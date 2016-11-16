@@ -1,0 +1,253 @@
+  
+  MIRAGE: Multiple-sequence Isoform Alignment Tool Guided by Exon Boundaries
+  --------------------------------------------------------------------------  
+
+
+  CONTENTS
+  --------
+  1. Setup (Short)
+  2. Setup (Detailed)
+  3. Basic Usage
+  4. More Usage
+  5. About
+  6. Source Files
+  7. Included Directories
+  8. Legal-ish Notice
+
+
+
+  SETUP (Short)
+  -------------
+  1.  Run the SETUP.pl script ('./SETUP.pl')
+  2.  Add the following to PATH: 
+         A. '(pwd)/inc/easel/miniapps'
+         B. '(pwd)/inc/spaln2.2.2/src'
+         C. '(pwd)/inc/blat'         
+  3.  Check setup by running './mirage.pl -check'
+
+
+
+  SETUP (Detailed)
+  ----------------
+  To setup the mirage software package, first run the SETUP.pl script as follows:
+
+      $ perl SETUP.pl
+
+  Once the setup script has reported successful completion, it is necessary to
+  add the program 'spaln' to the PATH environment variable.  This can be done by 
+  first running the command "pwd" to see the present working directory.  It 
+  should look like this:
+
+      $ pwd
+      /Users/yourname/a/file/path/mirage
+
+  Once you have the current directory, you can add the path to the spaln into
+  your PATH variable. In BASH, you can add this line to the file ~/.bashrc:
+
+      export PATH=(pwd_results)/inc/spaln2.2.2/src:$PATH
+
+  Note that the parentheses only indicate that the results of running 'pwd' will
+  be specific to your present working directory, and are not literal parts of the
+  PATH.  After adding the spaln source directory to the PATH, the easel 'miniapps'
+  library will also need to be added to the PATH as follows:
+
+      export PATH=(pwd_results)/inc/easel/miniapps:$PATH
+
+  In addition to installing spaln and the easel libraries, SETUP.pl will also
+  create a symbolic link to the appropriate blat executable in the directory 
+  (pwd_results)/inc/blat/, so the last item to add to the PATH is blat:
+
+      export PATH=(pwd_results)/inc/blat:$PATH
+
+  Finally, refresh your path variable by setting the file that you edited as your 
+  source.  Depending on whether PATH is set in .bash_profile or .bashrc, this will 
+  be done with one of the following two commands:
+
+      $ source ~/.bash_profile
+            - OR -
+      $ source ~/.bashrc
+
+  To test whether everything is setup, you can run the following command from the
+  directory containing mirage:
+
+      $ perl mirage.pl -check
+
+  If setup was successful, this command will report success.  Otherwise, it will
+  inform you of what is missing.
+
+
+
+  BASIC USAGE
+  -----------
+  Mirage requires 2 arguments:  a FASTA-formatted protein database and a simple
+  guide file directing the program to genomes and gtf indicies for each species
+  being searched on.
+
+      $ perl mirage.pl  <Protein DB>  <Species Guide>
+
+  It is expected that the names of the sequences in the protein database will
+  begin with 'GN:' and will be followed by the following fields, in order and
+  separated by bar (|) characters:
+
+       1. Gene family  
+       2. Isoform name 
+       3. Species
+       4. Identifier
+
+       For example: '>GN:OBSCN|obscn_iso2|human|4L3XR0X'
+
+  The guide file is a simple text file where each line corresponds to a species
+  and has the following fields (separated by whitespace):
+
+       1. Species name, as spelled in the species fields of the protein database
+       2. Path to genome, from the directory containing mirage.pl
+       3. Path to gtf index file, from the directory containing mirage.pl
+
+       For example: 'human ../genomes/Human.DNA.fa ../indices/human.gtf'
+
+  For more information, use './mirage.pl help'.
+
+
+
+  MORE USAGE
+  ----------
+  To run mirage on a reduced dataset (such as one particular gene family), first
+  create a database containing only the sequences that you are interested in
+  searching for.  This can be done with the tools "grep" and "esl-sfetch."
+  grep will pull out all lines from a file matching some string pattern, and may
+  thus be used to identify all sequence names matching a given format.  For
+  example, the command
+
+       grep "GN:OBSCN" big_database.fa
+
+  will list all members of the OBSCN gene family in the file "big_database.fa."
+  Because these lines reveal the names of sequences, esl-sfetch can be used to
+  pull out the corresponding sequences one at a time.  For example, if the above
+  grep command matches '>GN:OBSCN|obscn_iso2|human|4L3XR0X,' then the command
+
+       esl-sfetch big_database.fa "GN:OBSCN|obscn_iso2|human|4L3XR0X" >> new_database.fa
+
+  will pull out the sequence named "GN:OBSCN|obscn_iso2|human|4L3XR0X" and
+  append it to a file named "new_database.fa" (if there isn't a file with this
+  name a new file will be created automatically).
+
+  Once the new database has been generated, re-running mirage is as easy as
+  substituting the name of the old database with the name of the new database.
+
+  NOTE: Automation of aligning a data subset is in imminent development plans
+
+
+
+  ABOUT
+  -----
+  Mirage is a tool for generating exon-aware multiple sequence alignments (MSAs) 
+  of protein isoforms within the same gene family and across species.  This is
+  accomplished through 3 major phases: protein-to-genome alignment, intra-species
+  protein alignment, and cross-species alignment of MSAs.
+
+  During the first phase (protein-to-genome alignment), each protein in the database
+  is searched against its species' genome, identifying all "hits" (places where some
+  section of the protein is identical to one of its purported exons).  The program
+  analyzes each protein's hit set and identifies an optimal way of "stitching" the
+  hits together to achieve full coverage of the protein.  This is the work done
+  by the 'Quilter.pl' script, which relies on 'FindDiagonals' and SPALN (if installed)
+  to determine the individual hits.  A side program ('TransSW') is used to measure
+  the repetitiveness of the proteins, and may be used to help identify sequencing
+  errors.
+
+  The second phase consists of isolating each set of "stitched" hits for each 
+  isoform within the same species and gene family and joining these hits together
+  to form an intra-species multiple-sequence alignment.  Because the hits can be
+  compared to one another by way of their positions in the genome, this alignment
+  preserves the exon boundaries indicated by the hits identified in phase 1 and
+  places special markers in the MSAs to mark where splice sites are observed.
+  This work is done with the 'MultiMSA.pl' script.
+
+  The third phase aligns the MSAs generated during the second phase across species
+  (staying within gene families).  This is done with profile-to-profile alignment
+  using an slightly modified version of the Needleman-Wunsch algorithm, using the
+  'MultiSeqNW' program.
+
+
+
+  SOURCE FILES (by order of progression through mirage pipeline)
+  --------------------------------------------------------------
+  + CleanMirageDB.pl
+
+    A script used to verify that a FASTA-formatted database meets the formatting 
+    requirements expected by mirage.  If a database does not meet the requirements,
+    mirage will direct the user towards this program.
+
+  + mirage.pl
+
+    The top-level script used to generate MSAs.  This and CleanMirageDB.pl are 
+    the only programs that the user is expected to engage with.
+  
+  + src/Quilter.pl
+
+    A script used to align proteins within a particular species to their
+    genome (stitching together small hits for many proteins, hence the name).
+
+  + src/DiagonalSets.pm
+
+    A perl module containing the objects and methods that Quilter.pl uses to
+    stitch together protein-to-genome alignments.
+
+  + src/FindDiagonals.c
+   
+    A program used to identify nearly-identical alignments of protein sequence
+    to DNA (based on the Needleman-Wunsch dynamic programming algorithm, but only
+    allowing match states (diagonals)).
+
+  + src/Diagonals.c
+
+    A collection of helper functions used by FindDiagonals.c and TransSW.c.
+
+  + src/TransSW.c
+
+    A program currently used only for debugging purposes.
+
+  + src/MultiMSA.pl
+
+    A script used to generate MSAs for all gene families within a species based
+    on the results of Quilter.pl.
+
+  + src/MultiSeqNW.c
+
+    A program used to align two MSAs to one another by constructing profiles
+    for each of the MSAs and then performing profile-to-profile alignment based
+    on the Needleman-Wunsch dynamic programming algorithm.
+
+  + src/FinalMSA.pl
+
+    A script used to remove splice site markers and perform some common-sense
+    MSA cleanup of the final MSAs.
+
+
+
+  INCLUDED DIRECTORIES
+  --------------------
+  + inc/easel
+    
+    A library of general-purpose bioinformatics programs.  Used within mirage 
+    to extract sequences or sequence metadata
+
+  + inc/spaln2.2.2
+
+    A program used to generate intron-aware alignments of proteins to genomes.
+    Slower than FindDiagonals but allows for search without guidance from a
+    GTF index.
+
+  + inc/blat
+
+    A program used to perform extremely fast translated local mapping.
+
+
+
+  LEGAL-ISH NOTICE
+  ----------------
+  mirage.pl was developed as proprietary software for Cell Signaling Technology,
+  and as such unauthorized distribution may result in a variety of legal headaches.
+
+
+
