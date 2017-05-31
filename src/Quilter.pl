@@ -26,7 +26,6 @@ sub AddExon;
 sub GetChromosomeLengths;
 sub RunFindDiagonals;
 sub FindFullAlignments;
-sub FindPartialAlignments;
 sub ListCodonCenters;
 sub GetBestExons;
 sub AddToHitString;
@@ -75,6 +74,7 @@ my $overw   = 0; # Don't overwrite (default)
 my $resdir  = 0; # Use a user provided results directory
 my $CPUs    = 2; # Default: use 2 cores
 my $verbose = 0; # Use verbose printing
+my $spalner = 0; # Are we just running this as a means for getting SPALN output?
 
 
 # Check for additional options
@@ -101,6 +101,8 @@ while ($i < @ARGV) {
 	    print "\tReverting to default (2)\n\n";
 	    $CPUs = 2;
 	}
+    } elsif ($ARGV[$i] eq '-SPALN') {
+	$spalner = 1;
     } else {
 	print "\n\tUnrecognized option $ARGV[$i] ignored.\n\n";
     }
@@ -275,15 +277,15 @@ while ($processes < $CPUs) {
     }
     $processes++;
 }
-my $resultsfilename = $resultsfilehead.$threadID.'.Quilter.out';
 
 
 # The name of various temporary files we'll be writing to
-my $nuclfilename = $foldername.'nucl_tempfile_'.$threadID.'.Quilter.fa';
-my $protfilename = $foldername.'prot_tempfile_'.$threadID.'.Quilter.fa';
-my $hitfilename  = $foldername.'hit_tempfile_'.$threadID.'.Quilter.out';
-my $missfilename = $foldername.'miss_tempfile_'.$threadID.'.Quilter.out';
-my $blatfilename = $foldername.'blat_tempfile_'.$threadID.'.Quilter.fa'; 
+my $nuclfilename    = $foldername.'nucl_tempfile_'.$threadID.'.Quilter.fa';
+my $protfilename    = $foldername.'prot_tempfile_'.$threadID.'.Quilter.fa';
+my $hitfilename     = $foldername.'hit_tempfile_'.$threadID.'.Quilter.out';
+my $missfilename    = $foldername.'miss_tempfile_'.$threadID.'.Quilter.out';
+my $blatfilename    = $foldername.'blat_tempfile_'.$threadID.'.Quilter.fa'; 
+my $resultsfilename = $resultsfilehead.$threadID.'.Quilter.out';
 
 
 # Each thread writes its progress (number of completed families)
@@ -371,10 +373,10 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
     $line =~ s/\r|\n//g;
 
     # Make grabbing info. easy
-    $line =~ m/^\>GN:([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)/;    
+    $line =~ m/^\>GN\:([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|(\S*\|)?([^\|\s]+)\s*$/;
     
     # If we couldn't match one or more fields, let me know.
-    if (!$1 || !$2 || !$3 || !$4) {
+    if (!$1 || !$2 || !$3 || !$4 || !$6) {
 	print "  Strange line: $line\n";
 	$line = <$isoformfile>;
 	$lineNum++;
@@ -384,18 +386,17 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
     # Record sequence name information
     my $orig_gene = $1;
     my $gene      = uc($1);
-    my $orig_iso  = $2;
-    my $isoform   = $orig_iso;
-    my $orig_sp   = $3;
     my $species   = uc($3);
-    my $iso_id    = $4;
+    my $seqline   = $line;
+    $seqline      =~ s/\n|\r//g;
+    $seqline      =~ s/\>GN\://;
     $numIsos++;
     
     
     # Change any whitespaces to '_'s
     $gene    =~ s/\s/\_/g;
-    $isoform =~ s/\s/\_/g;
     $species =~ s/\s/\_/g;
+    $seqline =~ s/\s/\_/g;
     
     
     # If this is the wrong species, skip it
@@ -443,7 +444,7 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
     } else {
 	
 	# Does this seq. look repetitive?
-	$repetitive = LooksRepetitive($protfilename);
+	$repetitive = LooksRepetitive($protfilename) unless ($spalner);
 
 	# In the event of multiple chromosomes having strong hits,
 	# we'll grab the best `fast diagonals' hit (trusting manual
@@ -461,7 +462,15 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 	# each pair of start and end points, and then trying to find a full match to
 	# the protein.
 	foreach my $chromosomeName (sort keys %{$GeneIndex{$gene}}) {
-	    
+
+	    # We don't want to bother trying to align to a chromosome that
+	    # doesn't correspond to any of the sequences in the genome file
+	    # that we've been given, but we're going to miss quite a few if
+	    # we don't correct for 'revcomp' indicator
+	    my $raw_chr_name = $chromosomeName;
+	    $raw_chr_name =~ s/\[revcomp\]//g;
+	    next if (!$ChrLengths{$raw_chr_name});
+
 	    #print "CHROMOSOME: $chromosomeName ($gene)\n";
 	    
 	    # Add this chromosome to the chromosome set (hash).
@@ -486,15 +495,15 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 	    }
 	    
 	    
-	    # If none of the indices yielded hits, we do something EXTRA special (blast)
+	    # If none of the indices yielded hits, we do something EXTRA special (blat)
 	    if ($Chromosome->{NumHits}) {
 		
 		# Sort the chromosome's exons by their start positions
 		$Chromosome->SortHitsByField('ProtStarts',1); 
 		
 		# Search for any full diagonals (that cover entire protein), if it makes sense.
-		if (@{$Chromosome->{ProtStarts}} && ${$Chromosome->{ProtStarts}}[0] == 0) {
-		    ($next_score,$next_string) = FindFullAlignments(\$Chromosome,$Protein,$orig_gene,$orig_iso,$orig_sp,$iso_id,$HitFile,$debug);
+		if (@{$Chromosome->{ProtStarts}} && ${$Chromosome->{ProtStarts}}[0] == 0 && !$spalner) {
+		    ($next_score,$next_string) = FindFullAlignments(\$Chromosome,$Protein,$seqline,$HitFile,$debug);
 		    
 		    #print $GeneHitFile "$gene\n";
 		    
@@ -510,14 +519,15 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 		# If we don't have a better hit on this chromosome punt over to SPALN
 		if ($Chromosome->{NumHits} && $CurrentStat != 3 && $spaln) {
 		    
-		    ($next_score,$next_string) = ExonAssistedSPALN(\$Chromosome,\%ChrLengths,$orig_gene,$orig_iso,$orig_sp,$iso_id,
-								   $ARGV[1],$protfilename,$nuclfilename,$HitFile,$ProtLength,$SpalnLog);
+		    ($next_score,$next_string) = ExonAssistedSPALN(\$Chromosome,\%ChrLengths,$seqline,
+								   $ARGV[1],$protfilename,$nuclfilename,
+								   $HitFile,$ProtLength,$SpalnLog,$spalner);
 			
 		    # SPALN saves the day!!!
 		    if ($next_score > $best_SPALN_score) {
 			$best_SPALN_score  = $next_score;
 			$best_SPALN_string = $next_string;
-			$CurrentStat = 4 if ($CurrentStat == 0);		
+			$CurrentStat = 4 if ($CurrentStat == 0);
 		    }
 		    
 		}
@@ -539,7 +549,7 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 	    } else {
 		
 		# What a terrible loss :'(
-		print $MissFile ">GN:$orig_gene|$orig_iso|$orig_sp|$iso_id\n";
+		print $MissFile ">GN:$seqline\n";
 		#print $GeneMissFile "$gene\n";		    
 		$HitStats[5]++;
 		$CurrentStat = 5;
@@ -584,7 +594,7 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 	    $CurrentStat = $CurrentStat.' [NOT repetitive]' if ($verbose);
 	    $repY = 1;
 	}
-	my $nameline = "  >GN:$orig_gene|$isoform|$orig_sp|$iso_id";
+	my $nameline = "  >GN:$seqline";
 	while (length($nameline) < 50) {
 	    $nameline = $nameline.' ';
 	}
@@ -634,7 +644,7 @@ close($isoformfile);
 
 # Non-0 threads print their stats to a temporary file
 if ($threadID) {
-    open($resultsfile,'>',$resultsfilename);
+    open($resultsfile,'>',$resultsfilename) || die "\n  ERROR:  Failed to open temporary results file '$resultsfilename'\n\n";
     if ($numIsos) {	
 	print $resultsfile "$RepConf[0][0],$RepConf[0][1],$RepConf[1][0],$RepConf[1][1]\n";	
 	print $resultsfile "$numHits,$numIsos\n";
@@ -692,7 +702,7 @@ print "\n  1st Phase Quilter runtime: $timeDiffMins minutes $timeDiffSecs second
 foreach my $j (1..$CPUs-1) {
 
     $resultsfilename = $resultsfilehead.$j.'.Quilter.out';
-    open($resultsfile,'<',$resultsfilename);
+    open($resultsfile,'<',$resultsfilename) || die "\n  ERROR:  Failed to open results file '$resultsfilename'\n\n";
     my @linesplitter;
     $line = <$resultsfile>;
     $line =~ s/\n|\r//g;
@@ -848,11 +858,19 @@ if ($spaln && $blat) {
 	print "$progmsg\r";
 	    
 	# Construct and run a happy BLAT command
-	my $BlatResults = 'Quilter.Blat.out';
+	my $BlatStdOut  = 'Quilter.BLAT.std.out';
+	my $BlatStdErr  = 'Quilter.BLAT.std.err';
+	my $BlatResults = lc($ARGV[3]).'.Quilter.BLAT.out';
 	my $blatCmd = 'blat -tileSize=7 -minIdentity=90 -maxIntron=1';
-	$blatCmd    = $blatCmd.' -t=dnax -q=prot -out=blast8 -minScore=80 > /dev/null 2>&1';
+	$blatCmd    = $blatCmd.' -t=dnax -q=prot -out=blast8 -minScore=80';
+	$blatCmd    = $blatCmd.' 1>'.$BlatStdOut.' 2>'.$BlatStdErr;
 	$blatCmd    = $blatCmd.' '.$ARGV[1].' '.$bigBlat.' '.$BlatResults;
 	if (system($blatCmd)) { die "\n  ERROR: BLAT command '$blatCmd' failed\n\n"; }
+
+	# As long as BLAT ran successfully we aren't actually
+	# interested in what it has to say.
+	if (-e $BlatStdOut) { system("rm $BlatStdOut"); }
+	if (-e $BlatStdErr) { system("rm $BlatStdErr"); }
 
 	# Inform user that we're aligning with BLAT results
 	$progmsg = '  Quilter.pl:  Using SPALN on BLAT output ('.lc($reqSpecies).')';
@@ -862,13 +880,14 @@ if ($spaln && $blat) {
 	# Run SPALN on the results of the BLAT search
 	open(my $Results,'>',$finalHits);
 	open(my $Misses,'>',$finalMisses);
-	BLATAssistedSPALN(\%ChrLengths,\%SeqLengths,\%BlatNameIndex,$ARGV[1],$BlatResults,$Results,$Misses,$SpalnLog,$ARGV[3]);
+	BLATAssistedSPALN(\%ChrLengths,\%SeqLengths,\%BlatNameIndex,$ARGV[1],$ARGV[0],$BlatResults,$Results,$Misses,$SpalnLog,$ARGV[3]);
 	close($Results);
 	close($Misses);
 
 	# Clean up
 	system("rm $BlatResults") if (-e $BlatResults);
 	system("rm $bigBlat");
+
     }
 }
 
@@ -1165,12 +1184,12 @@ sub BuildGeneIndex
     open(my $isoformfile,'<',$isoformfilename) || die "\n\tCouldn't open '$isoformfilename'\n\n";
     while (my $line = <$isoformfile>) {
 
-	next unless ($line =~ /^\>GN:([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)/);
+	next unless ($line =~ /^\>GN:([^\|]+)\|([^\|]+)\|([^\|]+)\|/);
 
 	# Grab the pertinent details
-	my $seqfam  = $1;
-	my $seqiso  = $2;
-	my $seqspec = $3;	
+	my $seqfam   = $1;
+	my $seqiso   = $2;
+	my $seqspec  = $3;
 	$line =~ s/\n|\r//g;
        
 	# Does this entry match the species that we're looking for?
@@ -1355,8 +1374,13 @@ sub AddExon
     $eslsfetchCmd = 'esl-sfetch -c '.$exonStart.'..'.$exonEnd;             # Range
     $eslsfetchCmd = $eslsfetchCmd.' -o '.$nuclfilename;                    # Output file
     $eslsfetchCmd = $eslsfetchCmd.' '.$genomefilename.' '.$chromosomeName; # Input file and sequence name
-    $eslsfetchCmd = $eslsfetchCmd." > /dev/null 2>&1";   # '-o' still prints some info, but we don't care.
 
+    # I'M MOVE ERROR OUTPUT TO GARBAGEVILLE
+    #
+    $eslsfetchCmd = $eslsfetchCmd." > /dev/null 2>&1";   # '-o' still prints some info, but we don't care.
+    #my $garbage_file = $nuclfilename.'.GARBAGE_TIME.err.out';
+    #$eslsfetchCmd = $eslsfetchCmd." > /dev/null 2>$garbage_file";   # '-o' still prints some info, but we don't care.
+    
     # For now we bail altogether if this step goes wrong (for obv. reasons)
     if (system($eslsfetchCmd)) {
 	# DEBUGGING
@@ -1654,10 +1678,7 @@ sub FindFullAlignments
     my $Protein    = shift;
     my $protlength = length($Protein);
 
-    my $genename    = shift;
-    my $isoformname = shift;
-    my $speciesname = shift;
-    my $iso_id      = shift;
+    my $seqname = shift;
 
     my $HitFile = shift;
 
@@ -1728,6 +1749,27 @@ sub FindFullAlignments
 		}
 		
 		if ($nextProtStart >= $protlength && !$AlreadyRecd{$prevNuclString.$prevProtString}) {
+
+		    # As a special case, if we only have one more amino acid to go
+		    # and we're part-way in (i.e., nextOffset > 0) we goof a tiny
+		    # bit.
+		    $prevProtString =~ /\-(\d+)$/;
+		    my $prot_final_end = int($1);
+		    if ($prot_final_end != $protlength-1) {
+
+			$AlreadyRecd{$prevNuclString.$prevProtString} = 1;
+
+			$prot_final_end =  $protlength-1;
+			$prevProtString =~ s/\-\d+$/\-$prot_final_end/;
+
+			$prevNuclString =~ /\-(\d+)/;
+			my $nucl_final_end = int($1);
+			if ($revcomp) { $nucl_final_end -= 3; }
+			else          { $nucl_final_end += 3; }
+			$prevNuclString =~ s/\-\d+$/\-$nucl_final_end/;
+
+		    }
+		    
 		    push(@FinalNuclStrs,$prevNuclString);
 		    push(@FinalProtStrs,$prevProtString);
 		    push(@FinalScores,$prevScore);
@@ -1831,7 +1873,8 @@ sub FindFullAlignments
     my $FinalList  = ListCodonCenters($FinalNuclStrs[$max_pos],$FinalProtStrs[$max_pos],$revcomp);
 
     # Put everything together in a nice string and pass on up the chain of command!
-    my $hitstring = "Isoform ID : $genename|$isoformname|$speciesname|$iso_id\n";
+    my $hitstring = "Isoform ID : $seqname\n";
+    $hitstring    = $hitstring."Method     : FastDiagonals\n";
     $hitstring    = $hitstring."Chromosome : $Chromosome->{ChrName}\n";
     $hitstring    = $hitstring."Match Pos.s: $FinalList\n\n";
     
@@ -1869,6 +1912,7 @@ sub ListCodonCenters
     my @Ranges   = split(',',$rangestr);
     my $numexons = @Ranges;
 
+    
     my $CodonList = '';
 
     my $pickup = 0;
@@ -1952,260 +1996,265 @@ sub ListCodonCenters
 #         best extensions and then trying to stitch these together.
 #         It's the last thing we do before turning to spaln and blat.
 #
-sub FindPartialAlignments
-{
-    my ($i,$j,$k);
-
-    my $chromosomeRef = shift;
-    my $Chromosome = $$chromosomeRef;
-    
-    my $Protein    = shift;
-    my $protlength = length($Protein);
-
-    my $genename    = shift;
-    my $isoformname = shift;
-    my $speciesname = shift;
-    my $iso_id      = shift;
-
-    my $debug = shift;
-    
-    # The first contrast with FindFullAlignments is that we're
-    # interested in stitching together anything that's stitchable
-    # (which is to say, we're effectively doing a full traversal)
-    my $Hit = 0;
-
-    # Are we working on the reverse complement?
-    my $revcomp;
-    if ($Chromosome->{ChrName} =~ /\[revcomp\]/) { $revcomp = 1; }
-    else                                         { $revcomp = 0; }
-
-    # Because we don't want to end up with an explosion of redundant
-    # information (e.g., A->B->C  and  A->B  and  B->C), we don't
-    # allow any individual hit to be pulled from the Chromosome more
-    # than once.
-    my @SpentHits;
-    my %Pushed; # Recording full runs we've already encountered
-    foreach $i (0..$Chromosome->{NumHits}-1) { $SpentHits[$i] = 0; }
-
-    # We'll store the results of our search in a 'HitString' object
-    # (defined in the DiagonalSets module).  This can be thought of
-    # as a reduction of the Chromomsome to its longest implied runs.
-    my $ChrRedux = New DiagonalSet($Chromosome->{ChrName},1);
-    
-    # For this subroutine, we're doing the same sort of stack-
-    # based DFS as we used in FindFullAlignments, but instead of
-    # A. caring about whether the starting position is '0' in the
-    # Protein, or B. stopping if we can't get all the way to the
-    # end of the sequence, we're C. ID-ing ALL 'tendrils'
-    while ($Hit < $Chromosome->{NumHits}) {
-	
-	# Scan past anything we've already used
-	while ($Hit < $Chromosome->{NumHits} && $SpentHits[$Hit]) {
-	    $Hit++;	    
-	}	
-	last if ($Hit == $Chromosome->{NumHits});
-
-	# How is this looking?
-	my $hitLocated = ${$Chromosome->{IsTerminal}}[$Hit];
-	my $nuclstring = ${$Chromosome->{NuclStarts}}[$Hit].'-'.${$Chromosome->{NuclEnds}}[$Hit];
-	my $protstring = ${$Chromosome->{ProtStarts}}[$Hit].'-'.${$Chromosome->{ProtEnds}}[$Hit]; 
-	my $nuclstart  = ${$Chromosome->{StartOffsetLengths}}[$Hit];
-
-	# In the event that we have a hit starting at zero, we record it 'as is'
-	# Note that because we've failed to find a full extension, this will never
-	# also be a terminal hit.
-	if (${$Chromosome->{ProtStarts}}[$Hit] == 0 && !$Pushed{$nuclstring.$protstring}) {
-	    AddToHitString(\$ChrRedux,\$Chromosome,$nuclstring,$protstring,$Hit,$Hit);
-	}
-	
-	# Did we get lucky? Maybe...
-	if (!$hitLocated) { # MAYBE NOT!
-	    
-	    # Let's get stacking!
-	    push(my @hits,$Hit);
-	    push(my @nuclstrings,$nuclstring);
-	    push(my @protstrings,$protstring);
-	    push(my @nuclstarts,$nuclstart);
-	    push(my @starthits,$Hit);
-	    
-	    while (@hits) {
-		
-		# Pop the last hit position (and its string) off the stack
-		my $prevHit        = pop(@hits);
-		my $prevNuclString = pop(@nuclstrings);
-		my $prevProtString = pop(@protstrings);
-		my $originaloffset = pop(@nuclstarts);
-		my $originalhit    = pop(@starthits);
-
-		# Record that we've tried extending this hit
-		$SpentHits[$prevHit] = 1;
-		
-		# Setting requirements for the next hit position:
-		my $nextHit       = $prevHit+1;
-		my $nextProtStart = ${$Chromosome->{ProtEnds}}[$prevHit] + 1;
-		my $nextOffset    = (3 - ${$Chromosome->{EndOffsetLengths}}[$prevHit]) % 3;
-		$nextProtStart++ if ($nextOffset);
-		
-		# Special case consideration
-		if ($nextProtStart == $protlength && !$Pushed{$prevNuclString.$prevProtString}) {
-		    AddToHitString(\$ChrRedux,\$Chromosome,$prevNuclString,$prevProtString,$originalhit,$prevHit);
-		    $Pushed{$prevNuclString.$prevProtString} = 1;
-		    next;
-		}
-		
-		# Walk along looking for suitable extension points
-		my $hitlocated = 0;
-		while ($nextHit < $Chromosome->{NumHits}) {
-		    
-		    # Is this position viable?
-		    if (${$Chromosome->{ProtStarts}}[$nextHit] < $nextProtStart || $SpentHits[$nextHit]) {
-
-			$nextHit++;
-
-		    } elsif (${$Chromosome->{ProtStarts}}[$nextHit] == $nextProtStart) {
-			
-			# The final (BIG!) check for this possible next hit:
-			# Does it (1.) have the correct offset (2.) have a
-			# sensible DNA positioning (consistent with our direction)
-			if (${$Chromosome->{StartOffsetLengths}}[$nextHit] == $nextOffset
-			    && !(($revcomp && ${$Chromosome->{NuclStarts}}[$nextHit] >= ${$Chromosome->{NuclEnds}}[$prevHit]) 
-				 || (!$revcomp && ${$Chromosome->{NuclStarts}}[$nextHit] <= ${$Chromosome->{NuclEnds}}[$prevHit]))) {
-			    
-			    # WHAT A CINDERELLA STORY THIS IS!
-			    my $nextNuclString = $prevNuclString.','.${$Chromosome->{NuclStarts}}[$nextHit];
-			    my $nextProtString = $prevProtString.','.${$Chromosome->{ProtStarts}}[$nextHit];
-			    $nextProtString = $nextProtString.'-'.${$Chromosome->{ProtEnds}}[$nextHit];
-			    my $endoffset;
-			    
-			    # You'd better believe we located a hit!
-			    $hitlocated = 1;
-
-			    # Want to wrap this up to go?
-			    if (${$Chromosome->{IsTerminal}}[$nextHit]) {
-				
-				$nextNuclString = $nextNuclString.'-'.${$Chromosome->{NuclEnds}}[$nextHit];
-				
-				if (!$Pushed{$nextNuclString.$nextProtString}) {
-				    
-				    # Adding to our HitString object
-				    AddToHitString(\$ChrRedux,\$Chromosome,$nextNuclString,$nextProtString,$originalhit,$nextHit);
-				    $Pushed{$nextNuclString.$nextProtString} = 1;
-				    
-				}
-				
-				$SpentHits[$nextHit] = 1;
-				
-			    } else {
-
-				push(@hits,$nextHit);
-				$nextNuclString = $nextNuclString.'-'.${$Chromosome->{NuclEnds}}[$nextHit];
-				push(@nuclstrings,$nextNuclString);
-				push(@protstrings,$nextProtString);
-				push(@nuclstarts,$originaloffset);
-				push(@starthits,$originalhit);
-				
-			    }
-
-			    $nextHit++;
-			    
-			} else {
-			    
-			    $nextHit++;
-
-			}
-			
-		    } else {
-			
-			# The end of this run -- if we didn't push this string
-			# any farther, we record it as a standalone tendril.
-			if (!$hitlocated && !$Pushed{$prevNuclString.$prevProtString}) {
-			    AddToHitString(\$ChrRedux,\$Chromosome,$prevNuclString,$prevProtString,$originalhit,$prevHit);
-			    $Pushed{$prevNuclString.$prevProtString} = 1;
-			}
-			last;
-
-		    }
-
-		}
-		
-	    }
-		
-	} else {
-
-	    # This corresponds to finding a starter hit that happens to
-	    # be terminal (to be PC about what bigots would call "terminal hits")
-	    if (!$Pushed{$nuclstring.$protstring}) { # We might have seen this already if it starts at 0
-		AddToHitString(\$ChrRedux,\$Chromosome,$nuclstring,$protstring,$Hit,$Hit);
-		$Pushed{$nuclstring.$protstring} = 1;
-		$SpentHits[$Hit] = 1; # Not really necessary, but helps me sleep at night
-	    }
-	}
-	
-	$Hit++;
-	
-    }
-
-    # For debugging we might barf out what we're seeing.
-    #if ($debug) {
-    #print "\n\n";
-    #foreach $i (0..$ChrRedux->{NumHits}-1) {
-    #print "Start Offset: ${$ChrRedux->{StartOffsetLengths}}[$i]\n";
-    #print "Nucl Tendril: ${$ChrRedux->{NuclStrings}}[$i]\n";
-    #print "Prot Tendril: ${$ChrRedux->{ProtStrings}}[$i]\n";
-    #print "  End Offset: ${$ChrRedux->{EndOffsetLengths}}[$i]\n";
-    #print "------------+\n";
-    #}
-    #print "\n\n";
-    #}
-
-    # Finally, because we'll be running translated Smith-Waterman looking
-    # for hits to particular protein positions, we trim off all the
-    # offset info. for the reduced hits.
-    my ($offset,$old_pos,$new_pos);
-    foreach $i (0..$ChrRedux->{NumHits}-1) {
-
-	# Start offset trimming
-	$offset = ${$ChrRedux->{StartOffsetLengths}}[$i];
-	if ($offset) {
-
-	    $old_pos = ${$ChrRedux->{NuclStarts}}[$i];
-
-	    if ($revcomp) { $new_pos = $old_pos-$offset; }
-	    else          { $new_pos = $old_pos+$offset; }
-
-	    ${$ChrRedux->{NuclStrings}}[$i] =~ s/^\d+\-/\-/;
-	    ${$ChrRedux->{NuclStrings}}[$i] =  $new_pos.${$ChrRedux->{NuclStrings}}[$i];
-	    ${$ChrRedux->{NuclStarts}}[$i]  =  $new_pos; 
-
-	    ${$ChrRedux->{StartOffsetLengths}}[$i] = 0;
-	    ${$ChrRedux->{StartOffsets}}[$i]       = 0;
-
-	}
-
-
-	# End offset trimming
-	$offset = ${$ChrRedux->{EndOffsetLengths}}[$i];
-	if ($offset) {
-
-	    $old_pos = ${$ChrRedux->{NuclEnds}}[$i];
-
-	    if ($revcomp) { $new_pos = $old_pos+$offset; }
-	    else          { $new_pos = $old_pos-$offset; }
-
-	    ${$ChrRedux->{NuclStrings}}[$i] =~ s/\-\d+$/\-/;
-	    ${$ChrRedux->{NuclStrings}}[$i] =  ${$ChrRedux->{NuclStrings}}[$i].$new_pos;
-	    ${$ChrRedux->{NuclEnds}}[$i]    =  $new_pos; 
-
-	    ${$ChrRedux->{EndOffsetLengths}}[$i] = 0;
-	    ${$ChrRedux->{EndOffsets}}[$i]       = 0;
-
-	}
-
-    }
-
-    return (\$ChrRedux);
-    
-}
+# >>> NORD: This function is currently deprecated.  We are no longer
+#           interested in expending this effort, since our pipeline
+#           of passing "Full" alignment misses to SPALN and BLAT is
+#           currently fast enough.
+#
+#           I'm going to hold onto just in case it ever becomes useful
+#           as a reference...
+#
+#sub FindPartialAlignments
+#{
+#    my ($i,$j,$k);
+#
+#    my $chromosomeRef = shift;
+#    my $Chromosome = $$chromosomeRef;
+#    
+#    my $Protein    = shift;
+#    my $protlength = length($Protein);
+#
+#    my $seqname = shift;
+#
+#    my $debug = shift;
+#    
+#    # The first contrast with FindFullAlignments is that we're
+#    # interested in stitching together anything that's stitchable
+#    # (which is to say, we're effectively doing a full traversal)
+#    my $Hit = 0;
+#
+#    # Are we working on the reverse complement?
+#    my $revcomp;
+#    if ($Chromosome->{ChrName} =~ /\[revcomp\]/) { $revcomp = 1; }
+#    else                                         { $revcomp = 0; }
+#
+#    # Because we don't want to end up with an explosion of redundant
+#    # information (e.g., A->B->C  and  A->B  and  B->C), we don't
+#    # allow any individual hit to be pulled from the Chromosome more
+#    # than once.
+#    my @SpentHits;
+#    my %Pushed; # Recording full runs we've already encountered
+#    foreach $i (0..$Chromosome->{NumHits}-1) { $SpentHits[$i] = 0; }
+#
+#    # We'll store the results of our search in a 'HitString' object
+#    # (defined in the DiagonalSets module).  This can be thought of
+#    # as a reduction of the Chromomsome to its longest implied runs.
+#    my $ChrRedux = New DiagonalSet($Chromosome->{ChrName},1);
+#    
+#    # For this subroutine, we're doing the same sort of stack-
+#    # based DFS as we used in FindFullAlignments, but instead of
+#    # A. caring about whether the starting position is '0' in the
+#    # Protein, or B. stopping if we can't get all the way to the
+#    # end of the sequence, we're C. ID-ing ALL 'tendrils'
+#    while ($Hit < $Chromosome->{NumHits}) {
+#	
+#	# Scan past anything we've already used
+#	while ($Hit < $Chromosome->{NumHits} && $SpentHits[$Hit]) {
+#	    $Hit++;	    
+#	}	
+#	last if ($Hit == $Chromosome->{NumHits});
+#
+#	# How is this looking?
+#	my $hitLocated = ${$Chromosome->{IsTerminal}}[$Hit];
+#	my $nuclstring = ${$Chromosome->{NuclStarts}}[$Hit].'-'.${$Chromosome->{NuclEnds}}[$Hit];
+#	my $protstring = ${$Chromosome->{ProtStarts}}[$Hit].'-'.${$Chromosome->{ProtEnds}}[$Hit]; 
+#	my $nuclstart  = ${$Chromosome->{StartOffsetLengths}}[$Hit];
+#
+#	# In the event that we have a hit starting at zero, we record it 'as is'
+#	# Note that because we've failed to find a full extension, this will never
+#	# also be a terminal hit.
+#	if (${$Chromosome->{ProtStarts}}[$Hit] == 0 && !$Pushed{$nuclstring.$protstring}) {
+#	    AddToHitString(\$ChrRedux,\$Chromosome,$nuclstring,$protstring,$Hit,$Hit);
+#	}
+#	
+#	# Did we get lucky? Maybe...
+#	if (!$hitLocated) { # MAYBE NOT!
+#	    
+#	    # Let's get stacking!
+#	    push(my @hits,$Hit);
+#	    push(my @nuclstrings,$nuclstring);
+#	    push(my @protstrings,$protstring);
+#	    push(my @nuclstarts,$nuclstart);
+#	    push(my @starthits,$Hit);
+#	    
+#	    while (@hits) {
+#		
+#		# Pop the last hit position (and its string) off the stack
+#		my $prevHit        = pop(@hits);
+#		my $prevNuclString = pop(@nuclstrings);
+#		my $prevProtString = pop(@protstrings);
+#		my $originaloffset = pop(@nuclstarts);
+#		my $originalhit    = pop(@starthits);
+#
+#		# Record that we've tried extending this hit
+#		$SpentHits[$prevHit] = 1;
+#		
+#		# Setting requirements for the next hit position:
+#		my $nextHit       = $prevHit+1;
+#		my $nextProtStart = ${$Chromosome->{ProtEnds}}[$prevHit] + 1;
+#		my $nextOffset    = (3 - ${$Chromosome->{EndOffsetLengths}}[$prevHit]) % 3;
+#		$nextProtStart++ if ($nextOffset);
+#		
+#		# Special case consideration
+#		if ($nextProtStart == $protlength && !$Pushed{$prevNuclString.$prevProtString}) {
+#		    AddToHitString(\$ChrRedux,\$Chromosome,$prevNuclString,$prevProtString,$originalhit,$prevHit);
+#		    $Pushed{$prevNuclString.$prevProtString} = 1;
+#		    next;
+#		}
+#		
+#		# Walk along looking for suitable extension points
+#		my $hitlocated = 0;
+#		while ($nextHit < $Chromosome->{NumHits}) {
+#		    
+#		    # Is this position viable?
+#		    if (${$Chromosome->{ProtStarts}}[$nextHit] < $nextProtStart || $SpentHits[$nextHit]) {
+#
+#			$nextHit++;
+#
+#		    } elsif (${$Chromosome->{ProtStarts}}[$nextHit] == $nextProtStart) {
+#			
+#			# The final (BIG!) check for this possible next hit:
+#			# Does it (1.) have the correct offset (2.) have a
+#			# sensible DNA positioning (consistent with our direction)
+#			if (${$Chromosome->{StartOffsetLengths}}[$nextHit] == $nextOffset
+#			    && !(($revcomp && ${$Chromosome->{NuclStarts}}[$nextHit] >= ${$Chromosome->{NuclEnds}}[$prevHit]) 
+#				 || (!$revcomp && ${$Chromosome->{NuclStarts}}[$nextHit] <= ${$Chromosome->{NuclEnds}}[$prevHit]))) {
+#			    
+#			    # WHAT A CINDERELLA STORY THIS IS!
+#			    my $nextNuclString = $prevNuclString.','.${$Chromosome->{NuclStarts}}[$nextHit];
+#			    my $nextProtString = $prevProtString.','.${$Chromosome->{ProtStarts}}[$nextHit];
+#			    $nextProtString = $nextProtString.'-'.${$Chromosome->{ProtEnds}}[$nextHit];
+#			    my $endoffset;
+#			    
+#			    # You'd better believe we located a hit!
+#			    $hitlocated = 1;
+#
+#			    # Want to wrap this up to go?
+#			    if (${$Chromosome->{IsTerminal}}[$nextHit]) {
+#				
+#				$nextNuclString = $nextNuclString.'-'.${$Chromosome->{NuclEnds}}[$nextHit];
+#				
+#				if (!$Pushed{$nextNuclString.$nextProtString}) {
+#				    
+#				    # Adding to our HitString object
+#				    AddToHitString(\$ChrRedux,\$Chromosome,$nextNuclString,$nextProtString,$originalhit,$nextHit);
+#				    $Pushed{$nextNuclString.$nextProtString} = 1;
+#				    
+#				}
+#				
+#				$SpentHits[$nextHit] = 1;
+#				
+#			    } else {
+#
+#				push(@hits,$nextHit);
+#				$nextNuclString = $nextNuclString.'-'.${$Chromosome->{NuclEnds}}[$nextHit];
+#				push(@nuclstrings,$nextNuclString);
+#				push(@protstrings,$nextProtString);
+#				push(@nuclstarts,$originaloffset);
+#				push(@starthits,$originalhit);
+#				
+#			    }
+#
+#			    $nextHit++;
+#			    
+#			} else {
+#			    
+#			    $nextHit++;
+#
+#			}
+#			
+#		    } else {
+#			
+#			# The end of this run -- if we didn't push this string
+#			# any farther, we record it as a standalone tendril.
+#			if (!$hitlocated && !$Pushed{$prevNuclString.$prevProtString}) {
+#			    AddToHitString(\$ChrRedux,\$Chromosome,$prevNuclString,$prevProtString,$originalhit,$prevHit);
+#			    $Pushed{$prevNuclString.$prevProtString} = 1;
+#			}
+#			last;
+#
+#		    }
+#
+#		}
+#		
+#	    }
+#		
+#	} else {
+#
+#	    # This corresponds to finding a starter hit that happens to
+#	    # be terminal (to be PC about what bigots would call "terminal hits")
+#	    if (!$Pushed{$nuclstring.$protstring}) { # We might have seen this already if it starts at 0
+#		AddToHitString(\$ChrRedux,\$Chromosome,$nuclstring,$protstring,$Hit,$Hit);
+#		$Pushed{$nuclstring.$protstring} = 1;
+#		$SpentHits[$Hit] = 1; # Not really necessary, but helps me sleep at night
+#	    }
+#	}
+#	
+#	$Hit++;
+#	
+#    }
+#
+#    # For debugging we might barf out what we're seeing.
+#    #if ($debug) {
+#    #print "\n\n";
+#    #foreach $i (0..$ChrRedux->{NumHits}-1) {
+#    #print "Start Offset: ${$ChrRedux->{StartOffsetLengths}}[$i]\n";
+#    #print "Nucl Tendril: ${$ChrRedux->{NuclStrings}}[$i]\n";
+#    #print "Prot Tendril: ${$ChrRedux->{ProtStrings}}[$i]\n";
+#    #print "  End Offset: ${$ChrRedux->{EndOffsetLengths}}[$i]\n";
+#    #print "------------+\n";
+#    #}
+#    #print "\n\n";
+#    #}
+#
+#    # Finally, because we'll be running translated Smith-Waterman looking
+#    # for hits to particular protein positions, we trim off all the
+#    # offset info. for the reduced hits.
+#    my ($offset,$old_pos,$new_pos);
+#    foreach $i (0..$ChrRedux->{NumHits}-1) {
+#
+#	# Start offset trimming
+#	$offset = ${$ChrRedux->{StartOffsetLengths}}[$i];
+#	if ($offset) {
+#
+#	    $old_pos = ${$ChrRedux->{NuclStarts}}[$i];
+#
+#	    if ($revcomp) { $new_pos = $old_pos-$offset; }
+#	    else          { $new_pos = $old_pos+$offset; }
+#
+#	    ${$ChrRedux->{NuclStrings}}[$i] =~ s/^\d+\-/\-/;
+#	    ${$ChrRedux->{NuclStrings}}[$i] =  $new_pos.${$ChrRedux->{NuclStrings}}[$i];
+#	    ${$ChrRedux->{NuclStarts}}[$i]  =  $new_pos; 
+#
+#	    ${$ChrRedux->{StartOffsetLengths}}[$i] = 0;
+#	    ${$ChrRedux->{StartOffsets}}[$i]       = 0;
+#
+#	}
+#
+#
+#	# End offset trimming
+#	$offset = ${$ChrRedux->{EndOffsetLengths}}[$i];
+#	if ($offset) {
+#
+#	    $old_pos = ${$ChrRedux->{NuclEnds}}[$i];
+#
+#	    if ($revcomp) { $new_pos = $old_pos+$offset; }
+#	    else          { $new_pos = $old_pos-$offset; }
+#
+#	    ${$ChrRedux->{NuclStrings}}[$i] =~ s/\-\d+$/\-/;
+#	    ${$ChrRedux->{NuclStrings}}[$i] =  ${$ChrRedux->{NuclStrings}}[$i].$new_pos;
+#	    ${$ChrRedux->{NuclEnds}}[$i]    =  $new_pos; 
+#
+#	    ${$ChrRedux->{EndOffsetLengths}}[$i] = 0;
+#	    ${$ChrRedux->{EndOffsets}}[$i]       = 0;
+#
+#	}
+#
+#    }
+#
+#    return (\$ChrRedux);
+#    
+#}
 
 
 
@@ -2418,10 +2467,7 @@ sub ExonAssistedSPALN
     my $ChrLengthsRef = shift;
     my %ChrLengths    = %{$ChrLengthsRef};
 
-    my $orig_gene = shift;
-    my $isoform   = shift;
-    my $species   = shift;
-    my $iso_id    = shift;
+    my $seqname = shift;
 
     my $genomefilename = shift;
 
@@ -2433,6 +2479,9 @@ sub ExonAssistedSPALN
     my $ProtLength = shift;
     
     my $SpalnMisses = shift;
+
+    # Are we specifically looking for SPALN output?
+    my $spalner = shift;
 
     # Find min. and max. nucleotide positions based on exons
     my $minNucl = MIN(${$Chromosome->{NuclStarts}}[0],${$Chromosome->{NuclEnds}}[0]);
@@ -2466,10 +2515,45 @@ sub ExonAssistedSPALN
     
     # Run and parse SPALN's output
     my ($hitscore,$hitline) = ParseSPALNOutput($spalnCmd,$revcomp,$minNucl-1,0,$Chromosome->{ChrName},
-					       $orig_gene,$isoform,$species,$iso_id,$ProtLength,
-					       ,$SpalnMisses);
+					       $seqname,$ProtLength,$SpalnMisses,$spalner);
 
-    # Return your bliss
+
+    # Return your bliss if we got a clean hit, bail if things look bad
+    if    ($hitscore)               { return ($hitscore,$hitline); }
+    elsif (!$hitscore && !$hitline) { return (0,0);                }
+
+    
+    #
+    # Trying a bigger chunk of sequence
+    #
+
+    
+    # If ParseSPALNOutput returns (0,1), it means that we hit at >90%, so
+    # how about we expand our borders and see if we can't get up to 97%?
+
+    # Pull in a LOT of extra sequence
+    $minNucl = MAX($minNucl-400000,1);
+    $maxNucl = MIN($maxNucl+400000,$ChrLengths{$chrname});
+
+    # Toss the selected sequence into our file
+    $eslsfetchCmd = 'esl-sfetch -c '.$minNucl.'..'.$maxNucl;
+    $eslsfetchCmd = $eslsfetchCmd.' -o '.$nuclfilename;
+    $eslsfetchCmd = $eslsfetchCmd.' '.$genomefilename.' '.$chrname;
+    $eslsfetchCmd = $eslsfetchCmd." > /dev/null 2>&1";
+    if (system($eslsfetchCmd)) { die "\n\tERROR: Command '$eslsfetchCmd' failed (EAS)\n\n"; }    
+    
+    # Assemble the sytem call to run SPALN
+    $spalnCmd = 'spaln -Q3 -O1 -S3 -ya3 '.$nuclfilename.' '.$protfilename;
+    $spalnCmd = $spalnCmd.' 2>/dev/null';# if (!$verbose);
+    $spalnCmd = $spalnCmd.' |';
+
+    
+    # Run and parse SPALN's output
+    ($hitscore,$hitline) = ParseSPALNOutput($spalnCmd,$revcomp,$minNucl-1,0,$Chromosome->{ChrName},
+					    $seqname,$ProtLength,$SpalnMisses,$spalner);
+
+
+    # How's that bliss looking now?
     if ($hitscore) { return ($hitscore,$hitline); }
     else           { return (0,0);                }
 
@@ -2500,7 +2584,8 @@ sub BLATAssistedSPALN
     my $NameIndexRef  = shift;
     my %BlatNameIndex = %{$NameIndexRef};
 
-    my $genomefilename = shift;
+    my $genomefilename  = shift;
+    my $proteinfilename = shift;
 
     my $BlatFile = shift;
 
@@ -2511,9 +2596,12 @@ sub BLATAssistedSPALN
 
     my $InputSpecies = shift;
 
+    # Are we just looking at SPALN output?
+    my $spalner = shift;
+
     my $protfilename = 'Quilter.BAS.prot.fa';
     my $nuclfilename = 'Quilter.BAS.nucl.fa';
-
+    
     # Record that we haven't confirmed any hits for any seqs
     my %ConfirmedHits;
     foreach my $seqID (keys %BlatNameIndex) {
@@ -2566,26 +2654,21 @@ sub BLATAssistedSPALN
 		
 		$ConfirmedHits{$seqID} = 1;
 
-		if ($Chromosomes{$seqID}) {
-		    push(@{$Chromosomes{$seqID}},$chrname);
-		} else {
-		    ${$Chromosomes{$seqID}}[0] = $chrname;
-		}
+		if ($Chromosomes{$seqID}) { push(@{$Chromosomes{$seqID}},$chrname); }
+		else                      { @{$Chromosomes{$seqID}} = [$chrname];   }
 	    
-		# Forward Hit
-		if ($rev == 0) {
+		if ($rev == 0) { #################################### Forward Hit
 		    if ($NuclStarts{$seqID}) {
 			push(@{$Revcomp{$seqID}},0);
 			push(@{$NuclStarts{$seqID}},$nuclstart);
 			push(@{$NuclEnds{$seqID}},$nuclend);
 		    } else {
-			@{$Revcomp{$seqID}}    = [1];
+			@{$Revcomp{$seqID}}    = [0];
 			@{$NuclStarts{$seqID}} = [$nuclstart];
 			@{$NuclEnds{$seqID}}   = [$nuclend];
 		    }
 		    
-		    # Reverse Hit
-		} else {
+		} else { ############################################ Reverse Hit
 		    if ($NuclStarts{$seqID}) { 
 			push(@{$Revcomp{$seqID}},1);
 			push(@{$NuclStarts{$seqID}},$nuclend);
@@ -2611,22 +2694,24 @@ sub BLATAssistedSPALN
 		# Get the score
 		if ($line =~ /(\S+)\s+(\S+)\s*$/) {
 		    
+		    my $e_value = $1;
+		    my $score   = $2;
+
 		    if ($Scores{$seqID}) { 
-			push(@{$Scores{$seqID}},$2); 
+			push(@{$Scores{$seqID}},$score);
 		    } else { 
-			@{$Scores{$seqID}} = [$2];
-			$BestScore{$seqID} = $2;
+			@{$Scores{$seqID}} = [$score];
+			$BestScore{$seqID} = $score;
 			$TargetChr{$seqID} = $chrname;
 			$TargetRev{$seqID} = $rev;
 		    }
 
-		    my $e_value = $1;
-		    my $score   = $2;
 		    if ($score > $BestScore{$seqID}) {
 			$BestScore{$seqID} = $score;
 			$TargetChr{$seqID} = $chrname;
 			$TargetRev{$seqID} = $rev;
 		    }
+
 		    if ($e_value =~ /e\-(\d+)/) {
 			if ($1 > 20) {
 			    if ($TEtracker{$seqID}) {
@@ -2649,32 +2734,42 @@ sub BLATAssistedSPALN
     close($blatout);
 
     # Iterate over sequences, SPALNing 'em up and down
+    #
+    # UPDATE -- Increasingly wide ranges as hits fail to connect
+    #
     foreach my $seqID (keys %BlatNameIndex) {
 
 	my $seqname = $BlatNameIndex{$seqID};
 
 	# Did we find any suitable hits?
 	if ($ConfirmedHits{$seqname}) {
-	
-	    my $seqlength = $SeqLengths{$seqname};
-	
-	    $seqname =~ /GN\:([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)/;
+
+	    # We're going to need that sequence
+	    my $eslsfetchCmd = 'esl-sfetch  '.$proteinfilename." '".$seqname."' > ".$protfilename;
+	    if (system($eslsfetchCmd)) { die "\n  ERROR:  esl-sfetch command '$eslsfetchCmd' failed\n\n"; }
+	    
+	    $seqname =~ /GN:([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|(\S*\|)?([^\|\s]+)\s*$/;
 	    my $orig_gene = $1;
 	    my $isoform   = $2;
 	    my $species   = $3;
-	    my $iso_id    = $4;	
-	    
+	    my $iso_id    = $4;
+	    my $group_id  = $6;
+
+	    my $seqlength = $SeqLengths{$seqname};
+
 	    # Record this sequence (and number of significant e-values) if
 	    # it meets our threshold (100)
-	    print $TEfile "GN:$orig_gene|$isoform|$species|$iso_id\n" if ($TEtracker{$seqname} && $TEtracker{$seqname} >= 100);
+	    if ($TEtracker{$seqname} && $TEtracker{$seqname} >= 100) {
+		print $TEfile "$seqname\n";
+	    }
 	    
 	    # Radical dude! Now we run through each chromosome and
 	    # generate a list of places we might be interested in
 	    # looking.
 	    my $BestScore = $BestScore{$seqname};
 	    my $chrname   = $TargetChr{$seqname};
-	    my $revcomp   = $TargetRev{$seqname};
-	    
+	    my $revcomp   = $TargetRev{$seqname};	    
+
 	    # Generate an index that sorts the start positions
 	    my @NStarts;
 	    my @NEnds;
@@ -2683,6 +2778,7 @@ sub BLATAssistedSPALN
 	    my @SeqScores;
 	    my $numhits = 0;
 	    foreach my $blathit (0..@{$Chromosomes{$seqname}}-1) {
+
 		if (${$Chromosomes{$seqname}}[$blathit] eq $chrname 
 		    && ${$Revcomp{$seqname}}[$blathit] == $revcomp) {
 		    
@@ -2691,6 +2787,9 @@ sub BLATAssistedSPALN
 		    $PStarts[$numhits]   = ${$ProtStarts{$seqname}}[$blathit];
 		    $PEnds[$numhits]     = ${$ProtEnds{$seqname}}[$blathit];
 		    $SeqScores[$numhits] = ${$Scores{$seqname}}[$blathit];
+
+		    $numhits++;
+
 		}
 		
 	    }
@@ -2698,7 +2797,8 @@ sub BLATAssistedSPALN
 	    
 	    my $sortIndexRef = GenSortIndex(\@NStarts);
 	    my @sortIndex    = @{$sortIndexRef};
-	    
+
+
 	    # Sort those dang arrays.  Note that start is always less than
 	    # end, even if we're in revcomp-land.
 	    my @NuclStart;
@@ -2716,6 +2816,7 @@ sub BLATAssistedSPALN
 		$i++;
 	    }
 	    
+
 	    # Now, what we'll do is scan along the hits looking for breaks of
 	    # more than 200,000 characters between the end of one and the start
 	    # of the next and search each of these clusters using SPALN, looking
@@ -2733,22 +2834,19 @@ sub BLATAssistedSPALN
 		my $minProt = $ProtStart[$i];
 		my $maxProt = $ProtEnd[$i];
 		my $AddHit  = 0;
+
 		$i++;
 		while ($i < @sortIndex && $NuclStart[$i] < $NuclEnd[$i-1]+200000) {
-		    $maxNucl  = MAX($maxNucl,$NuclEnd[$i]);
-		    $minProt  = MIN($minProt,$ProtStart[$i]);
-		    $maxProt  = MAX($maxProt,$ProtEnd[$i]);
-		    $AddHit   = 1 if ($Score[$i] == $BestScore);
+		    $maxNucl = MAX($maxNucl,$NuclEnd[$i]);
+		    $minProt = MIN($minProt,$ProtStart[$i]);
+		    $maxProt = MAX($maxProt,$ProtEnd[$i]);
+		    $AddHit  = 1 if ($Score[$i] == $BestScore);
 		    $i++;
 		}
-		
+
 		# Only add this cluster for consideration if its max. score is
 		# at least 80% of the max hit to the chromosome
 		if ($AddHit) {
-		    
-		    # Pull in a little extra sequence, just to be safe
-		    $minNucl = MAX($minNucl-100000,1);
-		    $maxNucl = MIN($maxNucl+100000,$ChrLengths{$original_chr}-1);
 		    
 		    # Figure out how much of our protein is covered
 		    my $coverage = $maxProt-$minProt;
@@ -2758,55 +2856,87 @@ sub BLATAssistedSPALN
 		    
 		}
 	    }
-	
-	    
-	    # Run through the list of items
-	    my $numQueries = @SpalnQueue;
+
+
+	    # How much extra sequence we'll pull in (successively larger and
+	    # slower, but if we're getting any sort of hit at all this should
+	    # find a full translated alignment).
+	    #
+	    # 3:  100 KB
+	    # 2:  1   MB
+	    # 1:  10  MB
+	    # 0:  Bail
+	    #
 	    my $highscore = 0;
 	    my $hitline;
-	    foreach my $query (@SpalnQueue) {
-		
-		my @QueryArray   = split('#',$query);
-		my $minNucl      = $QueryArray[0];
-		my $maxNucl      = $QueryArray[1];
-		my $original_chr = $QueryArray[2];
-		my $chrname      = $QueryArray[3];
-		my $coverage     = $QueryArray[4];
-		
-		# Toss the selected sequence into our file (need to be a
-		# little careful about reverse complement)
-		my $eslsfetchCmd;
-		if ($revcomp) { $eslsfetchCmd = 'esl-sfetch -c '.$maxNucl.'..'.$minNucl; }
-		else          { $eslsfetchCmd = 'esl-sfetch -c '.$minNucl.'..'.$maxNucl; }	    
-		$eslsfetchCmd = $eslsfetchCmd.' -o '.$nuclfilename;
-		$eslsfetchCmd = $eslsfetchCmd.' '.$genomefilename.' '.$original_chr;
-		$eslsfetchCmd = $eslsfetchCmd." > /dev/null 2>&1";
-		if (system($eslsfetchCmd)) { die "\n\tERROR: Command '$eslsfetchCmd' failed (BAS)\n\n"; }    
-		
-		# Assemble the sytem call to run SPALN
-		#my $spalnCmd = 'spaln -Q3 -O1 -S3 '.$nuclfilename.' '.$protfilename.' |';
-		my $spalnCmd = 'spaln -Q3 -O1 -S3 -ya3 '.$nuclfilename.' '.$protfilename;
-		$spalnCmd = $spalnCmd.' 2>/dev/null';# if (!$verbose);
-		$spalnCmd = $spalnCmd.' |';	
-		
-		print $CmdLog "> (".localtime()." $spalnCmd\n\n";
-		
-		# Parse SPALN's output
-		my ($nextScore,$nextLine) = ParseSPALNOutput($spalnCmd,$revcomp,$minNucl-1,$highscore,
-							     $chrname,$orig_gene,$isoform,$species,$iso_id,$seqlength,$CmdLog);
-		
-		# Is this better than any hit we've seen?
-		if ($nextScore > $highscore) {
-		    $highscore = $nextScore;
-		    $hitline = $nextLine;
+	    my $remaining_attempts = 3;
+	    while ($remaining_attempts) {
+
+		$remaining_attempts--;
+		my $extra_seq = 100000 * (10 ** (2-$remaining_attempts));
+	
+		# Run through the list of items
+		my $numQueries = @SpalnQueue;
+		foreach my $query (@SpalnQueue) {
+		    
+		    my @QueryArray   = split('#',$query);
+		    my $minNucl      = $QueryArray[0];
+		    my $maxNucl      = $QueryArray[1];
+		    my $original_chr = $QueryArray[2];
+		    my $chrname      = $QueryArray[3];
+		    my $coverage     = $QueryArray[4];
+		    
+		    # Pull in a little extra sequence, just to be safe
+		    $minNucl = MAX($minNucl-$extra_seq,1);
+		    $maxNucl = MIN($maxNucl+$extra_seq,$ChrLengths{$original_chr}-1);
+		    
+		    # Toss the selected sequence into our file (need to be a
+		    # little careful about reverse complement)
+		    if ($revcomp) { $eslsfetchCmd = 'esl-sfetch -c '.$maxNucl.'..'.$minNucl; }
+		    else          { $eslsfetchCmd = 'esl-sfetch -c '.$minNucl.'..'.$maxNucl; }	    
+		    $eslsfetchCmd = $eslsfetchCmd.' -o '.$nuclfilename;
+		    $eslsfetchCmd = $eslsfetchCmd.' '.$genomefilename.' '.$original_chr;
+		    $eslsfetchCmd = $eslsfetchCmd." > /dev/null 2>&1";
+		    if (system($eslsfetchCmd)) { die "\n\tERROR: Command '$eslsfetchCmd' failed (BAS)\n\n"; } 
+
+		    # Assemble the sytem call to run SPALN
+		    #my $spalnCmd = 'spaln -Q3 -O1 -S3 '.$nuclfilename.' '.$protfilename.' |';
+		    my $spalnCmd = 'spaln -Q3 -O1 -S3 -ya3 '.$nuclfilename.' '.$protfilename;
+		    $spalnCmd = $spalnCmd.' 2>/dev/null';# if (!$verbose);
+		    $spalnCmd = $spalnCmd.' |';	
+		    
+		    print $CmdLog "> (".localtime()." $spalnCmd\n\n";
+		    
+		    # Make sure we're recording intelligently...
+		    if ($revcomp) { $chrname = $chrname.'[revcomp]'; $revcomp = 3; } #DEBUGGING
+
+		    # Parse SPALN's output
+		    my ($nextScore,$nextLine) = ParseSPALNOutput($spalnCmd,$revcomp,$minNucl-1,$highscore,
+								 $chrname,$seqname,$seqlength,$CmdLog,$spalner);
+
+		    
+		    # Is this better than any hit we've seen?
+		    if ($nextScore > $highscore) {
+			$highscore = $nextScore;
+			$hitline = $nextLine;
+		    }
+
 		}
-		
+
+		last if ($highscore);
+		#die if ($highscore);
+
 	    }
 	    
 	    
 	    # Print out the hit line and head on home
-	    if ($highscore) { print $HitFile  "$hitline";                                   }
-	    else            { print $MissFile ">GN:$orig_gene|$isoform|$species|$iso_id\n"; }
+	    if ($highscore) {
+		$hitline =~ s/Isoform ID \: GN\:/Isoform ID \: /;
+		$hitline =~ s/Method     \: SPALN/Method     \: SPALN\+BLAT/;
+		print $HitFile  "$hitline";
+	    } else { 
+		print $MissFile "$seqname\n"; 
+	    }
 	    
 	} else {
 
@@ -2815,6 +2945,12 @@ sub BLATAssistedSPALN
 
 	}
     }
+
+    # Clean up after yourself, man!
+    #
+    if (-e $nuclfilename) { system("rm $nuclfilename"); }
+    if (-e $protfilename) { system("rm $protfilename"); }
+
 }
 
 
@@ -2840,15 +2976,20 @@ sub ParseSPALNOutput
 
     my $ChrName = shift;
 
-    my $genename    = shift;
-    my $isoformname = shift;
-    my $speciesname = shift;
-    my $iso_id      = shift;
+    my $seqname = shift;
 
     my $prot_len = shift;
     
     my $SpalnMisses = shift;
 
+    # NOTE: When we're just looking for SPALN output we can't just
+    #       run the command and jump ship, due to how the various
+    #       functions depend on score comparison (well, BLAT).
+    #       For this reason, we'll set the 'hitstring' to be the full
+    #       output AFTER we get the score.
+    #
+    my $spalner = shift;
+    
     my ($line,$hitstring);
 
     # DEBUGGING
@@ -2866,12 +3007,14 @@ sub ParseSPALNOutput
     my ($range_low,$range_high);
     $line = readline($stdout);
     while (!eof($stdout) && $line !~ /\S+\/(\d+)\-(\d+)/) {
-	#print "$line";
 	$line = readline($stdout);
     }
 
     # If we've hit the end of the file, no point continuing
-    if (eof($stdout)) { return(0,0); }
+    if (eof($stdout)) {
+	close($stdout);
+	return(0,0); 
+    }
 
 
     # Grab the range of positions on the chromosome that we hit in.
@@ -2882,20 +3025,52 @@ sub ParseSPALNOutput
 
 
     # Go to the section that lays out the score and identity
-    my ($hitscore,$percent);
+    my ($hitscore,$percent,$true_num_chars);
     while ($line = <$stdout>) {
+
 	if ($line =~ /Score \= (\d+)/) {
+	    
+	    # SPALN's score
+	    #
 	    $hitscore = $1;
+
+	    # Grab the percent identity
+	    #
 	    $line =~ /\((\d+)\.\d+ \%\)[\s\n\r]+$/;
 	    $percent  = $1;
+
+	    # It turns out we need to manually confirm that every
+	    # character is included, because SPALN loves pranking
+	    # me around.
+	    #
+	    if ($line =~ /Score \= \S+ \S+\, (\d+)\.\d+ \S+\, (\d+)\.\d+ \S+\, (\d+)\.\d+ \S+\, (\d+)\.\d+/) {
+		$true_num_chars = $1 + $2 + $3 + $4;
+	    } else {
+
+		# It seems that in cases where SPALN gives BAD hits
+		# it breaks away from the expected format, so we'll
+		# just assume that we want to try again (hence the
+		# (0,1) return).
+		#
+		close($stdout);
+		return(0,1);
+		
+	    }
+
 	    last;
 	}
     }
 
     
-    # If we've hit the end of the file or have worse than 90% identity
+    # If we've hit the end of the file or have worse than 97% identity
     # jump ship.
-    if (eof($stdout) || $percent < 90) { return(0,0); }
+    if (eof($stdout)) {
+	close($stdout); 
+	return(0,0); 
+    } elsif ($percent < 97 || $true_num_chars < $prot_len) {
+	close($stdout);
+	return(0,1); # <- This '1' might give us a second chance (pull in more sequence)
+    }
     
     
     # NOW we can go to the real business (the alignment lines)
@@ -2906,301 +3081,473 @@ sub ParseSPALNOutput
 
 
     # Still not totally stoked on seeing an eof
-    if (eof($stdout)) { return(0,0); }
-
-    
-    # Variables used to vet any single-amino acid "exons"
-    my @last_tail;    
-    my $last_aa;
-    my $check_back = 0;
-    my $last_center_pos;
-
-    
-    #
-    # BEGIN READING
-    #
-    my $aa_count = 0;
-    my $CodonCenters = '';
-    my $testline = readline($stdout);
-    while (!eof($stdout)) {
-
-	$testline =~ s/\n|\r//g;	
-	while (!eof($stdout) && !$testline) {
-	    $testline = readline($stdout);
-	    $testline =~ s/\n|\r//g;
-	}
-
-	# 'The end' is the end!
-	last if (eof($stdout));
-	
-	# Is this a region with content?
-	if ($testline !~ /^\;\;/) {
-
-	    my @NuclString;
-	    my @ProtString;
-
-	    my $nuclpos = -1;
-
-	    while (!eof($stdout) && $testline !~ /\;\; skip/) {
-
-		my $nuclline = readline($stdout);
-		$nuclline =~ /^\s+(\d+)/;
-		$nuclpos  = $start_pos + $1 if ($nuclpos == -1);
-		
-		my @Nucls = split('',$nuclline);
-
-		my $strpos = 0;
-		while ($Nucls[$strpos] =~ /\d|\s/) {
-		    $strpos++;
-		}
-		
-		my $protline = readline($stdout);
-
-		my @Prots = split('',$protline);
-
-		while ($Nucls[$strpos] !~ /\s|\|/) {
-		    push(@NuclString,$Nucls[$strpos]);
-		    push(@ProtString,$Prots[$strpos]);
-		    $strpos++;
-		}
-		
-		$testline = readline($stdout); # Whitespace
-		$testline = readline($stdout);		
-
-	    }
-
-	    my $i = 0;
-	    while ($i < @NuclString) {
-
-		# The next string of codon centers
-		my $NextCodons = '';
-		my $obs_aminos = 0;
-		my $first_aa;
-
-		# Advance to next exon
-		while ($i < @NuclString
-		       && ($NuclString[$i] eq '-' ||  $NuclString[$i] ne uc($NuclString[$i]))) {
-		    
-		    if ($NuclString[$i] ne '-') {
-			if ($revcomp) { $nuclpos--; }
-			else          { $nuclpos++; }
-		    }
-
-		    $i++;
-		}
-
-
-		# If the last exon was only one amino acid long, we might
-		# try to hook it onto this one
-		if ($check_back) {
-		    
-		    # Get to the first actual codon center
-		    $j = $i;
-		    my $fwdnuclpos = $nuclpos;
-		    while ($j < @NuclString 
-			   && ($ProtString[$j] !~ /\w/ || $ProtString[$j] eq '-')) {
-			$j++;
-			if ($NuclString[$j] ne '-') {
-			    if ($revcomp) { $fwdnuclpos--; }
-			    else          { $fwdnuclpos++; }
-			}
-		    }
-
-		    # Be careful not to step over the edge!
-		    if ($j < @NuclString && $j >= 5) {
-
-			# Alright, now walk back two steps (to get to prior codon)
-			my $k = $j-2;
-			while ($j > $k) {
-			    if ($NuclString[$j] ne '-') {
-				if ($revcomp) { $fwdnuclpos++; }
-				else          { $fwdnuclpos--; }
-			    }
-			    $j--;
-			}
-
-			# Grab this codon
-			my @current_head;
-			$k = 2;
-			while ($k >= 2) {
-			    $current_head[2-$k] = $NuclString[$j-$k];
-			    if ($revcomp) { $fwdnuclpos++; }
-			    else          { $fwdnuclpos--; }
-			    $k--;
-			}
-
-			# Check if this is something we want to nuke
-			if (TranslateCodon(\@current_head) eq $last_aa) {
-			    
-			    # Looks like we're pulling forward!
-			    @last_tail    = ();
-			    $CodonCenters =~ s/\d+\,\*\,$//;
-			    $NextCodons   =  $fwdnuclpos.',';
-
-			    # We've seen an amino acid!
-			    $obs_aminos++;
-
-			    # Only reattach splice site if there's something
-			    # left to reattach to
-			    if ($CodonCenters) { $CodonCenters = $CodonCenters.'*,'; }
-			    
-			}			
-		    }
-		    
-		    # Reset the flag
-		    $check_back = 0;
-		    
-		}
-
-		
-		# Read through this exon
-		my $consec_indels = 0;
-		my $last_center;
-		my $center_pos;
-		while ($i < @NuclString && $NuclString[$i] eq uc($NuclString[$i])) {
-
-		    # Are we in the middle of a codon?
-		    if ($ProtString[$i] =~ /\w/ && $ProtString[$i] ne '-') {
-
-			# We need to do some special work for indels
-			if ($NuclString [$i] ne '-') {
-
-			    $NextCodons = $NextCodons."$nuclpos,";
-			    $center_pos = $nuclpos;
-			    $consec_indels = 0;
-
-			} else {
-			    
-			    $consec_indels++;
-			    return (0,0) if ($consec_indels > 2); # FOR LATER ATTENTION
-
-			    if ($center_pos) {
-				if ($revcomp) { $NextCodons = $NextCodons.($center_pos-$consec_indels).','; }
-				else          { $NextCodons = $NextCodons.($center_pos+$consec_indels).','; }
-			    } else { # Shouldn't happen, but anything's possible
-				if ($revcomp) { $NextCodons = $NextCodons.($nuclpos-$consec_indels).','; }
-				else          { $NextCodons = $NextCodons.($nuclpos+$consec_indels).','; }
-			    }
-
-			}
-			
-			$last_center = $i;
-			$last_aa     = $ProtString[$i];
-			$first_aa = $ProtString[$i] if (!$first_aa);
-			$aa_count++;
-			$obs_aminos++;
-			
-		    }
-		    
-		    if ($NuclString[$i] ne '-') {
-			if ($revcomp) { $nuclpos--; }
-			else          { $nuclpos++; }
-		    }
-		    
-		    $i++;
-		    
-		}
-
-		
-		# Head this off at the pass, so to speak
-		if ($obs_aminos) {
-		    
-		    # Walk up to the next three nucleotides
-		    my $j = $last_center+2;		
-		    while ($last_center < $j && $last_center < @NuclString) {
-			if ($NuclString[$last_center] ne '-') {
-			    if ($revcomp) { $center_pos--; }
-			    else          { $center_pos++; }
-			}
-			$last_center++;
-		    }
-		    
-		    # Record the forward tail and codon center position
-		    my @next_tail;
-		    if ($last_center < @NuclString) {
-			
-			$j = $last_center + 3;
-			if ($revcomp) { $center_pos--; }
-			else          { $center_pos++; }
-			while ($last_center < $j && $last_center < @NuclString) {
-			    push(@next_tail,$NuclString[$last_center]);
-			    $last_center++;
-			}
-			while (@next_tail < 3) {
-			    push(@next_tail,'X');
-			} 
-			
-			# If this was a single amino acid "exon" (and not the first exon)
-			$check_back = 0;
-			if ($obs_aminos == 1 && @last_tail) {
-			    
-			    # Compare the last tail to this character
-			    if (TranslateCodon(\@last_tail) eq $first_aa) {
-				
-				# Looks like we're bumping back!
-				$CodonCenters =~ s/\*\,$//;
-				$NextCodons =~ s/\,$//;
-				my @PopOn = split(',',$NextCodons);
-				foreach my $cent (@PopOn) {
-				    $CodonCenters = $CodonCenters.''
-				}
-				
-				$center_pos = $last_center_pos;
-				if ($revcomp) { $center_pos -= 3; }
-				else          { $center_pos += 3; }
-
-				$NextCodons   =  '';
-				
-			    } else {
-				
-				# Look try to pull this guy into the next one
-				$check_back = 1;;
-				
-			    }
-			    
-			}
-			
-		    } else { $check_back = 0; } # If we had nothing to check out
-		    
-		    # Add in a splice site marker
-		    $CodonCenters = $CodonCenters.$NextCodons."*,";
-		    
-		    # You're old news, exon!
-		    @last_tail = @next_tail;
-		    $last_center_pos = $center_pos;
-		
-		}
-
-	    }
-	    
-
-	} else {
-
-	    $CodonCenters = $CodonCenters.'*,';
-	    $testline     = readline($stdout); # Whitespace
-
-	}
-
+    if (eof($stdout)) {
+	close($stdout);
+	return(0,0);
     }
 
+
+    #
+    # Here's where we'll gather the SPALN output when we're looking
+    # to see the actual SPALN output, for debugging.
+    #
+    if ($spalner) {
+
+	close($stdout);
+
+	open($stdout,$spalnCmd) || die "\n  ERROR:  Spaln command '$spalnCmd' failed\n\n";
+	
+	$hitstring = 'SEQ: '.$seqname."\n";
+	$hitstring = $hitstring.'CMD: '.$spalnCmd."\n";
+	while ($line = <$stdout>) { $hitstring = $hitstring.$line; }
+	$hitstring = $hitstring."\nEND\n\n";
+
+	close($stdout);
+
+	return($hitscore,$hitstring);
+	
+    }
+
+
+    #
+    # ALRIGHT, GENTS AND LADIES, it looks like we're actually
+    # doing this thing.
+    #
+
+
+    # Scan through the SPALN output constructing 4 arrays:
+    #
+    #     - An array with the DNA sequence characters
+    #     - An array with the protein sequence characters
+    #     - An array mapping protein sequence indices to
+    #       DNA sequence indices
+    #     - An array mapping DNA sequence characters to
+    #       positions in the genome
+    #
+    # The combination of these arrays will allow us to do
+    # all of the work we need in terms of generating our
+    # final mapping of the protein to the genome, correcting
+    # for micro-exons.
+    #
+    my @FullNuclSeq;
+    my @FullProtSeq;
+    my @AAPositions;
+    my @NuclPositions;    
+    my $full_length = 0;
+    my $num_aas     = 0; 
+    my $current_pos = $offset;
+    my $first_jump  = 0;
+    while (!eof($stdout)) {
+
+	# Grab the next line, clean it up, make sure it's
+	# meaningful.
+	#
+	$line = readline($stdout);
+	$line =~ s/\n|\r//g;
+	next if (!$line);
+
+
+	# If we're skipping around in the genome, adjust
+	# the position variable accordingly.
+	#
+	if ($line =~ /skip\s+(\d+)\s+nt/) {
+	    my $skiplen = int($1);
+	    if ($revcomp) { $current_pos -= $skiplen; }
+	    else          { $current_pos += $skiplen; }
+	    next;
+	}
+
+
+	# If we've made it this far but don't match this
+	# terminal format then we're looking at SPALN's
+	# translation of the nucleotide sequence (and we'll
+	# want to skip it).
+	#
+	next if ($line !~ /\| \S+\/\d+\-\d+/);
+
+	my $nn_line = $line;
+
+	# EXCELLENT!  This is the next line of DNA characters
+	#
+	my @NextNucls = split('',$line);
+
+
+	# The final check we need to do is to add/subtract
+	# the initial 'jump' into the hit (but only if this
+	# is the very beginning)
+	#
+	if ($first_jump == 0) {
+
+	    $line =~ /\s+(\d+)/;
+	    $first_jump = $1;
+
+	    # Special catch for BLAT parsing
+	    if ($revcomp==3) { $current_pos  = ($start_pos+1)-$first_jump; }
+	    else             { $current_pos += $first_jump;                }
+
+	    $first_jump = 1;
+
+	}
+
+	
+	# ... which means that the following line is the next
+	# line of protein characters.
+	#
+	$line = readline($stdout);
+	$line =~ s/\n|\r//g;
+	my @NextAAs = split('',$line);
+
+
+	# Advance to the actual DNA sequence.
+	# NOTE:  it's possible for SPALN to have a line of
+	#        '-' characters, which we'd want to throw
+	#        away.  BUT we still need to count up the
+	#        position indices when we encounter these. << Do we?
+	#
+	$i = 0;
+	#while ($i < @NextNucls && $NextNucls[$i] !~ /[a-zA-Z]|\|/) { $i++; }
+	while ($i < @NextNucls && $NextNucls[$i] =~ /\s/) { $i++; }
+	while ($i < @NextNucls && $NextNucls[$i] !~ /\s/) { $i++; }
+	while ($i < @NextNucls && $NextNucls[$i] =~ /\s/) { $i++; }
+	
+
+
+	# Some sort of SPALN weirdness...
+	#
+	next if ($i == @NextNucls || $NextNucls[$i] eq '|');
+
+
+	# Run along the two lines storing all of the relevant
+	# information that we can get out of them.
+	#
+	while ($NextNucls[$i] !~ /\|/) {
+	    
+	    push(@FullNuclSeq,$NextNucls[$i]);
+	    push(@NuclPositions,$current_pos);
+
+	    # If we're centered on a codon, take note.
+	    #
+	    if ($NextAAs[$i] =~ /\w/) {
+		push(@FullProtSeq,$NextAAs[$i]);
+		push(@AAPositions,$full_length);
+		$num_aas++;
+	    }
+	    
+	    # Increment the position in the genome
+	    #
+	    if ($NextNucls[$i] =~ /\w/) {
+		if ($revcomp) { $current_pos--; }
+		else          { $current_pos++; }
+	    }
+
+	    $full_length++;
+	    $i++;
+	    
+	}
+	
+    }
+    
+
+    # Done reading input!  Now we just need to verify that
+    # any and all micro-exons get cleaned up!
+    #
     close($stdout);
 
 
-    # FOR LATER ATTENTION
-    # Currently, if SPALN gives us an incorrect number of amino-acids
-    # we just bail on what it's given us.  Eventually we'll intelligently
-    # incorporate this, but for now this is what we do.
-    return (0,0) if ($aa_count != $prot_len);
+    # Check if we failed to get the right number
+    # of amino acids.
+    #
+    return(0,0) if ($num_aas != $prot_len);
+
+
+
+    # ********************************************************************
+    # *** 'IF ZERO' WILL TOGGLE MICRO EXON SEARCHING OFF *****************
+    # ********************************************************************
+    #
+    #
+    #if (0) {
+
+    # Run along SPALN's output looking for 'exons' with
+    # improbably low amino acid counts.  Currently, we
+    # say that an exon should have at least 4 amino acids.
+    #
+    my @MicroExonRuns;
+    my $micro_start = -1;
+    my $micro_end   = 0;
     
-    # Remove the final splice site marker
-    $CodonCenters =~ s/\,\*\,$//;
+    $i = 0;
+    while ($i < $num_aas) {
+
+
+	# Figure out the genome position of the current amino
+	# acid, so that we can infer exon boundaries (large
+	# changes in nucleotide position).
+	#
+	my $aa_loc   = $NuclPositions[$AAPositions[$i]];
+	my $aa_start = $i;
+	my $exon_len = 1;
+
+	
+	# Run through this exon, counting how many amino acids
+	# it has.
+	#
+	$i++;
+	while ($i < $num_aas && abs($NuclPositions[$AAPositions[$i]] - $NuclPositions[$AAPositions[$i-1]]) < 5) {
+	    $exon_len++;
+	    $i++;
+	}
+
+
+	# If we have too few amino acids, then we're working
+	# with a micro exon, baby!  Observe that we chain together
+	# runs of contiguous micro-exons.
+	#
+	if ($exon_len < 4) {
+	    
+	    if ($micro_start == -1) { $micro_start = $aa_start; }
+	    $micro_end = $i;
+	    
+	} elsif ($micro_start != -1) {
+	    
+	    push(@MicroExonRuns,$micro_start.'-'.$micro_end);
+	    $micro_start = -1;
+	    
+	}
+	
+    }
+    
+    
+    # Next we'll run through each of the indicated micro-exon
+    # regions ('regions' because they can be chained together)
+    # and try to re-align the amino acids to the ends of the
+    # 'major' exons that flank them.
+    #
+    # NOTE: Be careful that we don't step over a breakpoint by
+    #       checking whether NuclPositions[i] and NP[i+1] are
+    #       1 off from one another.
+    #
+    foreach my $micro_run_str (@MicroExonRuns) {
+
+	
+	# Split the indices out of the string
+	#
+	my @MicroRun = split('-',$micro_run_str);
+	$micro_start = $MicroRun[0];
+	$micro_end   = $MicroRun[1]; # One past actual end, so we can do strict '<'
+
+
+	# Identify the amino acid sequence that constitutes
+	# this micro exon (or chain of micro exons)
+	#
+	my @MicroAAs;
+	for ($j = $micro_start; $j < $micro_end; $j++) {
+	    push(@MicroAAs,$FullProtSeq[$j]);
+	}
+
+
+	# Figure out how long the micro exon is
+	#
+	my $micro_len = $micro_end-$micro_start;
+
+	
+	# Look at the preceding exon
+	#
+	my @RearExt;
+	my $rear_ext_len = 0;
+	if ($micro_start > 0) {
+
+	    
+	    # Get situated so that we can start trying to
+	    # transfer amino acids from our micro exons to
+	    # the back end of the preceding exon.
+	    #
+	    my $rear_codon_center = $NuclPositions[$AAPositions[$micro_start-1]];	    
+	    my $nuclseq_pos = $AAPositions[$micro_start-1]+3;	    
+	    while ($rear_ext_len < $micro_len) {
+		
+		# Make sure we don't overstep
+		#
+		my $step_check = $NuclPositions[$nuclseq_pos];
+		if ($revcomp) { $step_check += 3 * ($rear_ext_len+1); }
+		else          { $step_check -= 3 * ($rear_ext_len+1); }
+		
+		last if ($step_check != $rear_codon_center);
+
+
+		# Figure out what the next codon is
+		#
+		my @NextCodon = ();
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos-1]);
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos]);
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos+1]);
+
+		
+		# If we have a match we are very happy.  If
+		# we do not have a match we are very sad.
+		#
+		if (uc($FullProtSeq[$micro_start+($rear_ext_len+1)]) eq uc(TranslateCodon(\@NextCodon))) {
+		    push(@RearExt,$nuclseq_pos);	    
+		    $nuclseq_pos += 3;
+		    $rear_ext_len++;
+		} else {
+		    last;
+		}
+		
+	    }
+	    
+	}
+	
+	# If we found a complete run, we're sooooo stoked!
+	#
+	if ($rear_ext_len == $micro_len) {
+	    
+	    # Record our triumph
+	    #
+	    for ($i = 0; $i < $micro_len; $i++) { $AAPositions[$micro_start+$i] = $RearExt[$i]; }
+	    next;
+	    
+	}
+
+	
+	# Look at the exon ahead
+	#
+	my @FwdExt;
+	my $fwd_ext_len = 0;
+	if ($micro_end < $num_aas) {
+	    
+	    # Try to find a good extension to the front of
+	    # the upcoming exon.
+	    #
+	    my $fwd_codon_center = $NuclPositions[$AAPositions[$micro_end]];
+	    my $nuclseq_pos = $AAPositions[$micro_end]-3;
+	    while ($fwd_ext_len < $micro_len) {
+
+		
+		# Make sure we don't overstep
+		#
+		my $step_check = $NuclPositions[$nuclseq_pos];
+		if ($revcomp) { $step_check -= 3 * ($fwd_ext_len+1); }
+		else          { $step_check += 3 * ($fwd_ext_len+1); }
+		
+		last if ($step_check != $fwd_codon_center);
+
+
+		# What does the next codon encode?
+		#
+		my @NextCodon = ();
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos-1]);
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos]);
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos+1]);
+		
+
+		# If we have a match, in terms of what the codon
+		# encodes, then we can continue our considerations.
+		# Otherwise we cannot.
+		#
+		if (uc($FullProtSeq[$micro_end-($fwd_ext_len+1)]) eq uc(TranslateCodon(\@NextCodon))) {
+		    push(@FwdExt,$nuclseq_pos);		
+		    $nuclseq_pos -= 3;
+		    $fwd_ext_len++;
+		} else {
+		    last;
+		}
+		
+	    }
+	    
+	}
+
+	
+	# Did we find a complete run?
+	#
+	if ($fwd_ext_len == $micro_len) {
+	    
+	    for ($i = 0; $i < $micro_len; $i++) { $AAPositions[$micro_start+$i] = $FwdExt[$i]; }
+	    next;
+	    
+	}
+	
+
+	# Append as much as you can to the preceding
+	# major exon first.  We don't put any work into
+	# evaluating whether amino acids that could go
+	# either way should be fitted to one or the other
+	# side.
+	#
+	$i = 0;
+	while ($i < $rear_ext_len) {
+	    $AAPositions[$micro_start+$i] = $RearExt[$i];
+	    $i++;
+	}
+
+	
+	# Skip ahead to the stuff we're appending to the
+	# upcoming major exon, if you need to.
+	#
+	if ($i < $micro_len - $fwd_ext_len) { $i = $micro_len - $fwd_ext_len; }
+
+
+	# Append this stuff onto the forward friend.
+	#
+	$j = $micro_end - $fwd_ext_len;
+	while ($i < $micro_len) {
+	    $AAPositions[$j] = $FwdExt[($micro_len-1)-$i];
+	    $i++;
+	    $j++;
+	}
+	
+    }
+    
+
+    #}
+    #
+    #
+    # ********************************************************************
+    # *** 'IF ZERO' TOGGLE END *******************************************
+    # ********************************************************************
+
+        
+    # Radical, dude!  Now all we need to do is just convert
+    # our list of amino acid positions into a list of
+    # their corresponding middle amino acids (with '*'s to
+    # denote splice site boundaries).
+    #
+    # We'll try to be careful about how we place codons that are
+    # called as insertions into the genome.
+    #
+    my $prev_codon_c = $NuclPositions[$AAPositions[0]];
+    my $CodonCenters = $prev_codon_c;
+    for ($i = 1; $i < $num_aas; $i++) {
+
+	# A gap of more than 4 is taken to deserve a splice site marker
+	#
+	if (abs($NuclPositions[$AAPositions[$i]] - $NuclPositions[$AAPositions[$i-1]]) > 4) {
+	    $CodonCenters = $CodonCenters.',*';
+	}
+
+	# Prepping for a fresh character!
+	#
+	$CodonCenters = $CodonCenters.',';
+	
+	# Are we in an insertion (wrt genome)?
+	#
+	if ($FullNuclSeq[$AAPositions[$i]] !~ /\w/) {
+	    $CodonCenters = $CodonCenters.$prev_codon_c;
+	} else {
+	    $prev_codon_c = $NuclPositions[$AAPositions[$i]];
+	    $CodonCenters = $CodonCenters.$prev_codon_c;
+	}
+	
+    }
+    
 
     # Now that we've got our purty little hit, we write it on out and tell
     # 'em how happy that made us feel.
-    my $hitline = "Isoform ID : $genename|$isoformname|$speciesname|$iso_id\n";
+    my $hitline = "Isoform ID : $seqname\n";
+    $hitline    = $hitline."Method     : SPALN\n";
     $hitline    = $hitline."Chromosome : $ChrName\n";
-    $hitline    = $hitline."Match Pos.s: ";
-    $hitline    = $hitline."$CodonCenters\n\n";
+    $hitline    = $hitline."Match Pos.s: $CodonCenters\n\n";
+
 
     return ($hitscore,$hitline);
 
