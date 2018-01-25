@@ -3,7 +3,7 @@
  * USAGE:  N/A
  *
  * ABOUT:  This file contains a handful of simple functions used
- *         by "FindDiagonals."
+ *         by "FastDiagonals."
  *
  */
 #include <math.h>

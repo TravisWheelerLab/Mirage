@@ -37,6 +37,7 @@ my $specific = 0;
 my $outputfolder = 'multilignments';
 my $CPUs = 2;
 my $canonical_species;
+my $mask_arfs = 1;
 
 $i = 2;
 while ($i < @ARGV) {
@@ -49,6 +50,8 @@ while ($i < @ARGV) {
     } elsif ($ARGV[$i] eq '-misses') {
 	$i++;
 	$FinalMisses = $ARGV[$i];
+    } elsif ($ARGV[$i] eq '-stack-arfs') {
+	$mask_arfs = 0;
     } elsif ($ARGV[$i] eq '-v') {
 	$verbose = 1;
     } elsif ($ARGV[$i] eq '-n') {
@@ -95,9 +98,8 @@ while (!eof($infile)) {
 	    die "\n  ERROR:  Unexpected ID line:  $ID_line\n\n";
 	}
 	
-	# NOTE: Eventually we'll want to generalize naming conventions,
-	#       but for our current purposes we'll stick with CST's "GN:"
-	my $db_entry  = 'GN:'.$1.'|'.$2.'|'.$3.'|'.$4.'|';
+	# NOTE: "GN:" ARTIFACT EXCISION
+	my $db_entry  = $1.'|'.$2.'|'.$3.'|'.$4.'|';
 	$db_entry = $db_entry.$5 if ($5);
 	$db_entry = $db_entry.$6;
 	my $orig_group = $6;
@@ -249,14 +251,14 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	    # Some entries might have additional data fields before the
 	    # group identifier, so we'll have to pay attention to how
 	    # many fields there are.
-	    if ($DBEntries[$chr_hits]  =~ /GN\:([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|(\S*\|)([^\|]+)\s*$/) {
+	    if ($DBEntries[$chr_hits]  =~ /([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|(\S*\|)([^\|]+)\s*$/) {
 		$GeneNames[$chr_hits]  = $1;
 		$IsoNames[$chr_hits]   = $2;
 		$Species[$chr_hits]    = $3;
 		$IsoIDs[$chr_hits]     = $4;
 		$ExtraInfo[$chr_hits]  = $5;
 		$GroupField[$chr_hits] = $6;
-	    } elsif ($DBEntries[$chr_hits]  =~ /GN\:([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\s*$/) {
+	    } elsif ($DBEntries[$chr_hits]  =~ /([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\s*$/) {
 		$GeneNames[$chr_hits]  = $1;
 		$IsoNames[$chr_hits]   = $2;
 		$Species[$chr_hits]    = $3;
@@ -286,14 +288,14 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	    # Some entries might have additional data fields before the
 	    # group identifier, so we'll have to pay attention to how
 	    # many fields there are.
-	    if ($DBEntries[$chr_hits]  =~ /GN\:([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|(\S*\|)([^\|]+)\s*$/) {
+	    if ($DBEntries[$chr_hits]  =~ /([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|(\S*\|)([^\|]+)\s*$/) {
 		$GeneNames[$chr_hits]  = $1;
 		$IsoNames[$chr_hits]   = $2;
 		$Species[$chr_hits]    = $3;
 		$IsoIDs[$chr_hits]     = $4;
 		$ExtraInfo[$chr_hits]  = $5;
 		$GroupField[$chr_hits] = $6;
-	    } elsif ($DBEntries[$chr_hits]  =~ /GN\:([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\s*$/) {
+	    } elsif ($DBEntries[$chr_hits]  =~ /([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\s*$/) {
 		$GeneNames[$chr_hits]  = $1;
 		$IsoNames[$chr_hits]   = $2;
 		$Species[$chr_hits]    = $3;
@@ -309,9 +311,9 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	# No need to keep playing around with this one
 	next if ($alt_chr);
 
-	# Get a hold of the proteins and record them as strings	
-	my $eslsfetchCmd = "esl-sfetch $ARGV[1] \"$DBEntries[$i]\" \|";
-	open(my $eslinput,$eslsfetchCmd) || die "\n  esl-sfetch failed to grab $DBEntries[$i] from $ARGV[1]\n\n";
+	# Get a hold of the proteins and record them as strings
+	my $eslsfetchCmd = "esl-sfetch $ARGV[1] \"$DBEntries[$chr_hits]\" \|";
+	open(my $eslinput,$eslsfetchCmd) || die "\n  esl-sfetch failed to grab $DBEntries[$chr_hits] from $ARGV[1]\n\n";
 	
 	# Eat header line <- could be used for sanity check
 	my $line = <$eslinput>;
@@ -707,6 +709,285 @@ foreach my $group_index ($startpoint..$endpoint-1) {
     }
 
 
+    # Unless we want visible ARF-candidates, we'll run through the disagreements to
+    # get ARFs into their own groups.
+    #
+    #    BEGIN ARF-SPLITTING HERE
+    #   +========================+
+    #
+    my @ARFNameField;
+    for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) { $ARFNameField[$seq_id] = 0; }
+    if ($mask_arfs && scalar(@Disagreements)) {
+	
+	# Run through the disagreement position indices and check for 
+	# any 5+ runs of contiguous disagreements (to account for spurious
+	# matches in ARFs).
+	#
+	my @ARFIndices;
+	my $dis_index = 0;
+	while ($dis_index < scalar(@Disagreements)) {
+	    
+	    my $runner = $dis_index+1;
+	    $runner++ while ($runner < scalar(@Disagreements) && abs($Disagreements[$runner] - $Disagreements[$runner-1]) <= 4);
+
+	    if ($runner - $dis_index > 5) { push(@ARFIndices,$Disagreements[$dis_index].'-'.$Disagreements[$runner-1]); }
+	    
+	    $dis_index = $runner;
+
+	}
+
+	# If we have ARF indices, we'll need to make some adjustments...
+	# Included in this are considerations for how much we'll be increasing
+	# the length of the MSA as we go along.
+	#
+	if (scalar(@ARFIndices)) {
+
+	    my @ContentPosition;
+	    for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) { 
+		$ContentPosition[$seq_id] = 0; 
+	    }
+
+	    my @ARFMSA;
+	    my $arfmsalen = 0;
+	    my $orig_pos  = 0;
+	    my $last_end  = 0;
+	    foreach my $msa_arf_pair (@ARFIndices) {
+		
+		#
+		#  In this loop we scan through each of the ARF indices (in the "original final" MSA)
+		#  and [1.] get caught up (in our ARFMSA) to the starting point, [2.] figure out if
+		#  we need to resolve (i.e., break apart) sequences to make the ARF not an abomination
+		#  for our alignment, and [3.] break it up if we decide that's what makes sense.
+		#
+
+		my @ARFPair = split(/\-/,$msa_arf_pair);
+		my $start   = $ARFPair[0];
+		my $end     = $ARFPair[1]+1; # NOTE that ARFPair[1] is the INTERNAL end point!
+		my $arf_len = $end-$start;
+		$last_end   = $end;
+
+		while ($orig_pos < $start) {
+		    for (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) {
+			$ARFMSA[$seq_id][$arfmsalen] = $FinalMSA[$seq_id][$orig_pos];
+			$ContentPosition[$seq_id]++ if ($FinalMSA[$seq_id][$orig_pos] =~ /[A-Za-z]/);
+		    }
+		    $orig_pos++;
+		    $arfmsalen++;
+		}
+		
+		my @ContentStart;
+		for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) { 
+		    $ContentStart[$seq_id] = $ContentPosition[$seq_id]; 
+		}
+
+		# We'll cluster sequences by finding out (1.) which sequence in the
+		# ARF-candidate region is most common, and (2.) dividing between
+		# sequences that are like this (>50% ID) and those that are < 50%.
+		#
+		my %CandidateSeqHash;
+		my @CandidateSeqs;
+		my @Intronic;
+		for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) {
+		    my $letter_count = 0;
+		    my $nonletter_count = 0;
+		    my $seq_str = '';
+		    for (my $pos = $start; $pos < $end; $pos++) {
+			my $next_char = uc($FinalMSA[$seq_id][$pos]);
+			$seq_str = $seq_str.$next_char;
+			if ($next_char =~ /[A-Za-z]/) {
+			    $ContentPosition[$seq_id]++;
+			    $Intronic[$pos-$start] = 0;
+			    $letter_count++;
+			} else {
+			    $nonletter_count++;
+			    if ($next_char eq '*')  { $Intronic[$pos-$start] = 1; }
+			}
+		    }
+		    
+		    # Any sequences that don't have any sequence here will just
+		    # go to the most common (i.e., non-ARF-candidate) sequence.
+		    #
+		    if ($nonletter_count < $letter_count) { 
+			$CandidateSeqs[$seq_id] = $seq_str;
+			if ($CandidateSeqHash{$seq_str}) { $CandidateSeqHash{$seq_str}++; }
+			else                             { $CandidateSeqHash{$seq_str}=1; }
+		    } else {
+			$CandidateSeqs[$seq_id] = 0;
+		    }
+		}
+
+		# Get a list of intron positions (if there were any)
+		#
+		my @IntronPositions;
+		for (my $pos = 0; $pos<$arf_len; $pos++) { 
+		    if ($Intronic[$pos]) { push(@IntronPositions,$pos); } 
+		}
+		push(@IntronPositions,$arf_len);
+		
+		# Figure out which of the candidates is the canonical non-ARF
+		#
+		my $top_seq   = '!';
+		my $top_count = 0;
+		foreach my $cand_seq (keys %CandidateSeqHash) {
+		    my $cand_count = $CandidateSeqHash{$cand_seq};
+		    if ($cand_count > $top_count) {
+			$top_count = $cand_count;
+			$top_seq = $cand_seq;
+		    }
+		}
+
+		# Not sure why this would happen, but whatever...
+		#
+		next if ($top_seq eq '!');
+		
+		# Alright -- who's aligned with the canonical non-ARF?
+		#
+		my @IsNonARF;
+		my @ReferenceChars = split(//,$top_seq);
+		my $ref_non_gaps = 0;
+		foreach my $ref_char (@ReferenceChars) {
+		    $ref_non_gaps++ if ($ref_char =~ /[a-zA-Z]/);
+		}
+
+		my $num_arf_seqs = 0; # In case we just want to leave this alone...
+		for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) {
+		    if ($CandidateSeqs[$seq_id]) {
+
+			my $id_positions = 0;
+			my @CandidateChars = split(//,$CandidateSeqs[$seq_id]);
+			for (my $pos = 0; $pos < $arf_len; $pos++) {
+			    next if ($ReferenceChars[$pos] !~ /[a-zA-Z]/);
+			    $id_positions++ if ($CandidateChars[$pos] eq $ReferenceChars[$pos]);
+			}
+
+			if ($id_positions / $ref_non_gaps > 0.75) {
+			    $IsNonARF[$seq_id] = 1;
+			} else {
+			    $IsNonARF[$seq_id] = 0;
+			    $num_arf_seqs++;
+			}
+
+		    } else {
+
+			# Gappy or low-content sequences will be noted as
+			# non-ARFs.
+			$IsNonARF[$seq_id] = 1;
+			
+		    }
+		}
+
+		# If we saw at least one strong arf candidate then we adjust the 
+		# MSA -- otherwise leave it alone!
+		#
+		# Note that by virtue of how we tabulate things this pseudo-arf
+		# will automatically be added to the alignment if we skip this
+		# conditional.
+		#
+		if ($num_arf_seqs) {
+
+		    for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) {
+
+			my $non_arf  = $IsNonARF[$seq_id];
+			my $full_str = '';
+			my $char_str = '';
+			my $gap_str  = '';
+			my $pos      = 0;
+			my $exon_num = 0;
+			while ($pos < $arf_len) {
+			    if ($pos == $IntronPositions[$exon_num]) {
+				$exon_num++;
+				if ($non_arf) { $full_str = $full_str.'*'.$char_str.$gap_str; }
+				else          { $full_str = $full_str.'*'.$gap_str.$char_str; }
+				$char_str = '';
+				$gap_str  = '';
+			    } else {
+				$char_str = $char_str.$FinalMSA[$seq_id][$start+$pos];
+				$gap_str  = $gap_str.'-';
+			    }
+			    $pos++;
+			}
+
+			# Record the altered sequence!  Also, record the range if we're the ARF
+			#
+			if ($non_arf) { 
+			    if (scalar(@IntronPositions) > 1) { $full_str = $full_str.'*'.$char_str.$gap_str; }
+			    else                              { $full_str = $char_str.$gap_str;               }
+			} else { 
+			    if (scalar(@IntronPositions) > 1) { $full_str = $full_str.'*'.$gap_str.$char_str; }
+			    else                              { $full_str = $gap_str.$char_str;               }
+			    if ($ARFNameField[$seq_id]) {
+				$ARFNameField[$seq_id] =~ s/ARF\:/ARFs\:/;
+				$ARFNameField[$seq_id] = $ARFNameField[$seq_id].','.$ContentStart[$seq_id].'..'.$ContentPosition[$seq_id];
+			    } else {
+				$ARFNameField[$seq_id] = 'ARF:'.$ContentStart[$seq_id].'..'.$ContentPosition[$seq_id];
+			    }
+			}
+
+			# NOW we can add in the ARF-y bit to the MSA
+			#
+			$pos = $arfmsalen;	
+			foreach my $char (split(//,$full_str)) { $ARFMSA[$seq_id][$pos++] = $char; }
+
+			# Shifting our 'big-picture' of the MSA forward
+			if ($seq_id == $chr_hits-1) { $arfmsalen = $pos; }
+
+		    }
+		    
+		} else {
+
+		    # Just a straightforward copy from 'FinalMSA'
+		    #
+		    while ($start < $end) {
+			for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) {			    
+			    $ARFMSA[$seq_id][$arfmsalen] = $FinalMSA[$seq_id][$start];
+			}
+			$start++;
+			$arfmsalen++;
+		    }
+		    
+		}
+
+		$orig_pos = $end;
+
+	    }
+
+
+	    # We'll need to really quickly incorporate everything after the last
+	    # ARF candidate.
+	    #
+	    while ($last_end < $final_len) {
+		for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) {
+		    $ARFMSA[$seq_id][$arfmsalen] = $FinalMSA[$seq_id][$last_end];
+		}
+		$arfmsalen++;
+		$last_end++;
+	    }
+
+	    # Swap ARFMSA into the FinalMSA variables
+	    #
+	    # NOTE:  It's been observed that there are some pathological ARFs that
+	    #        are recognized as having inserted AAs relative to the genome,
+	    #        so we need to do ANOTHER check for all-gap columns
+	    #
+	    $final_len = 0;
+	    for (my $j=0; $j<$arfmsalen; $j++) {
+		my $not_all_gaps = 0;
+		for (my $i=0; $i<$chr_hits; $i++) {
+		    $FinalMSA[$i][$final_len] = $ARFMSA[$i][$j];
+		    $not_all_gaps = 1 if ($ARFMSA[$i][$j] ne '-');
+		}
+		$final_len += $not_all_gaps;
+	    }
+	    
+	}
+
+    }
+    #
+    #     END OF ARF-SPLITTING
+    #    +====================+
+    #
+
+
     # Now that we have our clean and tidy MSA we can go
     # ahead and write it out!
     open(my $outfile,'>',$outfilename);
@@ -714,15 +995,23 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 
 	$IsoNames[$i] =~ s/\s//g;
 	if ($ExtraInfo[$i]) {
-	    print $outfile ">GN:$GeneNames[$i]|$IsoNames[$i]|$Species[$i]|$IsoIDs[$i]|$ExtraInfo[$i]$GroupField[$i]\n";
+	    if ($ARFNameField[$i]) {
+		print $outfile ">$GeneNames[$i]|$IsoNames[$i]|$Species[$i]|$IsoIDs[$i]|$ExtraInfo[$i]$ARFNameField[$i]|$GroupField[$i]\n";
+	    } else {
+		print $outfile ">$GeneNames[$i]|$IsoNames[$i]|$Species[$i]|$IsoIDs[$i]|$ExtraInfo[$i]$GroupField[$i]\n";
+	    }
 	} else {
-	    print $outfile ">GN:$GeneNames[$i]|$IsoNames[$i]|$Species[$i]|$IsoIDs[$i]|$GroupField[$i]\n";
+	    if ($ARFNameField[$i]) {
+		print $outfile ">$GeneNames[$i]|$IsoNames[$i]|$Species[$i]|$IsoIDs[$i]|$ARFNameField[$i]|$GroupField[$i]\n";
+	    } else {
+		print $outfile ">$GeneNames[$i]|$IsoNames[$i]|$Species[$i]|$IsoIDs[$i]|$GroupField[$i]\n";
+	    }
 	}
 	    
 	$j = 0;
 	$k = 0;
 	while ($j < $final_len) {
-
+	    
 	    print $outfile "$FinalMSA[$i][$j]";
 
 	    $k++;
@@ -749,7 +1038,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	my $disfilename = $outfilename;
 
 	$disfilename =~ s/\.afa/\_ARFs/;
-	print "  > WARNING: $numdisagreements positions did not reach unanimous consensus (see $disfilename)\n" if ($verbose);
+	#print "  > WARNING: $numdisagreements positions did not reach unanimous consensus (see $disfilename)\n" if ($verbose);
 
 	open(my $disfile,'>',$disfilename);
 	print $disfile "$numdisagreements mismatched sites\n";
@@ -956,7 +1245,7 @@ sub AssembleMSA
 	for ($i=0; $i<$num_seqs; $i++) {
 
 	    my @Row = split('',$Column[$i]);
-	    for ($k=0; $k<$max_col_size; $k++) { $FinalMSA[$i][$final_len+$k] = $Row[$k];}	    
+	    for ($k=0; $k<$max_col_size; $k++) { $FinalMSA[$i][$final_len+$k] = $Row[$k];}
 	    
 	}
 
@@ -1207,7 +1496,7 @@ sub SimpleClean
     # Actually, for one last sneak, let's see if we can't clean up any
     # jigsaw-type weirdness...
     #
-    for (my $i=0; $i<$msa_len; $i++) {
+    for (my $i=2; $i<$msa_len; $i++) {
 	
 	# Per usual, don't worry about those silly old splice sites
 	#
@@ -1217,7 +1506,7 @@ sub SimpleClean
 	#
 	my $switcheroo = 0;
 	for (my $j=0; $j<$num_seqs; $j++) {
-	    if ($ConsensusSeq[$i-1] eq uc($MSA[$j][$i]) && $MSA[$j][$i-1] eq '-') {
+	    if ($ConsensusSeq[$i-1] eq uc($MSA[$j][$i]) && $MSA[$j][$i-1] eq '-' && $MSA[$j][$i-2] =~ /\w/) {
 		$MSA[$j][$i-1] = $MSA[$j][$i];
 		$MSA[$j][$i]   = '-';
 		$switcheroo = 1;
@@ -1341,7 +1630,8 @@ sub QuickAlign
     # recycle the space as needed.
     #
     my @NWMatrix = ();
-    my $all_gaps = '';
+    $NWMatrix[0][0] = 0;
+    my $all_gaps = '';    
     for ($i=0; $i<=$max_col_size; $i++) {
 
 	# Since we'll be counting one over the max entry length

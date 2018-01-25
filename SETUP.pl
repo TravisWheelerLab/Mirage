@@ -13,6 +13,18 @@ use strict;
 use Cwd;
 
 
+my $argcheck=0;
+my $force=0;
+while ($argcheck < scalar(@ARGV)) {
+    if (lc($ARGV[$argcheck]) eq '-force') {
+	$force=1;
+    } else {
+	print "\n  Unrecognized option '$ARGV[$argcheck]' ignored.\n\n";
+    }
+    $argcheck++;
+}
+
+
 # The name of the spaln folder (at the top for ease of adjustment)
 my $spalnDir = 'inc/spaln2.2.2';
 my $easelDir = 'inc/easel';
@@ -26,10 +38,7 @@ my $blatTar  = $blatDir.'.tgz';
 # be missing)
 open(my $autoconfcheck,"which autoconf |");
 my $line = <$autoconfcheck>;
-if (!$line) { 
-    print "\n  ERROR: Program 'autoconf' is not installed (required for easel installation)";
-    die   "\n         Try 'brew install autoconf'\n\n";
-}
+if (!$line) { die "\n  ERROR: Program 'autoconf' is not installed (required for easel installation)\n         Try 'brew install autoconf'\n\n"; }
 close($autoconfcheck);
 
 
@@ -43,7 +52,7 @@ my @srcFiles;
 push(@srcFiles,'src/makefile');
 push(@srcFiles,'src/Diagonals.c');
 push(@srcFiles,'src/Diagonals.h');
-push(@srcFiles,'src/FindDiagonals.c');
+push(@srcFiles,'src/FastDiagonals.c');
 push(@srcFiles,'src/TransSW.c');
 push(@srcFiles,'src/MultiSeqNW.c');
 push(@srcFiles,'src/MultiSeqNW.h');
@@ -71,11 +80,16 @@ if (system("make")) { die "\n  Failed to compile C source files\n\n"; }
 open(my $spalncheck,"which spaln |");
 my $spaln = <$spalncheck>;
 close($spalncheck);
-if (!$spaln) {
+if (!$spaln || $force==1) {
 
     # We need to unpack spaln
     chdir($startDir);
-    if (system("tar -xzf $spalnTar -C inc/")) { die "\n  Failed to expand file '$spalnTar'\n\n"; }
+
+    # If forcing this might not be necessary
+    #
+    if (-e $spalnTar) {
+	if (system("tar -xzf $spalnTar -C inc/")) { die "\n  Failed to expand file '$spalnTar'\n\n"; }
+    }
 
     # Configure, make, and install spaln
     chdir("$startDir/$spalnDir/src") || die "\n  Failed to enter directory '$spalnDir/src'\n\n";
@@ -94,12 +108,14 @@ close($eslsfetchcheck);
 open(my $eslseqstatcheck,"which esl-seqstat |");
 my $eslseqstat = <$eslseqstatcheck>;
 close($eslseqstatcheck);
-if (!$eslsfetch || !$eslseqstat) {
+if (!$eslsfetch || !$eslseqstat || $force==1) {
 
     chdir($startDir);
     print "\n  Configuring and compiling easel\n\n";
-    if (system("tar -xzf $easelTar -C inc/")) { die "\n  Failed to expand '$easelTar'\n\n"; }
-    
+    if (-e $easelTar) {
+	if (system("tar -xzf $easelTar -C inc/")) { die "\n  Failed to expand '$easelTar'\n\n"; }
+    }
+
     # Configure
     chdir($easelDir);
     if (system "autoconf") { die "\n  Failed to configure easel library -- is autoconf installed?\n\n"; }
@@ -113,11 +129,14 @@ if (!$eslsfetch || !$eslseqstat) {
 }    
 
 
-# Finally, BLAT
+# Finally, BLAT -- we actually won't force this if there's a link already
 chdir($startDir);
 if (!(-e './inc/blat/blat')) {
     
-    if (system("tar -xzf $blatTar -C inc/")) { die "\n  Failed to expand '$blatTar'\n\n"; }    
+    if (-e $blatTar) {
+	if (system("tar -xzf $blatTar -C inc/")) { die "\n  Failed to expand '$blatTar'\n\n"; }    
+    }
+
     chdir($blatDir);
     
     # What sort of OS are we on? (opt.s: Linux, Darwin, other)

@@ -45,7 +45,7 @@ sub AttachSeqToMSA;
 if (@ARGV == 0) { PrintUsage(); }
 if (@ARGV == 1) {
     DetailedUsage() if (lc($ARGV[0]) eq '-h' || lc($ARGV[0]) =~ /help/);
-    CheckInstall()  if (lc($ARGV[0]) eq '-check');
+    CheckInstall()  if (lc($ARGV[0]) =~ /\-check$/);
 }
 
 # Generics
@@ -53,7 +53,7 @@ my ($i,$j,$k);
 
 
 # Where we'll be storing timing information
-my $StartTime = Time::HiRes::time();
+my $StartTime = [Time::HiRes::gettimeofday()];
 my $IntervalStart;
 my $IntervalEnd;
 my $FinalTime;
@@ -75,8 +75,11 @@ my $SpeciesGuide = $Options[1];
 my $ResultsDir   = $Options[2];
 my $verbose      = $Options[3];
 my $numProcesses = $Options[4];
-my $forcecompile = $Options[5]; # Hidden
-my $cleanMSA     = $Options[6]; # Hidden
+my $timed        = $Options[5];
+my $stack_arfs   = $Options[6];
+my $forcecompile = $Options[7]; # Hidden
+my $cleanMSA     = $Options[8]; # Hidden
+my $just_spaln   = $Options[9]; # Hidden
 
 
 # Verify that we have all the files we need on-hand
@@ -135,13 +138,50 @@ foreach $specname (@Species) {
 }
 
 
+# Make a bunch of species-specific databases
+my @SpeciesDBNames;
+my @SpeciesDBs;
+my %SpeciesToID;
+for (my $i=0; $i<$numSpecies; $i++) {
+    $SpeciesDBNames[$i] = $ProteinDB;
+    $SpeciesDBNames[$i] =~ s/\.fa$/\.Mirage.$Species[$i]\.fa/;
+    open($SpeciesDBs[$i],'>',$SpeciesDBNames[$i]);
+    $SpeciesToID{lc($Species[$i])} = $i+1;
+}
+open(my $db_file,'<',$ProteinDB);
+my $db_line = <$db_file>;
+while (!eof($db_file)) {
+    if ($db_line =~ /\>[^\|]+\|[^\|]+\|([^\|]+)\|/) {
+	my $seq_spec = lc($1);
+	if ($SpeciesToID{$seq_spec}) {
+	    my $species_db = $SpeciesDBs[$SpeciesToID{$seq_spec}-1];
+	    print $species_db "$db_line";
+	    $db_line = <$db_file>;
+	    while ($db_line !~ /\>/) {
+		print $species_db "$db_line";
+		last if (eof($db_file));
+		$db_line = <$db_file>;
+	    }
+	} else {
+	    $db_line = <$db_file>;
+	}
+    } else {
+	$db_line = <$db_file>;
+    }
+}
+for (my $i=0; $i<$numSpecies; $i++) { 
+    close($SpeciesDBs[$i]);
+    system("esl-sfetch --index \"$SpeciesDBNames[$i]\" 1>/dev/null 2>\&1");
+}
+
+
 # Run Quilter
 my %MultiMSADir;
 my %GroupsBySpecies;
 foreach $i (0..$numSpecies-1) {
 
     # Start a timer for Quilter
-    $IntervalStart = Time::HiRes::time();
+    $IntervalStart = [Time::HiRes::gettimeofday()];
 
     # Assembling the Quilter command.  Because we're a directory back
     # from src, we need to append a '../' to each of the file names.
@@ -153,8 +193,9 @@ foreach $i (0..$numSpecies-1) {
     # each of the files
 
     # Protein database
-    if ($ProteinDB =~ /^\//) { $QuilterCmd = $QuilterCmd.$ProteinDB.' ';       }
-    else                     { $QuilterCmd = $QuilterCmd.'../'.$ProteinDB.' '; }
+    my $SpeciesDB = $SpeciesDBNames[$i];
+    if ($SpeciesDB =~ /^\//) { $QuilterCmd = $QuilterCmd.$SpeciesDB.' ';       }
+    else                     { $QuilterCmd = $QuilterCmd.'../'.$SpeciesDB.' '; }
 
     # Genome
     if ($Genomes[$i] =~ /^\//) { $QuilterCmd = $QuilterCmd.$Genomes[$i].' ';       }
@@ -180,6 +221,12 @@ foreach $i (0..$numSpecies-1) {
     # Do we want a whole bunch of stuff spat at us?
     $QuilterCmd = $QuilterCmd.' -v' if ($verbose);
 
+    # Are we timing?
+    $QuilterCmd = $QuilterCmd.' -time' if ($timed);
+
+    # Are we only using SPALN?
+    $QuilterCmd = $QuilterCmd.' -fast' if ($just_spaln);
+
     # Display the call if we're being loud
     if ($verbose) {
 	print "\n  Aligning to the $Species[$i] genome using Quilter.pl\n";
@@ -189,15 +236,18 @@ foreach $i (0..$numSpecies-1) {
     # Make that daaaaaang call.
     if (system($QuilterCmd)) {
 	# Rats!
+	foreach my $species_db_name (@SpeciesDBNames) {
+	    if (-e $species_db_name) {
+		system("rm \"$species_db_name\"");
+		system("rm \"$species_db_name\.ssi\"");
+	    }
+	}
 	die "\n  *  ERROR:  Quilter.pl failed during execution  *\n\n";
     }
 
     # Figure out how much time that took and record it
-    $IntervalEnd = Time::HiRes::time();
-    $QuilterTimeStats[$i] =  $IntervalEnd-$IntervalStart;
+    $QuilterTimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
 
-
-    
 
     #################################################################### COUNTING DENSITY OF MICRO-EXONS
     #
@@ -270,11 +320,9 @@ foreach $i (0..$numSpecies-1) {
     #
     #################################################################### END COUNTING STUFF
 
-    
-    
-    
+        
     # Now we want to check how long it takes to run MultiMSA
-    $IntervalStart = Time::HiRes::time();
+    $IntervalStart = [Time::HiRes::gettimeofday()];
 
     # Grab a hold of your toys (confirming that they're where they should be)
     my $HitFileName  = $SpeciesDir{$Species[$i]}.'/Hits.Quilter.out';
@@ -292,7 +340,7 @@ foreach $i (0..$numSpecies-1) {
     my $MultiMSACmd;
     $MultiMSACmd = 'perl src/MultiMSA.pl ';       # base call
     $MultiMSACmd = $MultiMSACmd.$HitFileName.' '; # Quilter output
-    $MultiMSACmd = $MultiMSACmd.$ProteinDB;       # isoform file
+    $MultiMSACmd = $MultiMSACmd.$SpeciesDB;       # isoform file
     
     # Guiding output towards our desired directory
     $MultiMSACmd = $MultiMSACmd.' -folder '.$MultiMSADir{$Species[$i]};
@@ -304,6 +352,10 @@ foreach $i (0..$numSpecies-1) {
     # up any of those tasty multi-chromosomal gene families.
     $MultiMSACmd = $MultiMSACmd.' -misses '.$MissFileName;
 
+    # If we want to stack ARFs in the output alignment files, now is
+    # the time to communicate our desires
+    $MultiMSACmd = $MultiMSACmd.' -stack-arfs' if ($stack_arfs);
+    
     # Display the call and/or make it
     if ($verbose) {
 	print "  Generating MSAs for all identified $Species[$i] genes\n";
@@ -311,6 +363,12 @@ foreach $i (0..$numSpecies-1) {
     }
     if (system($MultiMSACmd)) {
 	# Hamsters!
+	foreach my $species_db_name (@SpeciesDBNames) {
+	    if (-e $species_db_name) {
+		system("rm \"$species_db_name\"");
+		system("rm \"$species_db_name\.ssi\"");
+	    }
+	}
 	die "\n  *  ERROR:  MultiMSA.pl failed during execution  *\n\n";
     }
 
@@ -416,7 +474,7 @@ foreach $i (0..$numSpecies-1) {
 	my @seqnames = split('&',$QuilterMisses{$missedgroup});
 	foreach my $seq (@seqnames) {
 	    my $GBSref = AttachSeqToMSA($seq,$MultiMSADir{$Species[$i]},$missedgroup,
-					$ProteinDB,\%GroupsBySpecies,$i+1,
+					$SpeciesDB,\%GroupsBySpecies,$i+1,
 					$singleseqfilename,$singleseqresults);
 	    %GroupsBySpecies = %{$GBSref};
 	}
@@ -425,9 +483,12 @@ foreach $i (0..$numSpecies-1) {
     system("rm $singleseqresults")  if (-e $singleseqresults);
 
     # Knock it off with that darn timing!
-    $IntervalEnd = Time::HiRes::time();
-    $MultiMSATimeStats[$i] = $IntervalEnd-$IntervalStart;
+    $MultiMSATimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
 
+    # Get rid of that stinky old pair of files!
+    system("rm \"$SpeciesDB\"");
+    system("rm \"$SpeciesDB\.ssi\"");
+    
 }
 
 
@@ -451,7 +512,7 @@ print "$progmsg\r" if (!$verbose);
 
 # We're now going to track how long the whole final-MSA-generating
 # part of the program takes
-$IntervalStart = Time::HiRes::time();
+$IntervalStart = [Time::HiRes::gettimeofday()];
 
 
 # Make a directory to place our final MSAs in
@@ -707,8 +768,7 @@ print "$progmsg\r" if (!$verbose);
 
 
 # When did we finish generating our final MSAs?
-$IntervalEnd = Time::HiRes::time();
-$MultiSeqNWTime = $IntervalEnd-$IntervalStart;
+$MultiSeqNWTime = Time::HiRes::tv_interval($IntervalStart);
 $AvgNWTime = $MultiSeqNWTime / $TotNumGroupFiles;
 
 
@@ -721,11 +781,10 @@ if (grep -f, glob 'src/*.TEs.Quilter.out') {
 
 
 # Slap that stop-watch!
-$FinalTime = Time::HiRes::time();
-$TotalRuntime = $FinalTime - $StartTime;
+$TotalRuntime = Time::HiRes::tv_interval($StartTime);
 
 # Print out runtime statistitcs
-if ($verbose) {
+if ($verbose || $timed) {
     my $formattedTime;
     print "\n\n\n";
     print "  +---------------------------------------------------+\n";
@@ -814,10 +873,11 @@ sub PrintUsage
     print "                            ordered as follows:  species, genome, .gtf index            \n";
     print "                            It is recommended that similar species are grouped together \n";
     print "                            and positioned near the top of the list.                    \n\n";
-    print " OPT.s  : -h   : More detailed help.                                                    \n";
-    print "          -o   : Specify output directory name.                                         \n";
-    print "          -v   : Verbose output.                                                        \n";
-    print "          -n   : Specify number of CPU cores (default: 2)                               \n";
+    print " OPT.s  : -h     : More detailed help.                                                  \n";
+    print "          -o     : Specify output directory name.                                       \n";
+    print "          -v     : Verbose output.                                                      \n";
+    print "          -n     : Specify number of CPU cores (default: 2)                             \n";
+    print "          --time : Print timing data to stdout at end of program                        \n";
     die "\n\n";
 }
 
@@ -874,6 +934,7 @@ sub DetailedUsage
     print "    OPT.s :  -o <string> : Specify ouptut directory name                          \n";
     print "             -v          : Verbose output                                         \n";
     print "             -n <int>    : Specify number of CPU cores (default: 2)               \n";
+    print "             --time      : Print timing data to stdout at end of program          \n";
     print "             -h          : Print this help page                                   \n";
     die "\n\n\n";
 }
@@ -909,7 +970,7 @@ sub CheckInstall
     my @RequiredFiles;
     push(@RequiredFiles,'src/Quilter.pl');
     push(@RequiredFiles,'src/DiagonalSets.pm');
-    push(@RequiredFiles,'src/FindDiagonals.c');
+    push(@RequiredFiles,'src/FastDiagonals.c');
     push(@RequiredFiles,'src/Diagonals.c');
     push(@RequiredFiles,'src/Diagonals.h');
     push(@RequiredFiles,'src/TransSW.c');
@@ -952,7 +1013,7 @@ sub CheckSourceFiles
     my @RequiredFiles;
     push(@RequiredFiles,'src/Quilter.pl');
     push(@RequiredFiles,'src/DiagonalSets.pm');
-    push(@RequiredFiles,'src/FindDiagonals.c');
+    push(@RequiredFiles,'src/FastDiagonals.c');
     push(@RequiredFiles,'src/Diagonals.c');
     push(@RequiredFiles,'src/Diagonals.h');
     push(@RequiredFiles,'src/TransSW.c');
@@ -969,7 +1030,7 @@ sub CheckSourceFiles
     }
 
     my @RequiredPrograms;
-    push(@RequiredPrograms,'src/FindDiagonals');
+    push(@RequiredPrograms,'src/FastDiagonals');
     push(@RequiredPrograms,'src/TransSW');
     push(@RequiredPrograms,'src/MultiSeqNW');
 
@@ -1015,8 +1076,11 @@ sub ParseArgs
     $Options[2] = 'MirageResults'; # Output folder name
     $Options[3] = 0;               # Verbose output
     $Options[4] = 2;               # Number of CPUs
-    $Options[5] = 0;               # (hidden) Force Compile
-    $Options[6] = 1;               # (hidden) perform final cleanup
+    $Options[5] = 0;               # Report timing information with final output
+    $Options[6] = 0;               # Stack ARFs with the rest of the sequence
+    $Options[7] = 0;               # (hidden) Force Compile
+    $Options[8] = 1;               # (hidden) perform final cleanup
+    $Options[9] = 0;               # (hidden) Only use SPALN (no FastDiagonals)
 
     my $i = 2;
     while ($i < @ARGS) {
@@ -1036,10 +1100,16 @@ sub ParseArgs
 		print "  Reverting to default (2)\n.";
 		$Options[4] = 2;
 	    }
-	} elsif ($ARGS[$i] eq '-forcecompile') {
+	} elsif ($ARGS[$i] eq '--time') {
 	    $Options[5] = 1;
-	} elsif ($ARGS[$i] eq '-showSpliceSites') {
-	    $Options[6] = 0;
+	} elsif ($ARGS[$i] eq '--stack-arfs') {
+	    $Options[6] = 1;
+	} elsif ($ARGS[$i] eq '--forcecompile') {
+	    $Options[7] = 1;
+	} elsif ($ARGS[$i] eq '--showSpliceSites') {
+	    $Options[8] = 0;
+	} elsif ($ARGS[$i] eq '--fast') {
+	    $Options[9] = 1;
 	} else {
 	    print "  Unrecognized option '$ARGS[$i]' ignored\n";
 	}
@@ -1289,7 +1359,7 @@ sub CoverMinorSpecies
     while (!eof($DB)) {
 	
 	# Go to the start of the next sequence
-	while (!eof($DB) && $line !~ /^\>GN\:/) {
+	while (!eof($DB) && $line !~ /^\>/) { # "GN:" EXCISION
 	    $line = readline($DB);
 	    $line =~ s/\r|\n//g;
 	}
@@ -1299,7 +1369,7 @@ sub CoverMinorSpecies
 	
 	# Not yet we ain't! Grab the species name
 	my $header = $line;
-	$line =~ /^\>GN\:([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|(\S*\|)?([^\|\s]+)\s*$/;
+	$line =~ /^\>([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|(\S*\|)?([^\|\s]+)\s*$/; # "GN:" EXCISION
 
 	if (!$6) { print ">>> $line\n"; }
 	
@@ -1403,7 +1473,7 @@ sub CoverMinorSpecies
 # Function Name: AttachSeqToMSA
 #
 # About: This function attaches a single sequence to an MSA, and is
-#        used to handle cases where neither FindDiagonals nor SPALN
+#        used to handle cases where neither FastDiagonals nor SPALN
 #        are able to identify a correct alignment of the sequence to
 #        the genome.
 #
@@ -1430,7 +1500,7 @@ sub AttachSeqToMSA
     my $resultsname  = shift;
     my $origseq = $seqname;
     $origseq =~ s/^\>|\s//g;
-    my $eslsfetchCmd = "esl-sfetch -o '$seqfilename' $ProteinDB '$origseq' > /dev/null 2>\&1";
+    my $eslsfetchCmd = "esl-sfetch -o \"$seqfilename\" \"$ProteinDB\" \"$origseq\" > /dev/null 2>\&1";
     
     
     # run it!
@@ -1466,7 +1536,7 @@ sub AttachSeqToMSA
 		my $alignCmd = "./src/MultiSeqNW '".$seqfilename."' 1 '".$baseMSAfile."' ".$num_isos;
 		$alignCmd    = $alignCmd.' -igBase 0';
 		$alignCmd    = $alignCmd." > '".$resultsname."'";
-		if (system($alignCmd)) { die "  *  ERROR: Alignment of missing sequence '$origseq' to MSA failed\n\n"; }
+		if (system($alignCmd)) { die "  *  ERROR: Alignment of missing sequence '$origseq' to MSA failed ($alignCmd)\n\n"; }
 		
 		# Move the results and count this sequence
 		system("mv $resultsname '$baseMSAfile'");

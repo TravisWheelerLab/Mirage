@@ -1,15 +1,4 @@
-/* FindDiagonals.c - Alex Nord - 2016
- *
- * USAGE:  ./FindDiagonals <protein.fa> <dna.fa> [-debug]
- *
- * ABOUT:  This program takes a file containing a protein sequence
- *         and a file containing a DNA sequence (both FASTA-format)
- *         and outputs data used to identify highly identical
- *         alignments of the two sequences.
- *
- *  NOTE:  The generic output of this program is extremely unfriendly
- *         to human readers---use the '-debug' option to see the
- *         same content with a little annotation.
+/* Diagonals.h - Alex Nord - 2016
  */
 #include <math.h>
 #include <stdio.h>

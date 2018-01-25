@@ -297,7 +297,7 @@ CalcGap
  TUPLE_SET * Tuple1,
  TUPLE_SET * Tuple2,
  int         starting,
- int         is_insert, // i.e., Tuple1 is actually a position back
+ int         unspliced,
  float       intron_gap_base,
  float       intron_gap_max,
  float       intron_gap_cont,
@@ -313,28 +313,34 @@ CalcGap
 
     // Are either of these tuples introns?
     if (Tuple1->MarksIntron || Tuple2->MarksIntron) {
-      
+
+      // Are we not really worried about splice site proximity penalizing, or...
       // Are BOTH introns?
-      if (Tuple1->MarksIntron && Tuple2->MarksIntron) {
+      if (unspliced || (Tuple1->MarksIntron && Tuple2->MarksIntron))
 	return basescore+gap_start;
-      }
       
       // Didn't think so.  Need to ID intron and calc. dist. for friendo.
-      // Note that 'INTRON_GAP_MAX' is the largest cost in the sense of "damage done"
-      // rather than lowest-value.
-      if (Tuple1->MarksIntron && !is_insert) {
+
+      // 1. We're working with an insertion ('*'-profile on x-aligned axis).
+      if (Tuple1->MarksIntron) {
 
 	if (Tuple2->NearestIntron > 10 && intron_gap_base > 0) 
 	  return basescore+intron_gap_max; // Avoiding overflow
-	return basescore+Max(intron_gap_max,intron_gap_base * pow(intron_gap_mult,Tuple2->NearestIntron-1));
+
+	return basescore+Max(intron_gap_max,intron_gap_base * pow(intron_gap_mult,Tuple2->NearestIntron));
 
       }
 
-      // Either Tuple2 is the intron or we're going the wrong way
-      if (Tuple2->MarksIntron && is_insert) {
+      // 2. We're working with a deletion ('*'-profile on y-aligned axis).
+      if (Tuple2->MarksIntron) {
+
 	if (Tuple1->NearestIntron > 10 && intron_gap_base > 0) 
 	  return basescore+intron_gap_max; // Avoiding overflow
-	return basescore+Max(intron_gap_max,(intron_gap_base*pow(intron_gap_mult,Tuple1->NearestIntron-1))-1);
+
+	return basescore+Max(intron_gap_max,intron_gap_base * pow(intron_gap_mult,Tuple1->NearestIntron));
+	
+	// NOTE:  The above line was originally this, for unclear reasons...:
+	//return basescore+Max(intron_gap_max,(intron_gap_base * pow(intron_gap_mult,Tuple1->NearestIntron-1))-1);
 
       }
 
@@ -421,8 +427,8 @@ NWTraceback
  int          TS1Length,
  TUPLE_SET ** TS2,
  int          TS2Length,
- int        * OptimalX,
- int        * OptimalY,
+ int          unspliced,
+ char       * StatePath,
  float        intron_gap_base,
  float        intron_gap_max,
  float        intron_gap_cont,
@@ -433,77 +439,70 @@ NWTraceback
 )
 {
   int i,j,k;
-  i = TS1Length;
-  j = TS2Length;
+
+  i = TS1Length-1;
+  j = TS2Length-1;
   k = 0;
-
   int state = 1;
-
-  while (i > 1 && j > 1) {
+  while (i && j) {
 
     if (state == 1) {
-      
-      if (Match[i-1][j-1] > Max(Insert[i-1][j-1],Delete[i-1][j-1])) {
-	state = 1;
-      } else if (Insert[i-1][j-1] > Delete[i-1][j-1]) {
-	state = 2;
+
+      StatePath[k++] = 'M';
+
+      if (Match[i-1][j-1] > Delete[i-1][j-1]) {
+	if (Match[i-1][j-1] > Insert[i-1][j-1]) state = 1;
+	else                                    state = 2;
       } else {
-	state = 3;
-      }      
+	if (Delete[i-1][j-1] > Insert[i-1][j-1]) state = 3;
+	else                                     state = 2;
+      }
+
       i--;
       j--;
 
     } else if (state == 2) {
-    
-      if (Insert[i][j] == CalcGap(Insert[i][j-1],TS1[i-1],TS2[j-2],0,1,
-				  intron_gap_base,intron_gap_max,intron_gap_cont,intron_gap_mult,
-				  gap_start,gap_continue,negative_inf)) {
-	state = 2;
-      } else {
-	state = 1;
-      }
-      j--;
       
-    } else {
+      StatePath[k++] = 'I';
 
-      if (Delete[i][j] == CalcGap(Delete[i-1][j],TS1[i-2],TS2[j-1],0,0,
+      if (Insert[i][j] == CalcGap(Match[i][j-1],TS1[i],TS2[j],1,unspliced,
 				  intron_gap_base,intron_gap_max,intron_gap_cont,intron_gap_mult,
 				  gap_start,gap_continue,negative_inf)) {
-	state = 3;
-      } else {
 	state = 1;
       }
-      i--;
+      
+      j--;
 
+    } else if (state == 3) {
+
+      StatePath[k++] = 'D';
+
+      if (Delete[i][j] == CalcGap(Match[i-1][j],TS1[i],TS2[j],1,unspliced,
+				  intron_gap_base,intron_gap_max,intron_gap_cont,intron_gap_mult,
+				  gap_start,gap_continue,negative_inf)) {
+	state = 1;
+      }
+
+      i--;
+      
     }
      
-    OptimalX[k] = i;
-    OptimalY[k] = j;
-    k++;
-
   }
   
-  while (i > 1) {
+  while (i) {
+    StatePath[k++] = 'D';
     i--;
-    OptimalX[k] = i;
-    OptimalY[k] = j;
-    k++;
   }
 
-  while (j > 1) {
+  while (j) {
+    StatePath[k++] = 'I';
     j--;
-    OptimalX[k] = i;
-    OptimalY[k] = j;
-    k++;
   }
 
-  // Because (1,1) has to be a match, we just build this in to our
+  // Because (0,0) has to be a match, we just build this in to our
   // MSA construction
-  if (OptimalX[k] != 1 || OptimalY[k] != 1) {
-    OptimalX[k] = 1;
-    OptimalY[k] = 1;
-    k++;
-  }
+  StatePath[k++] = 'M';
+
   /*
   printf("\n");
   for (i = k-1; i >= 0; i--) {
@@ -833,6 +832,7 @@ MSNeedlemanWunsch
  char      ** MSA2Names,
  int          MSA2Size,
  int          MSA2Length,
+ int          unspliced,
  float        intron_gap_base,
  float        intron_gap_max,
  float        intron_gap_cont,
@@ -846,116 +846,124 @@ MSNeedlemanWunsch
 {
   int i,j,k;
 
+  // DEBUGGING -- Just printing out the MSAs that were given as input
+  //           -- to confirm that everything looks right at this stage.
+  /*
+   *
+   *
+  printf("\n  MSA 1\n  -----\n");
+  for (i=0; i<MSA1Length; i++) {
+    printf("%d.\t",i);
+    for (j=0; j<MSA1Size; j++) {
+      printf("%c",MSA1[j][i]);
+    }
+    printf("\n");
+  }
+  printf("\n");
+  printf("\n  MSA 2\n  -----\n");
+  for (i=0; i<MSA2Length; i++) {
+    printf("%d.\t",i);
+    for (j=0; j<MSA2Size; j++) {
+      printf("%c",MSA2[j][i]);
+    }
+    printf("\n");
+  }
+  printf("\n");
+  return 1;
+  *
+  *
+  */
+  // DEBUGGING
+
   float ** Match;
-  if ((Match = malloc((MSA1Length+1)*sizeof(float *))) == NULL) {
+  if ((Match = malloc(MSA1Length*sizeof(float *))) == NULL) {
     printf("  ERROR:  Failed to initialize Match\n");
     return 1;
   }
-  for (i=0; i<=MSA1Length; i++) {
-    if ((Match[i] = malloc((MSA2Length+1)*sizeof(float))) == NULL) {
+  for (i=0; i<MSA1Length; i++) {
+    if ((Match[i] = malloc(MSA2Length*sizeof(float))) == NULL) {
       printf("  ERROR:  Failed to complete initialization of Match\n");
       return 1;
     }
   }
 
   float ** Insert;
-  if ((Insert = malloc((MSA1Length+1)*sizeof(float *))) == NULL) {
+  if ((Insert = malloc(MSA1Length*sizeof(float *))) == NULL) {
     printf("  ERROR:  Failed to initialize Insert\n");
     return 1;
   }
-  for (i=0; i<=MSA1Length; i++) {
-    if ((Insert[i] = malloc((MSA2Length+1)*sizeof(float))) == NULL) {
+  for (i=0; i<MSA1Length; i++) {
+    if ((Insert[i] = malloc(MSA2Length*sizeof(float))) == NULL) {
       printf("  ERROR:  Failed to complete initialization of Insert\n");
       return 1;
     }
   }
 
   float ** Delete;
-  if ((Delete = malloc((MSA1Length+1)*sizeof(float *))) == NULL) {
+  if ((Delete = malloc(MSA1Length*sizeof(float *))) == NULL) {
     printf("  ERROR:  Failed to initialize Delete\n");
     return 1;
   }
-  for (i=0; i<=MSA1Length; i++) {
-    if ((Delete[i] = malloc((MSA2Length+1)*sizeof(float))) == NULL) {
+  for (i=0; i<MSA1Length; i++) {
+    if ((Delete[i] = malloc(MSA2Length*sizeof(float))) == NULL) {
       printf("  ERROR:  Failed to complete initialization of Delete\n");
       return 1;
     }
   }
 
-  // Setting the corners
-  Match[0][0]  = 0.0;
-  Insert[0][0] = 0.0;
-  Delete[0][0] = 0.0;
+  // Setting the corner
+  Match[0][0]  = intron_to_intron;
+  Insert[0][0] = negative_inf;
+  Delete[0][0] = negative_inf;
+
+  // Setting the [1][0] position
   Match[1][0]  = negative_inf;
   Insert[1][0] = negative_inf;
   Delete[1][0] = gap_start;
+
+  // Setting the top row
+  for (i=2; i<MSA1Length; i++) {
+    Match[i][0]  = negative_inf;
+    Insert[i][0] = negative_inf;
+    Delete[i][0] = Delete[i-1][0] + gap_continue;
+  }
+
+  // Setting the [0][1] position
   Match[0][1]  = negative_inf;
   Insert[0][1] = gap_start;
   Delete[0][1] = negative_inf;
 
-  // Setting the margins
-  for (i=2; i<=MSA1Length; i++) {
-    Match[i][0]  = negative_inf;
-    Insert[i][0] = negative_inf;
-    Delete[i][0] = Delete[i-1][0]+gap_continue;
-  }
-  for (j=2; j<=MSA2Length; j++) {
+  // Setting the top row
+  for (j=2; j<MSA2Length; j++) {
     Match[0][j]  = negative_inf;
-    Insert[0][j] = Insert[0][j-1]+gap_continue;
+    Insert[0][j] = Insert[0][j-1] + gap_continue;
     Delete[0][j] = negative_inf;
-  }
-
-  // Last very special cases: (1,1), (2,1), and (1,2)
-  Match[1][1]  = intron_to_intron;
-  Insert[1][1] = negative_inf;
-  Insert[1][1] = negative_inf;
-
-  for (i=2; i<=MSA1Length; i++) {
-
-    if (TS1[i-1]->MarksIntron) Match[i][1] = intron_to_intron;
-    else                       Match[i][1] = negative_inf;
-    Insert[i][1] = Max(Match[i][0]+gap_start,Insert[i][0]+gap_continue);
-    Delete[i][1] = Max(Match[i-1][1]+gap_start,Delete[i-1][1]+gap_continue);
-
-  }
-
-  for (j=2; j<=MSA2Length; j++) {
-
-    if (TS2[j-1]->MarksIntron) Match[1][j] = intron_to_intron;
-    else                       Match[1][j] = negative_inf;
-    Delete[1][j] = Max(Match[0][j]+gap_start,Delete[0][j]+gap_continue);
-    Insert[1][j] = Max(Match[1][j-1]+gap_start,Insert[1][j-1]+gap_continue);
-
   }
 
   // The std. recurrence.  Note that because we're starting at 1,1 in the
   // dynamic programming table, everything that references the profiles 
   // (TS1,TS2) requires subtracting an additional 1.
-  for (i=2; i<=MSA1Length; i++) {
-    for (j=2; j<=MSA2Length; j++) {
+  for (i=1; i<MSA1Length; i++) {
+    for (j=1; j<MSA2Length; j++) {
 
       // Match State
       Match[i][j] = Max(Insert[i-1][j-1],Delete[i-1][j-1]);
       Match[i][j] = Max(Match[i][j],Match[i-1][j-1]);
-      Match[i][j] = CalcMatch(Match[i][j],TS1[i-1],TS2[j-1],intron_to_intron,negative_inf);
+      Match[i][j] = CalcMatch(Match[i][j],TS1[i],TS2[j],intron_to_intron,negative_inf);
       
-      // Note that we're worried about intron gaps in different ways when
-      // we're aligning to intron-containing MSAs and when we're aligning
-      // a raw sequence to an intron-containing MSA, so we need to check this.
-      // >> In brief, when we're 
-      // Insert State
-      Insert[i][j] = Max(CalcGap(Insert[i][j-1],TS1[i-1],TS2[j-2],0,1,
+      // Insert State -- VERTICAL
+      Insert[i][j] = Max(CalcGap(Insert[i][j-1],TS1[i],TS2[j],0,unspliced,
 				 intron_gap_base,intron_gap_max,intron_gap_cont,intron_gap_mult,
 				 gap_start,gap_continue,negative_inf),
-			 CalcGap(Match[i][j-1],TS1[i-1],TS2[j-2],1,1,
+			 CalcGap(Match[i][j-1],TS1[i],TS2[j],1,unspliced,
 				 intron_gap_base,intron_gap_max,intron_gap_cont,intron_gap_mult,
 				 gap_start,gap_continue,negative_inf));
-      
-      // Delete Stat
-      Delete[i][j] = Max(CalcGap(Delete[i-1][j],TS1[i-2],TS2[j-1],0,0,
+
+      // Delete State -- HORIZONTAL
+      Delete[i][j] = Max(CalcGap(Delete[i-1][j],TS1[i],TS2[j],0,unspliced,
 				 intron_gap_base,intron_gap_max,intron_gap_cont,intron_gap_mult,
 				 gap_start,gap_continue,negative_inf),
-			 CalcGap(Match[i-1][j],TS1[i-2],TS2[j-1],1,0,
+			 CalcGap(Match[i-1][j],TS1[i],TS2[j],1,unspliced,
 				 intron_gap_base,intron_gap_max,intron_gap_cont,intron_gap_mult,
 				 gap_start,gap_continue,negative_inf));
       
@@ -963,53 +971,71 @@ MSNeedlemanWunsch
 
   }
 
+
   /*
-   * Debugging - Not recommended for large tests :P
+   * DEBUGGING - Not recommended for large tests :P
+   *           - Prints out the final DP matrices that we arrived at
    *
+   * ACTIVATES WITH A '/': *
   printf("\nMATCH:\n");
-  for (j=0; j<=MSA2Length; j++) {
-    for (i=0; i<=MSA1Length; i++) {
+  for (j=0; j<MSA2Length; j++) {
+    for (i=0; i<MSA1Length; i++) {
       printf("%.0f\t",Match[i][j]);
     }
     printf("\n");
   }
   printf("\n\n");
   printf("\nDELETE:\n");
-  for (j=0; j<=MSA2Length; j++) {
-    for (i=0; i<=MSA1Length; i++) {
+  for (j=0; j<MSA2Length; j++) {
+    for (i=0; i<MSA1Length; i++) {
       printf("%.0f\t",Delete[i][j]);
     }
     printf("\n");
   }
   printf("\n\n");
   printf("\nINSERT:\n");
-  for (j=0; j<=MSA2Length; j++) {
-    for (i=0; i<=MSA1Length; i++) {
+  for (j=0; j<MSA2Length; j++) {
+    for (i=0; i<MSA1Length; i++) {
       printf("%.0f\t",Insert[i][j]);
     }
     printf("\n");
   }
   printf("\n\n");
-  */
+  //
+  * <- ADD A '/' IF THIS ISN'T COMMENTED OUT */
+  // END OF DEBUGGING 2
 
-  // Prep the arrays that will store the coordinates resulting from traceback
-  int * OptimalX;
-  int * OptimalY;
-  if ((OptimalX = malloc((MSA1Length+MSA2Length)*sizeof(int))) == NULL) {
-    printf("  ERROR:  Failed to allocate 'OptimalX'\n");
+  char * StatePath;
+  if ((StatePath = malloc((MSA1Length+MSA2Length)*sizeof(char))) == NULL) {
+    printf("  ERROR:  Failed to allocate 'StatePath'\n");
     return 1;
   }
-  if ((OptimalY = malloc((MSA1Length+MSA2Length)*sizeof(int))) == NULL) {
-    printf("  ERROR:  Failed to allocate 'OptimalY'\n");
-    return 1;
-  }
+  int OutputSeqLength = NWTraceback(Match,Insert,Delete,TS1,MSA1Length,TS2,MSA2Length,unspliced,
+				    StatePath,intron_gap_base,intron_gap_max,intron_gap_cont,
+				    intron_gap_mult,gap_start,gap_continue,negative_inf);
 
   
-  int OutputSeqLength;
-  OutputSeqLength = NWTraceback(Match,Insert,Delete,TS1,MSA1Length,
-				TS2,MSA2Length,OptimalX,OptimalY,
-				intron_gap_base,intron_gap_max,intron_gap_cont,intron_gap_mult,
-				gap_start,gap_continue,negative_inf);
+  /*
+   * DEBUGGING 3 - Should be with combined with above checking machinery
+   *             - Prints out the final state path coordinates (legacy format)
+   *
+   * ACTIVATES WITH A '/': *
+  i=0;
+  j=0;
+  printf("ALIGNMENT_LENGTH: %d\n",OutputSeqLength);
+  for (k=OutputSeqLength-1; k>=0; k--) {
+    printf("(%d,%d)\n",i,j);
+    if (StatePath[k] == 'M' || StatePath[k] == 'D') {
+      i++;
+      if (StatePath[k] == 'M') {
+	j++;
+      }
+    } else {
+      j++;
+    }
+  }
+  * <- ADD A '/' IF THIS ISN'T COMMENTED OUT */
+  // END OF DEBUGGING 3
 
 
   char ** FinalMSA;
@@ -1025,61 +1051,47 @@ MSNeedlemanWunsch
   }
 
   
-  // Prepare to generate the final MSA
-  for (k=0; k<MSA1Size; k++) {
-    
-    i = 0;
-    j = MSA1Length-1;
-    while (i < OutputSeqLength-1 && j > 0) {
+  int msa1_rip_pos = MSA1Length-1;
+  int msa2_rip_pos = MSA2Length-1;
+  j = OutputSeqLength;
+  for (k=0; k<OutputSeqLength; k++) {
 
-      if (i && OptimalX[i] == OptimalX[i-1]) {
-	FinalMSA[k][(OutputSeqLength-1)-i] = '-';
-      } else {
-	FinalMSA[k][(OutputSeqLength-1)-i] = MSA1[k][j];
-	j--;
-      }
-      i++;
+    j--;
+    if (StatePath[k] == 'M' || StatePath[k] == 'D') {
       
-    }
+      for (i=0; i<MSA1Size; i++) 
+	FinalMSA[i][j] = MSA1[i][msa1_rip_pos];
+      msa1_rip_pos--;
 
-    while (i < OutputSeqLength-1) {
-      FinalMSA[k][(OutputSeqLength-1)-i] = '-';
-      i++;
+      if (StatePath[k] == 'M') { // SWAGGADELIC MATCH-EROONI!
+
+	for (i=0; i<MSA2Size; i++) 
+	  FinalMSA[MSA1Size+i][j] = MSA2[i][msa2_rip_pos];
+	msa2_rip_pos--;
+	
+      } else { // DELETION-VILLE!
+
+	for (i=0; i<MSA2Size; i++) 
+	  FinalMSA[MSA1Size+i][j] = '-';
+
+      }
+
+    } else { // STRAIGHT-UP INSERTION, NO FRILLS AND NO GOOFS ABOUT IT!
+
+      for (i=0; i<MSA1Size; i++) 
+	FinalMSA[i][j] = '-';
+
+	for (i=0; i<MSA2Size; i++) 
+	  FinalMSA[MSA1Size+i][j] = MSA2[i][msa2_rip_pos];
+	msa2_rip_pos--;
+	
     }
-    FinalMSA[k][0] = '*';
 
   }
 
-  
-  // Prepare for the final MSA (part 2)
-  for (k=MSA1Size; k<MSA1Size+MSA2Size; k++) {
-    
-    i = 0;
-    j = MSA2Length-1;
-    while (i < OutputSeqLength-1 && j > 0) {
-      
-      if (i && OptimalY[i] == OptimalY[i-1]) {
-	FinalMSA[k][(OutputSeqLength-1)-i] = '-';
-      } else {
-	FinalMSA[k][(OutputSeqLength-1)-i] = MSA2[k-MSA1Size][j];
-	j--;
-      }
-      i++;
-      
-    }
-    
-    while (i < OutputSeqLength-1) {
-      FinalMSA[k][(OutputSeqLength-1)-i] = '-';
-      i++;
-    }
-    FinalMSA[k][0] = '*';
 
-  }
-
-  // Nothing more to see here, folks
-  free(OptimalX);
-  free(OptimalY);
-  for (i=0; i<=MSA1Length; i++) {
+  free(StatePath);
+  for (i=0; i<MSA1Length; i++) {
     free(Match[i]);
     free(Insert[i]);
     free(Delete[i]);
@@ -1090,7 +1102,7 @@ MSNeedlemanWunsch
 
   
   // We run a quick adjustment around the intronic regions
-  OutputSeqLength = IntronAdjustment(FinalMSA,MSA1Size+MSA2Size,OutputSeqLength);
+  //OutputSeqLength = IntronAdjustment(FinalMSA,MSA1Size+MSA2Size,OutputSeqLength);
 
   // Print out the final MSA!
   for (k=0; k<MSA1Size; k++) {
@@ -1247,7 +1259,7 @@ int main (int argc, char ** argv)
   
   // A string used to rip lines out of the FASTA file.
   char * next_line;
-  if ((next_line = malloc(128*sizeof(char))) == NULL) {
+  if ((next_line = malloc(256*sizeof(char))) == NULL) {
     printf("  ERROR:  Could not allocate string 'next_read'...?\n");
     return 1;
   }
@@ -1309,13 +1321,20 @@ int main (int argc, char ** argv)
     }
   }
 
+  // If (1.) MSA1 only has 1 sequence and it needs splice markers
+  // or (2.) MSA2 only has 1 sequence and it needs splice markers
+  // then this will be flagged and we'll adjust splice scoring.
+  int unspliced = 0;
 
   // It's possible that a sequence might be passed in without any splice
   // site markers, which would cause problems during traceback, so we just
   // do a quick check
   int needs_splices = 0;
   if (FirstSeq[0] != '*' && FirstSeq[0] != '-') {
-    
+
+    if (MSA1Size == 1) 
+      unspliced = 1;
+
     // First off, do we have the room to add the flanking splice site characters?
     if (MSA1Length+2 >= capacity) {
       if (tempSeq != NULL) {
@@ -1351,6 +1370,8 @@ int main (int argc, char ** argv)
     needs_splices = 1;
 
   }
+  if (tempSeq) free(tempSeq);
+  tempSeq = NULL;
 
 
   // Now we know the length of the first batch of seqs, so our job becomes a bit easier
@@ -1374,7 +1395,7 @@ int main (int argc, char ** argv)
 
   // Hold onto the string containing the sequence name
   char * nameholder;
-  if ((nameholder = malloc(128*sizeof(char))) == NULL) {
+  if ((nameholder = malloc(256*sizeof(char))) == NULL) {
     printf("  ERROR:  Failed to allocate string 'nameholder'\n");
     return 1;
   }
@@ -1384,7 +1405,7 @@ int main (int argc, char ** argv)
   int pos;
   for (k=1; k<MSA1Size; k++) {
   
-    // Read in the name of the next sequence    
+    // Read in the name of the next sequence 
     if (next_line[0] != '>') {
       fscanf(MSA1File,"%s",nameholder);
       while (nameholder[0] != '>') { 
@@ -1441,15 +1462,33 @@ int main (int argc, char ** argv)
 
   }
   fclose(MSA1File);
-  
-  // Prep for the second MSA
-  int MSA2Length= 0;
 
-  // Open up the DNA/RNA string
+  
+  /*
+   *  NORD -- DEBUGGING
+   *
+  for (i=0; i<MSA1Size; i++) {
+    printf(">%d\n",i);
+    for (j=0; j<MSA1Length; j++) {
+      printf("%c",MSA1[i][j]);
+      if ((j+1)%60 == 0) 
+	printf("\n");
+    }
+    printf("\n");
+    if (pos % 60)
+      printf("\n");
+  }
+  return 1;
+  * */
+
+  // Prep for the second MSA
+  int MSA2Length = 0;
+
+  // Open up the second MSA file
   FILE * MSA2File;
   MSA2File = fopen(argv[3],"r");
   if (MSA2File == NULL) {
-    printf("  ERROR:  Could not open file '%s'\n",argv[2]);
+    printf("  ERROR:  Could not open file '%s'\n",argv[3]);
     fclose(MSA2File);
     return 1;
   }
@@ -1465,8 +1504,8 @@ int main (int argc, char ** argv)
   for (i=0; i<capacity; i++)
     FirstSeq[i] = 0;
   
-  // Rip that DNA file!
-  while (!feof(MSA2File)) {    
+  // Rip that file!
+  while (!feof(MSA2File)) { 
     fscanf(MSA2File,"%s",next_line);
     if (next_line[0] == '>') break;
     i = 0;
@@ -1499,13 +1538,15 @@ int main (int argc, char ** argv)
       }
     }
   }
-  if (tempSeq) free(tempSeq);
 
 
   // It's possible that this sequence might be passed in without splice sites, too
   needs_splices = 0;
   if (FirstSeq[0] != '*' && FirstSeq[0] != '-') {
     
+    if (MSA2Size == 1) 
+      unspliced = 1;
+
     // First off, do we have the room to add the flanking splice site characters?
     if (MSA2Length+2 >= capacity) {
       if (tempSeq != NULL) {
@@ -1541,7 +1582,9 @@ int main (int argc, char ** argv)
     needs_splices = 1;
 
   }
+  if (tempSeq) free(tempSeq);
 
+  
   // Now we know the length of the second batch of seqs, so etc.
   char ** MSA2;
   if ((MSA2 = malloc(MSA2Size*sizeof(char *))) == NULL) {
@@ -1554,6 +1597,7 @@ int main (int argc, char ** argv)
       return 1;
     }
   }
+
 
   // Copying over the first sequence in the MSA and freeing FirstSeq
   for (i=0; i<MSA2Length; i++)
@@ -1652,7 +1696,7 @@ int main (int argc, char ** argv)
   }
 
   // Scan along, marking proximity to nearest intron
-  for (j=1; j<MSA1Length; j++) {
+  for (j=1; j<MSA1Length-1; j++) {
     if (TS1[j]->MarksIntron) continue;
     TS1[j]->NearestIntron = TS1[j-1]->NearestIntron+1;
   }
@@ -1674,7 +1718,7 @@ int main (int argc, char ** argv)
   }
 
   // Scan along, marking proximity to nearest intron
-  for (j=1; j<MSA2Length; j++) {
+  for (j=1; j<MSA2Length-1; j++) {
     if (TS2[j]->MarksIntron) continue;
     TS2[j]->NearestIntron = TS2[j-1]->NearestIntron+1;
   }
@@ -1683,12 +1727,14 @@ int main (int argc, char ** argv)
     TS2[j]->NearestIntron = Min(TS2[j]->NearestIntron,TS2[j+1]->NearestIntron+1);
   }
 
+
   // You have outlived your utility, tuple_base.  Prepare to die.
   free(tuple_base);
 
+
   // Get to work!
   i = MSNeedlemanWunsch(TS1,MSA1,MSA1Names,MSA1Size,MSA1Length,
-                        TS2,MSA2,MSA2Names,MSA2Size,MSA2Length,
+                        TS2,MSA2,MSA2Names,MSA2Size,MSA2Length,unspliced,
 			intron_gap_base,intron_gap_max,intron_gap_cont,intron_gap_mult,
 			gap_start,gap_continue,intron_to_intron,negative_inf
 			,debug);
@@ -1710,8 +1756,8 @@ int main (int argc, char ** argv)
   for (i=0; i<MSA2Size; i++)
     free(MSA2[i]);
   free(MSA2);
-  
 
+  
   // No problem / 2ez / gg
   return 0;
 

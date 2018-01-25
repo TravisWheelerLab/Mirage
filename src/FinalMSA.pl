@@ -13,7 +13,7 @@ use POSIX;
 sub MAX;
 sub MIN;
 sub RemoveIntronGaps;
-sub CleanMSA; # This is going to be ripped almost directly from MultiMSA...
+sub PostHocCleanup;
 
 
 
@@ -76,17 +76,21 @@ while (!eof($inf)) {
 }
 close($inf);
 
-# Do any cleanup that we need to do.
-#
-# NO CLEANING ALLOWED
-#
-#my ($cleanMSAref,$clean_len) = CleanMSA(\@BigMSA,$numSeqs,$MSALength);
-#@BigMSA    = @{$cleanMSAref};
-#$MSALength = $clean_len;
 
-# Remove intron gaps from the MSA, correcting any ugly shifts
+# Remove intron gaps from the MSA
+#
 my ($MSAref,$FinalLength) = RemoveIntronGaps(\@BigMSA,$MSALength,$numSeqs);
 my @FinalMSA = @{$MSAref};
+
+
+# Our post-hoc cleanup -- correcting 'jigsaw' ugliness and other
+# obvious imperfections.
+#
+if ($numSeqs > 1) {
+    my ($cleanedMSA,$cleanLength) = PostHocCleanup(\@FinalMSA,$FinalLength,$numSeqs);
+    @FinalMSA = @{$cleanedMSA};
+    $FinalLength = $cleanLength;
+}
 
 
 # Print out our final MSA
@@ -107,6 +111,16 @@ close($outf);
 # Yeah! Yeah! Yeah! Yeah!
 # What a rush!  Let's go again!
 1;
+
+
+
+
+#######################
+#                     #
+#    END OF SCRIPT    #
+#                     #
+#######################
+
 
 
 
@@ -194,423 +208,242 @@ sub RemoveIntronGaps
 
 
 
-
-
-
-
-################################################################
+########################################################################
 #
-# FUNCTION: CleanMSA <-- Ripped directly from MultiMSA
+# Function: PostHocCleanup
 #
-sub CleanMSA
+sub PostHocCleanup
 {
 
-    # The MSA that we're interested in cleaning up
-    #
-    my $InputMSAref = shift;
-    my @InputMSA = @{$InputMSAref};
-
-    # The dimensions of the MSA
-    #
+    my $msa_ref  = shift;
+    my $msa_len  = shift;
     my $num_seqs = shift;
-    my $input_len = shift;
 
+    my @MSA = @{$msa_ref};
 
-
-    ################
-    #              #
-    #   PART ONE   #
-    #              #
-    ################
-
-
+    my %PositionCharProfile;
+    
+    #
+    # What we're doing is scanning through the MSA looking for
+    # gap starts and checking
+    #
+    #   [1.] if fewer than half of the sequences are being represented
+    #
+    #   [2.] a strongly matching (<2 mismatches) subsequence exists in one
+    #        of the other sequences at that sequence's last gap start or
+    #        current gap end.
+    #
+    #   [3.] confirming that we have a gap to that strongly matching
+    #        subsequence.
+    #
 
     #
-    # The aim of the first part of the cleanup is to locate
-    # any segments in the alignment where we have mismatched
-    # sequence.  This is done in a forward left-shifting pass
-    # and a reverse right-shifting pass.
+    #  FORWARD Pass
     #
+    my @LastNonGap;
+    for (my $i=0; $i<$num_seqs; $i++) { $LastNonGap[$i] = -1; }
+    for (my $pos=0; $pos<$msa_len-1; $pos++) {
 
+	my @EndingGap;
+	for (my $seq_id = 0; $seq_id < $num_seqs; $seq_id++) {
 
-    # First, the forward pass.  We certainly can't shift anyone
-    # in column 0 leftwards.
-    #
-    for ($j=1; $j<$input_len; $j++) {
+	    if ($MSA[$seq_id][$pos] eq '-') {
 
+		if ($pos < $msa_len-1 && $MSA[$seq_id][$pos+1] =~ /[A-Za-z]/) {
 
-	# We don't fool around with splice sites.  Similarly, we
-	# can't do a left shift if the last position was a splice
-	# site...
-	#
-	next if ($InputMSA[0][$j] eq '*' || $InputMSA[0][$j-1] eq '*');
+		    push(@EndingGap,$seq_id);
+		    
+		    my $hash_key = ($pos+1).uc($MSA[$seq_id][$pos+1]);
+		    if ($PositionCharProfile{$hash_key}) { $PositionCharProfile{$hash_key}++; }
+		    else                                 { $PositionCharProfile{$hash_key}=1; }
 
+		}
 
-	# Is there a consensus character?  Is there disagreement?
-	#
-	my $sample_char  = 0;
-	my $disagreement = 0;
-	my @OpenLeft;
-	my @ClosedLeft;
-	my %ValidChars;
-	for ($i=0; $i<$num_seqs; $i++) {
-
-	    # Are we open to the idea of a leftwards shift?
-	    #
-	    if ($InputMSA[$i][$j-1] eq '-') {
-		push(@OpenLeft,$i);
 	    } else {
-		push(@ClosedLeft,$i);
-		$ValidChars{uc($InputMSA[$i][$j-1])} = 1;
-	    }
 
-	    # Don't distract me with your dumb old gaps!
-	    #
-	    next if ($InputMSA[$i][$j] eq '-');
+		my $hash_key = $pos.uc($MSA[$seq_id][$pos]);
+		if ($PositionCharProfile{$hash_key}) { $PositionCharProfile{$hash_key}++; }
+		else                                 { $PositionCharProfile{$hash_key}=1; }
 
-	    # Normalize to upper case
-	    #
-	    my $this_char = uc($InputMSA[$i][$j]);
-
-	    # Is this the first non-gap we've seen?
-	    #
-	    if (!$sample_char) {
-		$sample_char = $this_char;
-
-	    } elsif ($this_char ne $sample_char) { # COULD IT BE?!
-		$disagreement = 1;
+		$LastNonGap[$seq_id] = $pos;
 
 	    }
-
 	}
 
-	# Did we find any disagreements within this column?  Is fun on the table?
+	# Did fewer than half of the sequences see the end of a gapped region?
 	#
-	if ($disagreement && scalar(@OpenLeft)) { # Here comes the fun!
+        if (@EndingGap && scalar(@EndingGap) <= int($num_seqs/2)) {
 
-	    # For each character next to a gap, if we have a match scoot on over!
+	    # Before we consider individual amino acid movements, we'll check whether
+	    # this is a "jigsaw" region by checking if [1.] everyone is the same
+	    # amino acid and [2.] the same character is what we see at the first gap
+	    # index.
 	    #
-	    foreach $k (@OpenLeft) {
+	    my $ref_char   = uc($MSA[$EndingGap[0]][$pos+1]);
+	    my $ref_pos    = $LastNonGap[$EndingGap[0]]+1;
+	    my $jigsawable = 1;
+	    my $all_gap    = 1;
+	    for (my $gap_seq_index = 1; $gap_seq_index < scalar(@EndingGap); $gap_seq_index++) {
+		my $seq_id = $EndingGap[$gap_seq_index];
+		if (uc($MSA[$seq_id][$pos+1]) ne $ref_char) {
+		    $jigsawable = 0;
+		    last;
+		} elsif ($ref_pos != $LastNonGap[$seq_id]+1) {
+		    $all_gap = 0;
+		    last;
+		}
+	    }
 
-		my $this_char = uc($InputMSA[$k][$j]);
+	    
+	    # One last check before the full jigsaw transfer -- are we in agreement that the
+	    # reference position suggests this character?
+	    #
+	    if ($jigsawable && $all_gap && $PositionCharProfile{$ref_pos.$ref_char}
+		&& $PositionCharProfile{$ref_pos.$ref_char} >= scalar(@EndingGap)) {
+		
+		foreach my $seq_id (@EndingGap) {
 
-		next if ($this_char eq '-');
+		    $MSA[$seq_id][$ref_pos] = $MSA[$seq_id][$pos+1];
+		    $MSA[$seq_id][$pos+1]   = '-';
 
-		# Shift left!
-		#
-		if ($ValidChars{$this_char}) {
-		    $InputMSA[$k][$j-1] = $InputMSA[$k][$j];
-		    $InputMSA[$k][$j]   = '-';
+		    $LastNonGap[$seq_id] = $ref_pos;
+
+		    $PositionCharProfile{$ref_pos.$ref_char}++;
+		    $PositionCharProfile{($pos+1).$ref_char}--;
+
 		}
 
-	    }
-
-	}
-
-    }
-
-
-    # Second, the reverse pass.  We certainly can't shift anyone
-    # in column input_len-1 rightwards.
-    #
-    for ($j=$input_len-2; $j>=0; $j--) {
-
-
-	# We don't fool around with splice sites.  Similarly, we
-	# can't do a left shift if the last position was a splice
-	# site...
-	#
-	next if ($InputMSA[0][$j] eq '*' || $InputMSA[0][$j+1] eq '*');
-
-
-	# Is there a consensus character?  Is there disagreement?
-	#
-	my $sample_char  = 0;
-	my $disagreement = 0;
-	my @OpenRight;
-	my @ClosedRight;
-	my %ValidChars;
-	for ($i=0; $i<$num_seqs; $i++) {
-
-	    # Are we open to the idea of a rightwards shift?
-	    #
-	    if ($InputMSA[$i][$j+1] eq '-') {
-		push(@OpenRight,$i);
 	    } else {
-		push(@ClosedRight,$i);
-		$ValidChars{uc($InputMSA[$i][$j-1])} = 1;
-	    }
 
-	    # Don't distract me with your dumb old gaps!
-	    #
-	    next if ($InputMSA[$i][$j] eq '-');
 
-	    # Normalize to upper case
-	    #
-	    my $this_char = uc($InputMSA[$i][$j]);
-
-	    # Is this the first non-gap we've seen?
-	    #
-	    if (!$sample_char) {
-		$sample_char = $this_char;
-
-	    } elsif ($this_char ne $sample_char) { # COULD IT BE?!
-		$disagreement = 1;
-
-	    }
-
-	}
-
-	# Did we find any disagreements within this column?  Is fun on the table?
-	#
-	if ($disagreement && scalar(@OpenRight)) { # Here comes the fun!
-
-	    # For each character next to a gap, if we have a match scoot on over!
-	    #
-	    foreach $k (@OpenRight) {
-
-		my $this_char = uc($InputMSA[$k][$j]);
-
-		next if ($this_char eq '-');
-
-		# Shift right!
-		#
-		if ($ValidChars{$this_char}) {
-		    $InputMSA[$k][$j+1] = $InputMSA[$k][$j];
-		    $InputMSA[$k][$j]   = '-';
-		}
-
-	    }
-
-	}
-
-    }
-
-
-    # Because we might have introduced some all-gap columns during this
-    # first cleanup pass, we need to do some basic cleanup work.  This
-    # will involve knowing where splice locations are.
-    #
-    my @FinalMSA;
-    my @SpliceSites;
-    my $final_len = 0;
-    for ($j=0; $j<$input_len; $j++) {
-
-	# If this is a splice-site column we'll want to know.  This also
-	# allows us to skip the other checking work...
-	#
-	if ($InputMSA[0][$j] eq '*') {
-
-	    # Record that we saw a splice site
-	    #
-	    push(@SpliceSites,$final_len);
-
-	    # Give everyone an asterisk!
-	    #
-	    for ($i=0; $i<$num_seqs; $i++) { $FinalMSA[$i][$final_len] = '*'; }
-
-	    # Definitely don't want to overwrite this friend!
-	    #
-	    $final_len++;
-
-	} else {
-
-	    # Copy over to the FinalMSA.  If it's an all-gap column, we'll
-	    # just overwrite it.
-	    #
-	    my $non_gap_observed = 0;
-	    for ($i=0; $i<$num_seqs; $i++) {
-		$FinalMSA[$i][$final_len] = $InputMSA[$i][$j];
-		$non_gap_observed = 1 if ($InputMSA[$i][$j] ne '-');
-	    }
-	    $final_len++ if ($non_gap_observed);
-
-	}
-
-    }
-
-
-    # Copy the 'Final' MSA back over to InputMSA.
-    #
-    @InputMSA  = @FinalMSA;
-    $input_len = $final_len;
-
-
-    # Reset the 'Final' MSA.
-    #
-    @FinalMSA  = ();
-    $final_len = 0;
-
-
-
-
-    ################
-    #              #
-    #   PART TWO   #
-    #              #
-    ################
-
-
-    #
-    #  The aim of the second part of the cleanup is to look
-    #  for any 'jigsaw' regions of the MSA, where weird gapping
-    #  around a splice site may have caused issues.
-    #
-
-
-    # First, check around each of the splice sites to see
-    # if there are any places where it makes sense to flip
-    # some peptides around
-    #
-    for ($k=0; $k<@SpliceSites; $k++) {
-
-
-	my $site_pos = $SpliceSites[$k];
-
-
-	# If we need to be careful about edges, adjust how far out
-	# we're allowed to go.  By default we only allow flips up
-	# to 9 amino acids
-	#
-	my $ext_dist = 9;
-	if ($site_pos < $ext_dist) {
-	    $ext_dist = $site_pos-1;
-	}
-	if ($site_pos + $ext_dist > $input_len) {
-	    $ext_dist = $input_len-($site_pos+1);
-	}
-
-
-	# This shouldn't happen, but just in case...
-	#
-	next if ($ext_dist <= 0);
-
-
-	# Check those gaps
-	#
-	my @GapDirs = ();
-	my @GapStrs = ();
-	for ($i=0; $i<$num_seqs; $i++) {
-
-
-	    # If there's a gap on only one side, how far can
-	    # we go before we hit the sequence on that side?
-	    # We don't consider flips larger than 9 amino acids.
-	    #
-	    my $gap_dir = 0;
-	    my $gap_str = '';
-
-
-	    # 1. Gap on the left, string on the right
-	    #
-	    if ($InputMSA[$i][$site_pos-1] =~ /\-/ && $InputMSA[$i][$site_pos+1] =~ /\w/) {
-
-		$gap_dir = -1;
-
-		$j=1;
-		while ($j<$ext_dist && $InputMSA[$i][$site_pos-$j] =~ /\-/ && $InputMSA[$i][$site_pos+$j] =~ /\w/) {
-		    last if ($InputMSA[$i][$site_pos+$j] eq '*');
-		    $gap_str = $gap_str.$InputMSA[$i][$site_pos+$j];
-		    $gap_dir--;
-		    $j++;
-		}
-
-		# TOO LONG!
-		if ($j == $ext_dist) { $gap_dir = 0; }
-
-	    }
-	    #
-	    # 2. Gap on the right, string on the left
-	    #
-	    elsif ($InputMSA[$i][$site_pos-1] =~ /\w/ && $InputMSA[$i][$site_pos+1] =~ /\-/) {
-
-		$gap_dir = 1;
-
-		$j=1;
-		while ($j<$ext_dist && $InputMSA[$i][$site_pos-$j] =~ /\w/ && $InputMSA[$i][$site_pos+$j] =~ /\-/) {
-		    last if ($InputMSA[$i][$site_pos-$j] eq '*');
-		    $gap_str = $gap_str.$InputMSA[$i][$site_pos-$j];
-		    $gap_dir++;
-		    $j++;
-		}
-
-		# TOO LONG!
-		if ($j == $ext_dist) { $gap_dir = 0; }
-
-	    }
-
-
-	    # Regardless of what we saw, add it to the list
-	    #
-	    push(@GapDirs,$gap_dir);
-	    push(@GapStrs,$gap_str);
-
-	}
-
-	# Run through our hits, figuring out who we can swap around
-	#
-	for ($i=0; $i<$num_seqs; $i++) {
-
-	    next if ($GapDirs[$i] == 0);
-
-	    my @Flippers  = ();
-	    my $left_rep  = 0;
-	    my $right_rep = 0;
-
-	    if ($GapDirs[$i] < 0) { $right_rep = 1; }
-	    else                  { $left_rep  = 1; }
-
-	    for ($j=$i+1; $j<$num_seqs; $j++) {
-
-		# If we have a matching sequence, add it to the flippers
-		#
-		if ($GapDirs[$j] && $GapStrs[$j] eq $GapStrs[$i]) {
-
-		    push(@Flippers,$j);
-
-		    # Repping a new side?
-		    #
-		    if ($GapDirs[$i] < 0) { $right_rep = 1; }
-		    else                  { $left_rep  = 1; }
-
-		}
-
-	    }
-
-	    # First off, any matches at all?
-	    #
-	    if (@Flippers) {
-
-		# Cool!  Now we can go through and scoot anybody
-		# on the right side over to the left (arbitrary
-		# directional choice), assuming both sides are
-		# represented.
-		#
-		if ($left_rep && $right_rep) {
-
-		    # The actual string (as a char array)
-		    #
-		    my @FlipStr = split('',$GapStrs[$i]);
-
-		    # Make it be so!
-		    #
-		    for ($j=0; $j<@Flippers; $j++) {
-			if ($GapDirs[$Flippers[$j]] < 0) {
-			    my $seq        = $Flippers[$j];
-			    my $char_start = $site_pos-@FlipStr;
-			    my $gap_start  = $site_pos+1;
-			    for (my $pos=0; $pos<@FlipStr; $pos++) {
-				$InputMSA[$seq][$char_start+$pos] = $FlipStr[$pos];
-				$InputMSA[$seq][$gap_start +$pos] = '-';
-			    }
-			}
+		# For each sequence that saw the end of a gap, check if the upcoming
+		# character matches the "character profile" of anything at the first
+		# position of the gap.
+		my @DelayedRemovalKeys;
+		foreach my $seq_id (@EndingGap) {
+		    
+		    my $upcoming_char = $MSA[$seq_id][$pos+1];
+		    my $first_gap_pos = $LastNonGap[$seq_id]+1;
+		    my $new_hash_key  = $first_gap_pos.uc($upcoming_char);
+		    my $old_hash_key  = ($pos+1).uc($upcoming_char);
+		    if ($first_gap_pos && $PositionCharProfile{$new_hash_key}
+			&& $PositionCharProfile{$new_hash_key} > $PositionCharProfile{$old_hash_key}) {
+			
+			$MSA[$seq_id][$pos+1] = '-';
+			$MSA[$seq_id][$first_gap_pos] = $upcoming_char;
+			
+			$LastNonGap[$seq_id]++;
+			
+			$PositionCharProfile{$new_hash_key}++;
+			$PositionCharProfile{$old_hash_key}--;
+			
+		    } else {
+			
+			push(@DelayedRemovalKeys,$old_hash_key);
+			
 		    }
+		    
+		}
+		
+		foreach my $key (@DelayedRemovalKeys) { $PositionCharProfile{$key}--; }
+		
+	    }
+
+	}
+    }
+
+
+    #
+    #  BACKWARD Pass
+    #
+    for (my $i=0; $i<$num_seqs; $i++) { $LastNonGap[$i] = -1; }
+    for (my $pos=$msa_len-1; $pos>0; $pos--) {
+
+	my @StartingGap;
+	for (my $seq_id = 0; $seq_id < $num_seqs; $seq_id++) {
+
+	    if ($MSA[$seq_id][$pos] eq '-') {
+
+		if ($MSA[$seq_id][$pos-1] =~ /[A-Za-z]/) {
+		    push(@StartingGap,$seq_id);
+		}
+
+	    } else {
+
+		$LastNonGap[$seq_id] = $pos;
+
+	    }
+	}
+
+	# Did fewer than half of the sequences see the end of a gapped region?
+	#
+        if (@StartingGap && scalar(@StartingGap) <= int($num_seqs/2)) {
+
+	    # Before we consider individual amino acid movements, we'll check whether
+	    # this is a "jigsaw" region by checking if [1.] everyone is the same
+	    # amino acid and [2.] the same character is what we see at the first gap
+	    # index.
+	    #
+	    my $ref_char   = uc($MSA[$StartingGap[0]][$pos-1]);
+	    my $ref_pos    = $LastNonGap[$StartingGap[0]]-1;
+	    my $jigsawable = 1;
+	    my $all_gap    = 1;
+	    for (my $gap_seq_index = 1; $gap_seq_index < scalar(@StartingGap); $gap_seq_index++) {
+		my $seq_id = $StartingGap[$gap_seq_index];
+		if (uc($MSA[$seq_id][$pos-1]) ne $ref_char) {
+		    $jigsawable = 0;
+		    last;
+		} elsif ($ref_pos ne $LastNonGap[$seq_id]-1) {
+		    $all_gap = 0;
+		    last;
+		}
+	    }
+
+	    
+	    # One last check before the full jigsaw transfer -- are we in agreement that the
+	    # reference position suggests this character?
+	    #
+	    if ($jigsawable && $all_gap && $PositionCharProfile{$ref_pos.$ref_char}
+		&& $PositionCharProfile{$ref_pos.$ref_char} >= scalar(@StartingGap)) {
+		
+		foreach my $seq_id (@StartingGap) {
+
+		    $MSA[$seq_id][$ref_pos] = $MSA[$seq_id][$pos-1];
+		    $MSA[$seq_id][$pos-1]   = '-';
+
+		    $LastNonGap[$seq_id] = $ref_pos;
+
+		    $PositionCharProfile{$ref_pos.$ref_char}++;
+		    $PositionCharProfile{($pos-1).$ref_char}--;
 
 		}
 
-		# These seqs should now be off-limits for flipping
-		#
-		for ($j=0; $j<@Flippers; $j++) { $GapDirs[$Flippers[$j]] = 0; }
+	    } else {
+
+		
+		# For each sequence that saw the end of a gap, check if the upcoming
+		# character matches the "character profile" of anything at the first
+		# position of the gap.
+		foreach my $seq_id (@StartingGap) {
+		    
+		    my $upcoming_char = $MSA[$seq_id][$pos-1];
+		    my $first_gap_pos = $LastNonGap[$seq_id]-1;
+		    my $new_hash_key  = $first_gap_pos.uc($upcoming_char);
+		    my $old_hash_key  = ($pos-1).uc($upcoming_char);
+		    if ($first_gap_pos && $PositionCharProfile{$new_hash_key}
+			&& $PositionCharProfile{$new_hash_key} > $PositionCharProfile{$old_hash_key}) {
+			
+			$MSA[$seq_id][$pos-1] = '-';
+			$MSA[$seq_id][$first_gap_pos] = $upcoming_char;
+			
+			$LastNonGap[$seq_id]--;
+			
+			$PositionCharProfile{$new_hash_key}++;
+			$PositionCharProfile{$old_hash_key}--;
+			
+		    }
+		    
+		}
 
 	    }
 
@@ -618,56 +451,27 @@ sub CleanMSA
 
     }
 
-
-    # Rad!  All of that flipping may have created some columns that
-    # are all gaps, though, so we'll need to clean those up.
+    
+    # We may have created some all-gap columns, so let's go ahead and blow 'em
+    # to smithereens (sp?).
     #
-    for ($j=0; $j<$input_len; $j++) {
+    my @CleanMSA;
+    my $clean_len = 0;
+    for (my $pos=0; $pos<$msa_len; $pos++) {
 
-	# If this is a splice-site column we'll want to know.  This also
-	# allows us to skip the other checking work...
-	#
-	if ($InputMSA[0][$j] eq '*') {
-
-	    # Record that we saw a splice site
-	    #
-	    push(@SpliceSites,$final_len);
-
-	    # Give everyone an asterisk!
-	    #
-	    for ($i=0; $i<$num_seqs; $i++) { $FinalMSA[$i][$final_len] = '*'; }
-
-	    # Definitely don't want to overwrite this friend!
-	    #
-	    $final_len++;
-
-	} else {
-
-	    # Copy over to the FinalMSA.  If it's an all-gap column, we'll
-	    # just overwrite it.
-	    #
-	    my $non_gap_observed = 0;
-	    for ($i=0; $i<$num_seqs; $i++) {
-		$FinalMSA[$i][$final_len] = $InputMSA[$i][$j];
-		$non_gap_observed = 1 if ($InputMSA[$i][$j] ne '-');
-	    }
-	    $final_len++ if ($non_gap_observed);
-
+	my $all_gaps = 1;
+	for (my $seq_id=0; $seq_id<$num_seqs; $seq_id++) {
+	    $CleanMSA[$seq_id][$clean_len] = $MSA[$seq_id][$pos];
+	    $all_gaps = 0 if ($MSA[$seq_id][$pos] =~ /[A-Za-z]/);
 	}
+	
+	$clean_len++ if ($all_gaps == 0);
 
     }
 
-
-    # Return our cleaned-up MSA
-    #
-    return(\@FinalMSA,$final_len);
-
+    return (\@CleanMSA,$clean_len);
+    
 }
-
-
-
-
-
 
 
 
