@@ -25,6 +25,7 @@ sub CheckSourceFiles;
 sub ParseArgs;
 sub VerifiedClean;
 sub ParseSpeciesGuide;
+sub GenerateSpeciesDBs;
 sub CoverMinorSpecies;
 sub AttachSeqToMSA;
 
@@ -138,47 +139,17 @@ foreach $specname (@Species) {
 }
 
 
-# Make a bunch of species-specific databases
-my @SpeciesDBNames;
-my @SpeciesDBs;
-my %SpeciesToID;
-for (my $i=0; $i<$numSpecies; $i++) {
-    $SpeciesDBNames[$i] = $ProteinDB;
-    $SpeciesDBNames[$i] =~ s/\.fa$/\.Mirage.$Species[$i]\.fa/;
-    open($SpeciesDBs[$i],'>',$SpeciesDBNames[$i]);
-    $SpeciesToID{lc($Species[$i])} = $i+1;
-}
-open(my $db_file,'<',$ProteinDB);
-my $db_line = <$db_file>;
-while (!eof($db_file)) {
-    if ($db_line =~ /\>[^\|]+\|[^\|]+\|([^\|]+)\|/) {
-	my $seq_spec = lc($1);
-	if ($SpeciesToID{$seq_spec}) {
-	    my $species_db = $SpeciesDBs[$SpeciesToID{$seq_spec}-1];
-	    print $species_db "$db_line";
-	    $db_line = <$db_file>;
-	    while ($db_line !~ /\>/) {
-		print $species_db "$db_line";
-		last if (eof($db_file));
-		$db_line = <$db_file>;
-	    }
-	} else {
-	    $db_line = <$db_file>;
-	}
-    } else {
-	$db_line = <$db_file>;
-    }
-}
-for (my $i=0; $i<$numSpecies; $i++) { 
-    close($SpeciesDBs[$i]);
-    system("esl-sfetch --index \"$SpeciesDBNames[$i]\" 1>/dev/null 2>\&1");
-}
-
+# Make species-specific databases, organized by gene family
+my ($speciesdbnames_ref,$MinorSpeciesDBName,$specprocesses_ref,$fambreaks_ref) 
+    = GenerateSpeciesDBs(\@Species,$ProteinDB,$numProcesses);
+my @SpeciesDBNames   = @{$speciesdbnames_ref};
+my @SpeciesProcesses = @{$specprocesses_ref};
+my @SpeciesFamBreaks = @{$fambreaks_ref};
 
 # Run Quilter
 my %MultiMSADir;
 my %GroupsBySpecies;
-foreach $i (0..$numSpecies-1) {
+for ($i=0; $i<$numSpecies; $i++) {
 
     # Start a timer for Quilter
     $IntervalStart = [Time::HiRes::gettimeofday()];
@@ -214,9 +185,15 @@ foreach $i (0..$numSpecies-1) {
     # Set Quilter to work in the src directory, since it needs to interact with
     # other tools there.
     $QuilterCmd = $QuilterCmd.' -setcwd '.cwd().'/src';
-    
-    # Tell Quilter how many CPUs we want it to work with
-    $QuilterCmd = $QuilterCmd.' -n '.$numProcesses;
+
+    # How many CPUs do we want to work with?
+    my $speciesProcesses = $SpeciesProcesses[$i];
+
+    # Tell Quilter how many CPUs we want it to work with (-nplus is -n plus stop points)
+    $QuilterCmd = $QuilterCmd.' -nplus '.$speciesProcesses;
+
+    # Tell Quilter which lines each process stops at
+    for ($j=0; $j<$speciesProcesses; $j++) { $QuilterCmd = $QuilterCmd.' '.$SpeciesFamBreaks[$i][$j]; }
 
     # Do we want a whole bunch of stuff spat at us?
     $QuilterCmd = $QuilterCmd.' -v' if ($verbose);
@@ -236,12 +213,10 @@ foreach $i (0..$numSpecies-1) {
     # Make that daaaaaang call.
     if (system($QuilterCmd)) {
 	# Rats!
-	foreach my $species_db_name (@SpeciesDBNames) {
-	    if (-e $species_db_name) {
-		system("rm \"$species_db_name\"");
-		system("rm \"$species_db_name\.ssi\"");
-	    }
+	foreach my $species_db_name (@SpeciesDBNames) {	    
+	    system("rm \"$species_db_name\"") if (-e $species_db_name);
 	}
+	system("rm \"$MinorSpeciesDBName\"") if (-e $MinorSpeciesDBName);
 	die "\n  *  ERROR:  Quilter.pl failed during execution  *\n\n";
     }
 
@@ -364,11 +339,9 @@ foreach $i (0..$numSpecies-1) {
     if (system($MultiMSACmd)) {
 	# Hamsters!
 	foreach my $species_db_name (@SpeciesDBNames) {
-	    if (-e $species_db_name) {
-		system("rm \"$species_db_name\"");
-		system("rm \"$species_db_name\.ssi\"");
-	    }
+	    system("rm \"$species_db_name\"") if (-e $species_db_name);
 	}
+	system("rm \"$MinorSpeciesDBName\"") if (-e $MinorSpeciesDBName);
 	die "\n  *  ERROR:  MultiMSA.pl failed during execution  *\n\n";
     }
 
@@ -485,9 +458,8 @@ foreach $i (0..$numSpecies-1) {
     # Knock it off with that darn timing!
     $MultiMSATimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
 
-    # Get rid of that stinky old pair of files!
+    # Get rid of that stinky old file!
     system("rm \"$SpeciesDB\"");
-    system("rm \"$SpeciesDB\.ssi\"");
     
 }
 
@@ -497,7 +469,7 @@ foreach $i (0..$numSpecies-1) {
 # of attention (and gather in their names).
 my $GBSref;
 my $MMSAref;
-($speciesref,$numSpecies,$GBSref,$MMSAref) 
+($speciesref,$numSpecies,$GBSref,$MMSAref)
     = CoverMinorSpecies(\@Species,$ProteinDB,$numSpecies,
 			\%GroupsBySpecies,$AllSpeciesDir,\%MultiMSADir);
 @Species         = @{$speciesref};
@@ -535,6 +507,7 @@ my $portion;
 if ($numProcesses) {
     $portion = $TotNumGroupFiles/$numProcesses;
 } else {
+    system("rm \"$MinorSpeciesDBName\"") if (-e $MinorSpeciesDBName);
     print "\n";
     print "  No genes were identified for alignment.\n";
     print "  Program Terminating Peacefully\n";
@@ -1303,6 +1276,274 @@ sub ParseSpeciesGuide
 
 ########################################################################
 #
+# Function Name: GenerateSpeciesDBs
+#
+# About:  This function breaks up the isoform database into individual
+#         species-specific databases, organized by gene families.
+#
+#         It also identifies the specific line ranges for each of the
+#         requested processes, so that each process can easily operate
+#         on the level of gene families, rather than individual sequences.
+#
+#         Because the naming conventions might be a bit of hot rubbish,
+#         here's a super fun little guide to what this function returns:
+#
+#             + SpeciesDBNames : The filenames for the species-specific
+#                 databases, organized in the same order as the Species
+#                 array.
+#
+#             + MinorSpeciesDBName : The filename for the database of all
+#                 isoforms belonging to species that don't have an
+#                 associated genome.
+#
+#             + SpecThreadCounts : The number of threads to use for each
+#                 species.  This will typically be numProcesses, but in
+#                 the event that we have some species with fewer gene
+#                 families than requested processes we'll reduce this.
+#
+#             + SpecFamBreaks : The line number that each thread should
+#                 count up to (but not hit).
+#
+sub GenerateSpeciesDBs
+{
+    my $species_ref    = shift;
+    my $ProteinDB_name = shift;
+    my $numProcesses   = shift;
+
+    my $DB_base_name = $ProteinDB_name;
+    $DB_base_name =~ s/\.[^\/\.]+$//; # remove the file extension.
+
+    my @Species = @{$species_ref};
+    my %SpeciesToDBNames;
+    foreach my $species (@Species) { $SpeciesToDBNames{$species} = $DB_base_name.'.'.$species.'.fa'; }
+    my $MinorSpeciesDBName = $DB_base_name.'MinorSpecies.fa';
+
+    # The very first thing we'll do is scan through our database
+    # making a set of species-AND-gene-family mini-databases, and
+    # then we can concatenate within species.
+
+    open(my $ProteinDB,'<',$ProteinDB_name) || die "\n  ERROR:  Failed to open input protein database '$ProteinDB_name'\n\n";
+    my $spec_gene_filename = 0;
+    my %SpeciesGeneFileNames;
+    my $SpecGeneFile;
+    my $next_entry = 0;
+    while (my $line = <$ProteinDB>) {
+	
+	$line =~ s/\n|\r//g;
+	next if (!$line);
+
+	if ($line =~ /\>(\S+)/) {
+
+	    if ($spec_gene_filename) { close($SpecGeneFile); }
+
+	    my $seqname = $1;
+	    $seqname =~ /^[^\|]+\|[^\|]+\|([^\|]+)\|\S+\|([^\|]+)$/;
+	    my $species = lc($1);
+	    my $genefam = lc($2);
+
+	    $spec_gene_filename = $DB_base_name.$species.'-'.$genefam.'.fa';
+	    $SpeciesGeneFileNames{$species.';'.$genefam} = $spec_gene_filename;
+	    
+	    open($SpecGeneFile,'>>',$spec_gene_filename) || die "\n  ERROR:  Failed to open output species-gene database '$spec_gene_filename'\n\n";
+	    
+	    print $SpecGeneFile "$line\n";
+
+	} elsif ($spec_gene_filename) {
+	    print $SpecGeneFile "$line\n";
+	}
+
+    }
+    if ($spec_gene_filename) { close($SpecGeneFile); }
+    close($ProteinDB);
+
+    #
+    #  Now that we've segrated species and gene families into TONS of little databases,
+    #  we can run through our little databases and concatenate them into species databases.
+    #
+    #  Observe that the primary sorting on species name and secondary sorting on gene family
+    #  guarantees that we'll have a really clean re-organization into gene families.
+    #
+
+    my %GeneFamsPerSpecies;
+    foreach my $spec_gene (sort keys %SpeciesGeneFileNames) {
+
+	$spec_gene =~ /^(\S+)\;/;
+	my $species = $1;
+
+	if ($GeneFamsPerSpecies{$species}) { $GeneFamsPerSpecies{$species}++; }
+	else                               { $GeneFamsPerSpecies{$species}=1; }
+
+	my $spec_gene_filename = $SpeciesGeneFileNames{$spec_gene};
+
+	my $species_db_name;
+	if ($SpeciesToDBNames{$species}) { $species_db_name = $SpeciesToDBNames{$species}; }
+	else                             { $species_db_name = $MinorSpeciesDBName;         }
+
+	my $cat_cmd = "cat \"$spec_gene_filename\" >> \"$species_db_name\"";
+	if (system($cat_cmd)) { die "\n  ERROR:  Concatenation command '$cat_cmd' failed during execution\n\n"; }
+
+	my $rm_cmd = "rm \"$spec_gene_filename\"";
+	if (system($rm_cmd)) { die "\n  ERROR:  Failed to remove species-gene file '$spec_gene_filename'\n\n"; }
+
+
+    }
+
+
+    # Next, we can figure out the right order for our species DB names
+    my @SpeciesDBNames;
+    my @SpeciesFamCounts;
+    foreach my $species (@Species) {
+	push(@SpeciesDBNames,$SpeciesToDBNames{$species}); 
+	push(@SpeciesFamCounts,$GeneFamsPerSpecies{$species});
+    }
+
+
+    # Were there any unindexed species?
+    if (-e $MinorSpeciesDBName) { 
+	
+	# Let's just slip this nasty boy in right quick
+	
+    }
+
+
+
+    #
+    #  We can actually give Quilter some cheat codes by identifying the specific lines
+    #  at which we want each process to start up.
+    #
+    #  Note that these are one above the final line, so it's an [i-1,i) sort of thing
+    #
+
+
+
+    my @SpecFamBreaks;
+    my @SpecThreadCounts;
+    for (my $i=0; $i<scalar(@SpeciesDBNames); $i++) {
+
+	my $species_db_name = $SpeciesDBNames[$i];
+	my $wc_cmd = "wc -l \"$species_db_name\" \|";
+	open(my $WC,$wc_cmd) || die "\n  ERROR:  Failed to run linecount command '$wc_cmd'\n\n";
+	my $wc_line = <$WC>;
+	close($WC);
+
+	my $tot_line_count;
+	if ($wc_line =~ /^\s*(\d+)/) {
+	    $tot_line_count = $1;
+	} else {
+	    die "\n  ERROR:  Failed to get a line count for file '$species_db_name'\n\n";
+	}
+
+	open(my $SpeciesDB,'<',$species_db_name) || die "\n  ERROR:  Failed to open species database '$species_db_name'\n\n";
+
+	# We need some sort of mechanism for adjusting the number of requested
+	# cores in the event that there's a species with very few entries.
+	#
+	if ($SpeciesFamCounts[$i] <= $numProcesses) {
+
+	    #
+	    # We'll just assign each core a single gene family
+	    #
+	    
+	    $SpecThreadCounts[$i] = $SpeciesFamCounts[$i];
+
+	    my $linenum = 0;
+	    my $lastfam;
+	    my $j=0;
+
+	    my $line;
+		
+	    while ($linenum < $tot_line_count) {
+		$line = <$SpeciesDB>;
+		$linenum++;
+		if ($line =~ /^\>\S+\|([^\|]+)$/) {
+		    my $nextfam = lc($1);
+		    if ($lastfam && $lastfam ne $nextfam) {
+			$SpecFamBreaks[$i][$j] = $linenum;
+			$j++;
+		    }
+		    $lastfam = $nextfam;			
+		}
+	    }
+	    
+	    $SpecFamBreaks[$i][$j] = $linenum;
+
+	} else {
+
+	    my $avg_frac = $tot_line_count / $numProcesses;
+
+	    $SpecThreadCounts[$i] = $numProcesses;
+
+	    my $fams_in_block = 0;
+	    
+	    my $linenum = 0;
+	    my $lastfam;
+	    my $j=0;
+	    while ($j<$SpecThreadCounts[$i]) {
+		
+		my $line;
+		
+		while ($linenum < $tot_line_count && $linenum < ($j+1)*$avg_frac) {
+		    $line = <$SpeciesDB>;
+		    $linenum++;
+		    if ($line =~ /^\>\S+\|([^\|]+)$/) {
+			$lastfam = lc($1);
+			$fams_in_block = 1;
+		    }
+		}
+		
+		# This is a catch for the special case where we might have
+		# (say) numProcesses+1 sequences where one of those is gigantic
+		# and goofs up our best laid plans.
+		#
+		if ($fams_in_block) {
+
+		    while ($linenum < $tot_line_count && $line !~ /^\>/) {
+			$line = <$SpeciesDB>;
+			$linenum++;
+			if ($line =~ /^\>\S+\|([^\|]+)$/) {
+			    my $nextfam = lc($1);
+			    if ($nextfam eq $lastfam) {
+				$line = <$SpeciesDB>;
+				$linenum++;
+			    }
+			}
+		    }
+		    
+		    $SpecFamBreaks[$i][$j] = $linenum;
+		    $j++;
+
+		} else {
+
+		    $SpecThreadCounts[$i]--;
+
+		}
+		
+	    }
+
+	    if ($SpecThreadCounts[$i]) {
+		$SpecFamBreaks[$i][$SpecThreadCounts[$i]-1] = $tot_line_count;
+	    } else {
+		die "\n  Hey, dude, what's going on with '$species_db_name' and division into threadable blocks?\n\n";
+	    }
+
+	}
+
+	close($SpeciesDB);
+    
+    }
+
+
+    # This is it, baby!
+    return (\@SpeciesDBNames,$MinorSpeciesDBName,\@SpecThreadCounts,\@SpecFamBreaks);
+
+}
+
+
+
+
+
+########################################################################
+#
 # Function Name: CoverMinorSpecies
 #
 # About: In order to handle the presence of species that aren't listed
@@ -1321,7 +1562,7 @@ sub CoverMinorSpecies
 	$MajorSpecies{$Species[$i]} = 1;
     }
     
-    # Grab the name of the protein database
+    # Grab the name of the database we're interested in looking through
     my $DBname = shift;
 
     # How many species were there to start with?
