@@ -146,6 +146,7 @@ my @SpeciesDBNames   = @{$speciesdbnames_ref};
 my @SpeciesProcesses = @{$specprocesses_ref};
 my @SpeciesFamBreaks = @{$fambreaks_ref};
 
+
 # Run Quilter
 my %MultiMSADir;
 my %GroupsBySpecies;
@@ -214,9 +215,11 @@ for ($i=0; $i<$numSpecies; $i++) {
     if (system($QuilterCmd)) {
 	# Rats!
 	foreach my $species_db_name (@SpeciesDBNames) {	    
-	    system("rm \"$species_db_name\"") if (-e $species_db_name);
+	    system("rm \"$species_db_name\"")      if (-e $species_db_name);
+	    system("rm \"$species_db_name\.ssi\"") if (-e $species_db_name.'.ssi');
 	}
-	system("rm \"$MinorSpeciesDBName\"") if (-e $MinorSpeciesDBName);
+	system("rm \"$MinorSpeciesDBName\"")      if (-e $MinorSpeciesDBName);
+	system("rm \"$MinorSpeciesDBName\.ssi\"") if (-e $MinorSpeciesDBName.'.ssi');
 	die "\n  *  ERROR:  Quilter.pl failed during execution  *\n\n";
     }
 
@@ -339,9 +342,11 @@ for ($i=0; $i<$numSpecies; $i++) {
     if (system($MultiMSACmd)) {
 	# Hamsters!
 	foreach my $species_db_name (@SpeciesDBNames) {
-	    system("rm \"$species_db_name\"") if (-e $species_db_name);
+	    system("rm \"$species_db_name\"")      if (-e $species_db_name);
+	    system("rm \"$species_db_name\.ssi\"") if (-e $species_db_name.'.ssi');
 	}
-	system("rm \"$MinorSpeciesDBName\"") if (-e $MinorSpeciesDBName);
+	system("rm \"$MinorSpeciesDBName\"")      if (-e $MinorSpeciesDBName);
+	system("rm \"$MinorSpeciesDBName\.ssi\"") if (-e $MinorSpeciesDBName.'.ssi');
 	die "\n  *  ERROR:  MultiMSA.pl failed during execution  *\n\n";
     }
 
@@ -460,6 +465,7 @@ for ($i=0; $i<$numSpecies; $i++) {
 
     # Get rid of that stinky old file!
     system("rm \"$SpeciesDB\"");
+    system("rm \"$SpeciesDB\.ssi\"") if (-e $SpeciesDB.'.ssi');
     
 }
 
@@ -1241,7 +1247,7 @@ sub ParseSpeciesGuide
 		
 		# Make sure the genome has a .ssi index
 		if (!(-e $Genomes[$i].'.ssi')) {
-		    if (system("esl-sfetch --index $Genomes[$i]")) { 
+		    if (system("esl-sfetch --index $Genomes[$i] 1>/dev/null")) { 
 			die "\n  Failed to create easel index for $Genomes[$i]\n\n"; 
 		    }
 		}
@@ -1316,7 +1322,7 @@ sub GenerateSpeciesDBs
     my @Species = @{$species_ref};
     my %SpeciesToDBNames;
     foreach my $species (@Species) { $SpeciesToDBNames{$species} = $DB_base_name.'.'.$species.'.fa'; }
-    my $MinorSpeciesDBName = $DB_base_name.'MinorSpecies.fa';
+    my $MinorSpeciesDBName = $DB_base_name.'.MinorSpecies.fa';
 
     # The very first thing we'll do is scan through our database
     # making a set of species-AND-gene-family mini-databases, and
@@ -1433,6 +1439,11 @@ sub GenerateSpeciesDBs
 	    die "\n  ERROR:  Failed to get a line count for file '$species_db_name'\n\n";
 	}
 
+	# Just for good measure, we'll slip in some esl-indexing here
+	if (system("esl-sfetch --index \"$species_db_name\" 1>/dev/null")) { 
+	    die "\n  ERROR:  Failed to generate esl index for species database '$species_db_name'\n\n"; 
+	}
+	
 	open(my $SpeciesDB,'<',$species_db_name) || die "\n  ERROR:  Failed to open species database '$species_db_name'\n\n";
 
 	# We need some sort of mechanism for adjusting the number of requested
@@ -1473,15 +1484,14 @@ sub GenerateSpeciesDBs
 
 	    $SpecThreadCounts[$i] = $numProcesses;
 
-	    my $fams_in_block = 0;
-	    
 	    my $linenum = 0;
 	    my $lastfam;
 	    my $j=0;
 	    while ($j<$SpecThreadCounts[$i]) {
 		
 		my $line;
-		
+		my $fams_in_block = 0;
+	    		
 		while ($linenum < $tot_line_count && $linenum < ($j+1)*$avg_frac) {
 		    $line = <$SpeciesDB>;
 		    $linenum++;
@@ -1500,7 +1510,7 @@ sub GenerateSpeciesDBs
 		    while ($linenum < $tot_line_count && $line !~ /^\>/) {
 			$line = <$SpeciesDB>;
 			$linenum++;
-			if ($line =~ /^\>\S+\|([^\|]+)$/) {
+			if ($line && $line =~ /^\>\S+\|([^\|]+)$/) {
 			    my $nextfam = lc($1);
 			    if ($nextfam eq $lastfam) {
 				$line = <$SpeciesDB>;

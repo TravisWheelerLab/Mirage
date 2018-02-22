@@ -286,7 +286,10 @@ if (!$overw) {
     }
     if (system("mkdir $foldername")) { die "\n\tFailed to generate temporary folder '$foldername'\n\n"; }
 } else {
-    if (!(-e $foldername) && system("mkdir $foldername")) { die "\n\tFailed to generate temporary folder '$foldername'\n\n"; }
+    if (-e $foldername && system("rm $foldername/\*; rmdir $foldername")) { 
+	die "\n\tFailed to clear existing temporary folder '$foldername'\n\n"; 
+    }
+    if (system("mkdir $foldername")) { die "\n\tFailed to generate temporary folder '$foldername'\n\n"; }
 }
 
 
@@ -378,7 +381,7 @@ $RepConf[1][1] = 0;
 
 
 # Where in the protein database do we want to start / stop?
-my $startpoint = 0;
+my $startpoint = 1;
 if ($threadID) { $startpoint = $StopPoints[$threadID-1]; }
 my $stoppoint  = $StopPoints[$threadID];
 
@@ -390,7 +393,7 @@ my $lineNum = 0;
 
 # Walk your way up to the starting line (<= because we want to prime with new seqname)
 my $line;
-while ($lineNum <= $startpoint) {
+while ($lineNum < $startpoint) {
     $line = <$isoformfile>;
     $lineNum++;
 }
@@ -414,6 +417,9 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 
      # Record sequence name information
     $line =~ /^\>[^\|]+\|[^\|]+\|([^\|]+)\|\S+\|([^\|]+)$/;
+    if (!($1 && $2)) {
+	die "$reqSpecies: $threadID:  $line ($lineNum: $startpoint,$stoppoint)\n";
+    }
     my $gene      = uc($2);
     my $species   = uc($1);
     my $nameline  = $line;
@@ -475,6 +481,12 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 	    print $protfile "$line\n";
 	    $Protein = $Protein.$line;
 	    $line =  <$isoformfile>;
+	    $lineNum++;
+	}
+	if (eof($isoformfile) && $line) { # Special catch for final line
+	    $line =~ s/\n|\r//g;
+	    print $protfile "$line\n";
+	    $Protein = $Protein.$line;
 	    $lineNum++;
 	}
 	my $ProtLength = length($Protein);
