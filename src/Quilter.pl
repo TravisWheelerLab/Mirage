@@ -1562,8 +1562,17 @@ sub BuildGeneIndex
 	my $gene = uc($1);
 
 	if ($spec eq $species) {
-	    $FamNames{$fam}  = $fam;
-	    $FamNames{$gene} = $fam unless ($gene eq '-');
+
+	    $FamNames{$fam} = $fam;
+
+	    # NOTE: We can't totally get away from the 'GN:' thing in our UniProt
+	    #       database, so we need to preserve a teensy little fragment
+	    #       of our prior excessive 'GN:'-consciousness
+	    if ($gene ne '-') {
+		$gene =~ s/^GN\://;
+		$FamNames{$gene} = $fam;
+	    }
+
 	}
 	
     }
