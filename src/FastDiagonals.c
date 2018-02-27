@@ -103,6 +103,8 @@ FindDiagonals
     Translation[j] = DNAtoAA(NuclString[i],NuclString[i+1],NuclString[i+2]);
 
     if (Translation[j] == 0) {  // ERROR! Unrecognized triple
+
+      /* -- OLD STUFF
       printf("  ERROR: String '");
       printf("%c",NuclString[i]);
       printf("%c",NuclString[i+1]);
@@ -112,6 +114,14 @@ FindDiagonals
       if (end_nucls)   free(end_nucls);      
       free(Translation);
       return 1;
+      */
+
+      // We'll piggy-back off the old machinery and say that there weren't
+      // any hits (this is now our catch for non-ACGT characters in a coding
+      // region.
+      TransLength = 0;
+      break;
+
     }
 
     if (Translation[j] == 'x') { // STOP CODON! (more like 'codoff', am I right?)      
@@ -572,12 +582,21 @@ int main (int argc, char ** argv)
 
   // If we found a non-ACGT character then we'll need to trick Quilter
   // into thinking it's already read through offsets 0, 1, and 2...
+  //
+  // NOTE :  We're changing this, since we might have some non-acgt
+  //         characters in the coding region, but not in the exonic
+  //         sequences.  Instead of giving up on the whole dang thing,
+  //         we'll just need to return an automatic "no-hitter" for
+  //         exons that have non-acgt characters.
+  //
+  /*
   if (nonacgt) {
     free(Protein);
     free(NuclString);
     printf("3\n");
     return 0;
   }
+  */
   
   // If we're debugging, we want to make sure that we read the files in correctly
   if (debug) {
