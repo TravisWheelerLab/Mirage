@@ -408,9 +408,10 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 			$last_write = $next_pos-1;
 
 			
-			# New placement
+			# New placement -- note that we need to start with a comma for the
+			# preceding 'elsif's to work in every case (we'll trim this later)
 		    } else {
-			$MSA{$next_pos} = $i.':'.$Seq[$k];
+			$MSA{$next_pos} = ','.$i.':'.$Seq[$k];
 			$last_write = $next_pos;
 		    }
 		    
@@ -511,7 +512,11 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	# (i.e., indel indicator) associated with this position.
 	my @Seqs;
 	my @Chars;
-	my @Entries = split(',',$MSA{$genome_pos});
+
+	my $cleaned_entry = $MSA{$genome_pos}; # We need to chop off the leading comma first
+	$cleaned_entry =~ s/^\,//;
+	my @Entries = split(',',$cleaned_entry);
+
 	my $num_entries = @Entries;
 	my @MultiChars;
 	my $num_multis = 0;
@@ -546,7 +551,9 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	    if ($aa_index < @PositionIndex) {
 
 		# Sample the acceptable characters at this site
-		my @NextEntries = split(',',$MSA{$PositionIndex[$aa_index]});
+		$cleaned_entry = $MSA{$PositionIndex[$aa_index]};
+		$cleaned_entry =~ s/^\,//;
+		my @NextEntries = split(',',$cleaned_entry);
 		my %AcceptedChars;
 		for ($i=0; $i<@NextEntries; $i++) {
 		    my @NextEntry = split(':',$NextEntries[$i]);
@@ -578,9 +585,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 			# We decide what to do based next based on whether this
 			# sequence occurs in the next amino-acid associated site.
 			my $next_entry = $MSA{$PositionIndex[$aa_index]};
-			if ($next_entry =~ /^$Seqs[$j]\:/) {
-			    $next_entry =~ s/^$Seqs[$j]\:/$Seqs[$j]\:$remainder/;
-			} elsif ($next_entry =~ /\,$Seqs[$j]\:/) {
+			if ($next_entry =~ /\,$Seqs[$j]\:/) {
 			    $next_entry =~ s/\,$Seqs[$j]\:/\,$Seqs[$j]\:$remainder/;
 			} else {
 			    $next_entry = $next_entry.','.$Seqs[$j].':'.$remainder;
