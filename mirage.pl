@@ -735,6 +735,10 @@ if (-e $tempfileB && system("rm $tempfileB")) { die "\n  Failed to remove file $
 if ($ThreadID) { exit(0); }
 while (wait() != -1) {}
 
+# Well, why NOT put this here?!
+system("rm \"$MinorSpeciesDBName\"")      if (-e $MinorSpeciesDBName);
+system("rm \"$MinorSpeciesDBName\.ssi\"") if (-e $MinorSpeciesDBName.'.ssi');
+
 
 # Get rid of progress files (won't apply to thread 0)
 for ($i = 1; $i < $numProcesses; $i++) {

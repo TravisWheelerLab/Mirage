@@ -544,6 +544,7 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 	my $chr_list_str = $FamChrs{$gene};
 	$chr_list_str =~ s/^\#//;
 	$chr_list_str =~ s/\#$//;
+
 	foreach my $chromosomeName (sort(split(/\#/,$chr_list_str))) {
 
 
@@ -571,46 +572,71 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 	    # Iterate over all entries for this gene on this chromosome.
 	    if (!$noFD) {
 
-		foreach my $start_end (split(/\,/,$GeneIndex{$gene.'|'.$chromosomeName})) {
-		    
-		    # Grab the next start and end pair
-		    $start_end =~ /(\d+)\-(\d+)/;
-		    my $start = $1;
-		    my $end   = $2;
+		# NOTE ON GENEINDEX ENTRIES (2018/02/26)
+		#
+		# These will be sorted according to direction, so a forward GeneIndex
+		# entry will look like '3-4,6-7' whereas a revcomp entry will look
+		# like '7-6,4-3'
+		#
 
-		    # Whether or not we're considering the reverse complement will be
-		    # identifiable by whether or not we appended '[revcomp]' to the
-		    # chromosome name.
-		    my $revcomp = 0;
-		    if ($chromosomeName =~ /\[revcomp\]/) {
-			$revcomp = 1;
-			$chromosomeName =~ s/\[revcomp\]//;
-			my $temp = $end;
-			$end   = $start;
-			$start = $temp;
-		    }
-		    
-		    # The system call to generate a FASTA file using the given index info.
-		    my $eslsfetchCmd;
-		    $eslsfetchCmd = 'esl-sfetch -c '.$start.'..'.$end;              # Range
-		    $eslsfetchCmd = $eslsfetchCmd.' -o '.$nuclfilename;             # Output file
-		    $eslsfetchCmd = $eslsfetchCmd.' '.$ARGV[1].' '.$chromosomeName; # Input file and sequence name
-		    $eslsfetchCmd = $eslsfetchCmd." > /dev/null 2>&1";   # '-o' still prints some info, but we don't care.
-		    
-		    # For now we bail altogether if this step goes wrong (for obv. reasons)
-		    if (system($eslsfetchCmd)) {
-			die "\n\tERROR: Command '$eslsfetchCmd' failed (AE) - $gene\n\n"; 
-		    }
-		    
-		    # Generate a new exon object
-		    for ($i=0; $i<$num_gene_seqs; $i++) {
-			RunFastDiagonals(\$Chromosomes[$i],$ProtFileNames[$i],$nuclfilename,
-					 $ProtSeqLengths[$i],$start,$end,$revcomp,
-					 $timing,\@TimingData,$debug);
-		    }
+		# Find the start and end of the whole shebang -- note that these will
+		# respect revcomp-iness
+		my $gene_index_list = $GeneIndex{$gene.'|'.$chromosomeName};
 
+		# Whether or not we're considering the reverse complement will be
+		# identifiable by whether or not we appended '[revcomp]' to the
+		# chromosome name.
+		my $revcomp = 0;
+		if ($chromosomeName =~ /\[revcomp\]/) {
+		    $revcomp = 1;
+		    $chromosomeName =~ s/\[revcomp\]//;
+		}
+		
+		# Find the highest and lowest nucleotide indices in the coding 
+		# region for this gene
+		my $minNucl = 100000000000; # 100 GB genome? unlikely
+		my $maxNucl = -1;
+		my ($start,$end);
+		foreach my $start_end (split(/\,/,$gene_index_list)) {
+		    $start_end =~ /^(\d+)\-(\d+)$/;
+		    $start = $1;
+		    $end   = $2;
+		    if ($revcomp) {
+			$minNucl = MIN($end,$minNucl);
+			$maxNucl = MAX($start,$maxNucl);
+		    } else {
+			$minNucl = MIN($start,$minNucl);
+			$maxNucl = MAX($end,$maxNucl);
+		    }
+		}
+		if ($revcomp) {
+		    $start = $maxNucl;
+		    $end = $minNucl;
+		} else {
+		    $start = $minNucl;
+		    $end = $maxNucl;
 		}
 
+		# The system call to generate a FASTA file using the given index info.
+		my $eslsfetchCmd;
+		$eslsfetchCmd = 'esl-sfetch -c '.$start.'..'.$end;               # Range (revcomp-ready)
+		$eslsfetchCmd = $eslsfetchCmd.' -o '.$nuclfilename;              # Output file
+		$eslsfetchCmd = $eslsfetchCmd.' '.$ARGV[1].' '.$chromosomeName;  # Input file and sequence name
+		$eslsfetchCmd = $eslsfetchCmd." > /dev/null 2>&1";               # '-o' still prints some info, but we don't care.
+
+		# For now we bail altogether if this step goes wrong (for obv. reasons)
+		if (system($eslsfetchCmd)) {
+		    die "\n\tERROR: Command '$eslsfetchCmd' failed (AE) - $gene\n\n"; 
+		}
+		
+		# Generate a new exon object
+		for ($i=0; $i<$num_gene_seqs; $i++) {
+		    RunFastDiagonals(\$Chromosomes[$i],$ProtFileNames[$i],$nuclfilename,
+				     $ProtSeqLengths[$i],$start,$end,$revcomp,
+				     $gene_index_list,$timing,\@TimingData,
+				     $debug);
+		}
+		
 	    } else { # We're just going to go ahead and skip FastDiagonals and locate the plausible coding range
 
 		for ($i=0; $i<$num_gene_seqs; $i++) {
@@ -1534,7 +1560,6 @@ sub BuildGeneIndex
 	my $fam  = uc($3);
 	my $spec = uc($2);
 	my $gene = uc($1);
-	$gene =~ s/^GN\://;
 
 	if ($spec eq $species) {
 	    $FamNames{$fam}  = $fam;
@@ -1555,6 +1580,8 @@ sub BuildGeneIndex
 	next if ($line =~ /^\#/ || lc($line) !~ /\S+\s+\S+\s+exon/); # This is dumb, Alex.  You know why (wild boy).
 	$line =~ /^(\S+)\s+\S+\s+\S+\s+(\d+)\s+(\d+)\s+\S+\s+([\+\-])/;
 	
+	# Note that startPos is always less than endPos, even when we're
+	# indexing into the reverse complement.
 	my $chrName  = $1;
 	my $startPos = $2;
 	my $endPos   = $3;
@@ -1562,6 +1589,9 @@ sub BuildGeneIndex
 	if ($4 eq '-') {
 	    $revcomp = 1;
 	    $chrName = $chrName.'[revcomp]';
+	    my $tempPos = $startPos;
+	    $startPos = $endPos;
+	    $endPos = $tempPos;
 	}
 
 	$line =~ /gene\_name \"([^\"]+)\"\;/;
@@ -1574,11 +1604,17 @@ sub BuildGeneIndex
 	if (!$RepeatTracker{$repeat_id} && $FamNames{$famName}) {
 
 	    if ($FamChrs{$famName}) {
-		if ($FamChrs{$famName} !~ /\#$chrName\#/) {
-		    $FamChrs{$famName} = $FamChrs{$famName}.$chrName.'#';
+		my $already_there = 0;
+		for my $chrs_for_fam (split(/\#/,$FamChrs{$famName})) {
+		    if ($chrs_for_fam eq $chrName) {
+			$already_there = 1;
+		    }
+		}
+		if ($already_there == 0) {
+		    $FamChrs{$famName} = $FamChrs{$famName}.'#'.$chrName;
 		}
 	    } else {
-		$FamChrs{$famName} = '#'.$chrName.'#';
+		$FamChrs{$famName} = $chrName;
 	    }
 
 	    my $key = $famName.'|'.$chrName;
@@ -1591,6 +1627,52 @@ sub BuildGeneIndex
 	
     }
     close($gtf);
+
+    # We'll want to have the exons sorted according to nucleotide positions (ascending if
+    # forward strand, descending if reverse complement).
+    foreach my $fam_chr_pair (keys %GeneIndex) {
+
+	$fam_chr_pair =~ /\S+\|(\S+)/;
+	my $chr = $1;
+	my $revcomp = 0;
+	$revcomp = 1 if ($chr =~ /\[revcomp\]/);
+
+	# This is a fun algorithm called "lazy sort"
+	my %StartPosHash;
+	foreach my $start_end_pair (split(/\,/,$GeneIndex{$fam_chr_pair})) {
+	    $start_end_pair =~ /(\d+)\-(\d+)/;
+	    my $start = $1;
+	    my $end   = $2;
+	    if ($StartPosHash{$start}) { $StartPosHash{$start} = $StartPosHash{$start}.','.$end; }
+	    else                       { $StartPosHash{$start} = $end;                           }	    
+	}
+
+	# Keep that lazy train a-rolling
+	my $sorted_entry = '';
+	if ($revcomp) {
+
+	    foreach my $start (sort {$b <=> $a} keys %StartPosHash) {
+	        foreach my $end (sort {$b <=> $a} split(/\,/,$StartPosHash{$start})) {
+		    $sorted_entry = $sorted_entry.','.$start.'-'.$end;
+		}
+	    }
+	    $sorted_entry =~ s/^\,//;
+	    
+	} else {
+	    
+	    foreach my $start (sort {$a <=> $b} keys %StartPosHash) {
+	        foreach my $end (sort {$a <=> $b} split(/\,/,$StartPosHash{$start})) {
+		    $sorted_entry = $sorted_entry.','.$start.'-'.$end;
+		}
+	    }
+	    $sorted_entry =~ s/^\,//;
+	    
+	}
+
+	# Wooot! What a nice, lazy sort!
+	$GeneIndex{$fam_chr_pair} = $sorted_entry;
+
+    }
 
     # Sanity check
     my %MissingFams;
@@ -1606,60 +1688,6 @@ sub BuildGeneIndex
     return (\%GeneIndex,\%FamChrs,\%MissingFams);
     
 }
-
-
-
-
-
-
-#########################################################################
-#
-#  Function Name: AddExon <<<<<<< DEPRECATED!!!!
-#
-#  About: Once we've built an index on the genes we're interested in, we
-#         need to rip each recorded exon off (as a start-index/end-index
-#         pair) and actually compare that exon against the provided protein
-#         sequence, using the translated-similarity-detection program
-#         FastDiagonals.  AddExon funnels all the relevant information
-#         towards the actual run of FastDiagonals (in RunFastDiagonals).
-#         This primarily involves running esl-sfetch to get the relevant
-#         part of the genome on-hand.
-#
-#
-sub AddExon
-{
-    # The chromosome we're adding to
-    my $chromosomeRef = shift;
-    my $Chromosome    = $$chromosomeRef;
-
-    # File names
-    my $protfilename   = shift;
-    my $genomefilename = shift;
-    my $nuclfilename   = shift;
-
-    # Information about the exon we intend to add
-    my $gene           = shift;
-    my $chromosomeName = shift;
-    my $proteinLength  = shift;
-    my $exonStart      = shift;
-    my $exonEnd        = shift;
-    my $revcomp        = shift;
-
-    # Are we timing?
-    my $timing     = shift;
-    my $timingdata = shift;
-
-    # Are we debugging?
-    my $debug = shift;
-    
-    # Find all high-scoring diagonals for this exon (aligned with the given protein)
-    RunFastDiagonals(\$Chromosome,$protfilename,$nuclfilename,
-		     $proteinLength,$exonStart,$exonEnd,$revcomp,
-		     $timing,$timingdata,$debug);
-    
-
-}
-
 
 
 
@@ -1713,9 +1741,6 @@ sub RunFastDiagonals
     my $chrRef     = shift;
     my $Chromosome = $$chrRef;
 
-    # How many entries does this chromosome already have?
-    my $diagNum = $Chromosome->{NumHits};
-
     # Get the names of the protein and nucleotide files
     my $protfile = shift;
     my $nuclfile = shift;
@@ -1724,11 +1749,14 @@ sub RunFastDiagonals
     my $proteinLength = shift;
 
     # Get the start and end points of the chromosome
-    my $NuclStart = shift;
-    my $NuclEnd   = shift;
+    my $RegionStart = shift;
+    my $RegionEnd   = shift;
 
     # Is this search on the chromosome's reverse complement?
     my $revcomp = shift;
+
+    # The full list of gene index entries for this gene family
+    my $gene_index_list = shift;
 
     # Are we timing?
     my $timing     = shift;
@@ -1738,185 +1766,237 @@ sub RunFastDiagonals
     # Are we debugging?
     my $debug = shift;
 
+    # Record how many diagonals each protein sequence has
+    my $diagNum = 0;
+
     # PRINT THAT SUPER-FLY FastDiagonals.c DEBUGGING OUTPUT
     # If we want to peek at how FastDiagonals is doing, we can run it in debug mode,
     # SEPARATELY from running it in parsable-format
     #if ($debug && system("\.\/FastDiagonals $protfile $nuclfile \-debug")) { die "\n\tFastDiagonals failed\n\n"; }
 
+    # Break our list of gene index entries into a proper list
+    my @TrueIndexList  = split(/\,/,$gene_index_list);
+    my $gene_index_len = scalar(@TrueIndexList);
+    my @RelativeList;
+    foreach my $start_end_pair (@TrueIndexList) {
+
+	$start_end_pair =~ /(\d+)\-(\d+)/;
+	my $start = $1;
+	my $end   = $2;
+
+	if ($revcomp) {
+	    $start = $RegionStart - $start;
+	    $end   = $RegionStart - $end;
+	} else {
+	    $start = $start - $RegionStart;
+	    $end   = $end   - $RegionStart;
+	}
+
+	push(@RelativeList,$start);
+	push(@RelativeList,$end);
+
+    }
+    
+    my $nucl_seq_len = abs($RegionStart-$RegionEnd)+1;
+
+    # Construct our FastDiagonals command
+    my $FDcmd = './FastDiagonals "'.$protfile.'" "'.$nuclfile.'" ';
+    $FDcmd = $FDcmd.' '.$nucl_seq_len.' '.$gene_index_len;
+    foreach my $relative_pos (@RelativeList) { $FDcmd = $FDcmd.' '.$relative_pos; }
+    $FDcmd = $FDcmd.' |';
+
     # Run FastDiagonals
     $timeA = [Time::HiRes::gettimeofday()] if ($timing);
-    open(my $stdoutput,"\.\/FastDiagonals $protfile $nuclfile \|") || die "\n\tFastDiagonals failed\n\n";
+    open(my $stdoutput,$FDcmd) || die "\n\tFastDiagonals failed (command: FDcmd)\n\n";
     if ($timing) {
 	@{$timingdata}[2] += Time::HiRes::tv_interval($timeA);
 	@{$timingdata}[3]++;
     }
 
-    my $startoffsetChars;
-    my $numDiagonals;
-    my $fullDiagLength;
-    my @DiagProtStarts;
-    my @DiagProtEnds;
-    my @DiagScores;
-    my $numTerms;
-    my @TermProtStarts;
-    my @TermNuclEnds;
-    my @TermScores;
-    my $stopCodonFound;
-    my $endoffsetLength;
-    my $endoffsetChars;
-    my $line;
-    my @genTuple; # Generic tuple
+    # We should be able to just iterate over our IndexList entries,
+    # thanks to the way that FastDiagonals provides output...
+    foreach my $index_entry (@TrueIndexList) {
 
-    # Considering offsets of 0, 1, and 2
-    my $startoffsetLength = 0;
-    while ($startoffsetLength < 2) { # NOTE: Incrementing happens at the end, so 2 DOES get counted
-	
-	# Resetting our arrays
-	@DiagProtStarts   = ();
-	@DiagProtEnds     = ();
-	@DiagScores       = ();
-	@TermProtStarts   = ();
-	@TermNuclEnds     = ();
-	@TermScores       = ();
-	
-	# 1.
-	# Read in the current starting offset and record the
-	# characters this corresponds to (if relevant)
-	# Try to get ahead of failures:
-	$startoffsetLength = <$stdoutput>;
-	if ($startoffsetLength =~ /ERROR/) { die "\n  $startoffsetLength (FD on $protfile and $nuclfile)\n\n"; }
-	last if ($startoffsetLength !~ /[012]/);
+	$index_entry  =~ /(\d+)\-(\d+)/;
+	my $NuclStart = $1;
+	my $NuclEnd   = $2;
 
-	$startoffsetLength = int($startoffsetLength);
-
-	if ($startoffsetLength) {
-	    $line = <$stdoutput>;
-	    $line =~ s/\n|\r//g;
-	    $startoffsetChars = $line;
-	} else {
-	    $startoffsetChars = 0;
+	# We'll flip these if we're in revcomp-land
+	if ($revcomp) {
+	    my $temp = $NuclStart;
+	    $NuclStart = $NuclEnd;
+	    $NuclEnd = $temp;
 	}
+
+	my $startoffsetChars;
+	my $numDiagonals;
+	my $fullDiagLength;
+	my @DiagProtStarts;
+	my @DiagProtEnds;
+	my @DiagScores;
+	my $numTerms;
+	my @TermProtStarts;
+	my @TermNuclEnds;
+	my @TermScores;
+	my $stopCodonFound;
+	my $endoffsetLength;
+	my $endoffsetChars;
+	my $line;
+	my @genTuple; # Generic tuple
 	
-	# 4.
-	# How long is the end offset? This is also where
-	# we check whether a stop codon was hit, which
-	# is recorded.  Eventually we might want to just not
-	# record non-terminal hits that end in a stop codon...
-	$endoffsetLength = <$stdoutput>;
-	$endoffsetLength =~ s/\r|\n//g;
-	if ($endoffsetLength eq 'X') { # Stop codon!
-
-	    $stopCodonFound = 1;
-
-	} else {
-
-	    $stopCodonFound = 0;
-
-	    $endoffsetLength = int($endoffsetLength);
-	    if ($endoffsetLength) {
+	# Considering offsets of 0, 1, and 2
+	my $startoffsetLength = 0;
+	while ($startoffsetLength < 2) { # NOTE: Incrementing happens at the end, so 2 DOES get counted
+	    
+	    # Resetting our arrays
+	    @DiagProtStarts   = ();
+	    @DiagProtEnds     = ();
+	    @DiagScores       = ();
+	    @TermProtStarts   = ();
+	    @TermNuclEnds     = ();
+	    @TermScores       = ();
+	    
+	    # 1.
+	    # Read in the current starting offset and record the
+	    # characters this corresponds to (if relevant)
+	    # Try to get ahead of failures:
+	    $startoffsetLength = <$stdoutput>;
+	    while ($startoffsetLength !~ /\S/) { $startoffsetLength = <$stdoutput>; }
+	    if ($startoffsetLength =~ /ERROR/) { die "\n  $startoffsetLength (FD on $protfile and $nuclfile)\n\n"; }
+	    last if ($startoffsetLength !~ /[012]/);
+	    
+	    $startoffsetLength = int($startoffsetLength);
+	    
+	    if ($startoffsetLength) {
 		$line = <$stdoutput>;
 		$line =~ s/\n|\r//g;
-		$endoffsetChars = $line;
+		$startoffsetChars = $line;
 	    } else {
-		$endoffsetChars = 0;
+		$startoffsetChars = 0;
 	    }
-	}
-
-	
-	# 2.
-	# Read in how many diagonals there are, and how many
-	# amino acids a full diagonal contains.  Then, read
-	# in the diagonal starting positions and scores.
-	$line = <$stdoutput>;
-	$line =~ s/\r|\n//g;
-	@genTuple = split(' ',$line);
-
-	$numDiagonals   = int($genTuple[0]);
-	$fullDiagLength = int($genTuple[1]);
-	
-	my $codonStart = $NuclStart;
-	if ($revcomp) { $codonStart -= $startoffsetLength; }      
-	else          { $codonStart += $startoffsetLength; }
-
-	my $codonEnd = $NuclEnd; # In the event of a stop codon, go long
-	if (!$stopCodonFound) {
-	    if ($revcomp) { $codonEnd = ($codonStart-((3*$fullDiagLength)-1))-$endoffsetLength; }
-	    else          { $codonEnd = ($codonStart+((3*$fullDiagLength)-1))+$endoffsetLength; }
-	}
-	
-	foreach my $i (0..$numDiagonals-1) {
-
-	    $line = <$stdoutput>;
-	    $line =~ s/\r|\n//g;
-
-	    # We don't need to record non-terminal hits that ended in
-	    # a stop codon.
-	    if (!$stopCodonFound) {
-
-		@genTuple = split(' ',$line);
-
-		${$Chromosome->{ProtStarts}}[$diagNum]  = $genTuple[0];
-		${$Chromosome->{ProtEnds}}[$diagNum]    = $genTuple[0]+$fullDiagLength-1;
-		${$Chromosome->{ProtStrings}}[$diagNum] = ${$Chromosome->{ProtStarts}}[$diagNum].'-'.${$Chromosome->{ProtEnds}}[$diagNum];
-		${$Chromosome->{NuclStarts}}[$diagNum]  = $NuclStart;
-		${$Chromosome->{NuclEnds}}[$diagNum]    = $NuclEnd;
+	    
+	    # 4.
+	    # How long is the end offset? This is also where
+	    # we check whether a stop codon was hit, which
+	    # is recorded.  Eventually we might want to just not
+	    # record non-terminal hits that end in a stop codon...
+	    $endoffsetLength = <$stdoutput>;
+	    $endoffsetLength =~ s/\r|\n//g;
+	    if ($endoffsetLength eq 'X') { # Stop codon!
 		
-		${$Chromosome->{StartOffsetLengths}}[$diagNum] = $startoffsetLength;
-		${$Chromosome->{StartOffsets}}[$diagNum]       = $startoffsetChars;
-		${$Chromosome->{EndOffsetLengths}}[$diagNum]   = $endoffsetLength;
-		${$Chromosome->{EndOffsets}}[$diagNum]         = $endoffsetChars;
+		$stopCodonFound = 1;
 		
-		${$Chromosome->{NuclStrings}}[$diagNum] = $codonStart.'-'.$codonEnd;
-
-		${$Chromosome->{Scores}}[$diagNum]     = $genTuple[1];
-		${$Chromosome->{StopCodon}}[$diagNum]  = 0;
-		${$Chromosome->{IsTerminal}}[$diagNum] = 0;
+	    } else {
 		
-		$diagNum++;
+		$stopCodonFound = 0;
+		
+		$endoffsetLength = int($endoffsetLength);
+		if ($endoffsetLength) {
+		    $line = <$stdoutput>;
+		    $line =~ s/\n|\r//g;
+		    $endoffsetChars = $line;
+		} else {
+		    $endoffsetChars = 0;
+		}
 	    }
-
-	}
-	
-	# 3.
-	# Read in how many diagonals we started and then
-	# terminated because they reached the end of the 
-	# protein sequence.
-	$numTerms = int(<$stdoutput>);
-	foreach my $i (0..$numTerms-1) {
-
+	    
+	    
+	    # 2.
+	    # Read in how many diagonals there are, and how many
+	    # amino acids a full diagonal contains.  Then, read
+	    # in the diagonal starting positions and scores.
 	    $line = <$stdoutput>;
 	    $line =~ s/\r|\n//g;
 	    @genTuple = split(' ',$line);
 	    
-	    # Add all our information into the Chromosome (DiagonalSet object)
-	    ${$Chromosome->{ProtStarts}}[$diagNum]  = $genTuple[0];
-	    ${$Chromosome->{ProtEnds}}[$diagNum]    = $proteinLength-1;
-	    ${$Chromosome->{ProtStrings}}[$diagNum] = ${$Chromosome->{ProtStarts}}[$diagNum].'-'.${$Chromosome->{ProtEnds}}[$diagNum];
-
-	    # There's no actual need to know the end nucleotide on terminals -- just walk it in!
-	    ${$Chromosome->{NuclStarts}}[$diagNum] = $NuclStart;
-	    if ($revcomp) {
-		${$Chromosome->{NuclEnds}}[$diagNum] = $NuclStart-(3*(1+$proteinLength-$genTuple[0])-1);
-	    } else {
-		${$Chromosome->{NuclEnds}}[$diagNum] = $NuclStart+(3*(1+$proteinLength-$genTuple[0])-1);
+	    $numDiagonals   = int($genTuple[0]);
+	    $fullDiagLength = int($genTuple[1]);
+	    
+	    my $codonStart = $NuclStart;
+	    if ($revcomp) { $codonStart -= $startoffsetLength; }      
+	    else          { $codonStart += $startoffsetLength; }
+	    
+	    my $codonEnd = $NuclEnd; # In the event of a stop codon, go long
+	    if (!$stopCodonFound) {
+		if ($revcomp) { $codonEnd = ($codonStart-((3*$fullDiagLength)-1))-$endoffsetLength; }
+		else          { $codonEnd = ($codonStart+((3*$fullDiagLength)-1))+$endoffsetLength; }
 	    }
 	    
-	    ${$Chromosome->{StartOffsetLengths}}[$diagNum] = $startoffsetLength;
-	    ${$Chromosome->{StartOffsets}}[$diagNum]       = $startoffsetChars;
-	    ${$Chromosome->{EndOffsetLengths}}[$diagNum]   = 0;
-	    ${$Chromosome->{EndOffsets}}[$diagNum]         = 0;
-
-	    ${$Chromosome->{NuclStrings}}[$diagNum] = $codonStart.'-X';
+	    foreach my $i (0..$numDiagonals-1) {
+		
+		$line = <$stdoutput>;
+		$line =~ s/\r|\n//g;
+		
+		# We don't need to record non-terminal hits that ended in
+		# a stop codon.
+		if (!$stopCodonFound) {
+		    
+		    @genTuple = split(' ',$line);
+		    
+		    ${$Chromosome->{ProtStarts}}[$diagNum]  = $genTuple[0];
+		    ${$Chromosome->{ProtEnds}}[$diagNum]    = $genTuple[0]+$fullDiagLength-1;
+		    ${$Chromosome->{ProtStrings}}[$diagNum] = ${$Chromosome->{ProtStarts}}[$diagNum].'-'.${$Chromosome->{ProtEnds}}[$diagNum];
+		    ${$Chromosome->{NuclStarts}}[$diagNum]  = $NuclStart;
+		    ${$Chromosome->{NuclEnds}}[$diagNum]    = $NuclEnd;
+		    
+		    ${$Chromosome->{StartOffsetLengths}}[$diagNum] = $startoffsetLength;
+		    ${$Chromosome->{StartOffsets}}[$diagNum]       = $startoffsetChars;
+		    ${$Chromosome->{EndOffsetLengths}}[$diagNum]   = $endoffsetLength;
+		    ${$Chromosome->{EndOffsets}}[$diagNum]         = $endoffsetChars;
+		    
+		    ${$Chromosome->{NuclStrings}}[$diagNum] = $codonStart.'-'.$codonEnd;
+		    
+		    ${$Chromosome->{Scores}}[$diagNum]     = $genTuple[1];
+		    ${$Chromosome->{StopCodon}}[$diagNum]  = 0;
+		    ${$Chromosome->{IsTerminal}}[$diagNum] = 0;
+		    
+		    $diagNum++;
+		}
+		
+	    }
 	    
-	    ${$Chromosome->{Scores}}[$diagNum]     = $genTuple[1];
-	    ${$Chromosome->{StopCodon}}[$diagNum]  = $stopCodonFound;
-	    ${$Chromosome->{IsTerminal}}[$diagNum] = 1;
+	    # 3.
+	    # Read in how many diagonals we started and then
+	    # terminated because they reached the end of the 
+	    # protein sequence.
+	    $numTerms = int(<$stdoutput>);
+	    foreach my $i (0..$numTerms-1) {
+		
+		$line = <$stdoutput>;
+		$line =~ s/\r|\n//g;
+		@genTuple = split(' ',$line);
+		
+		# Add all our information into the Chromosome (DiagonalSet object)
+		${$Chromosome->{ProtStarts}}[$diagNum]  = $genTuple[0];
+		${$Chromosome->{ProtEnds}}[$diagNum]    = $proteinLength-1;
+		${$Chromosome->{ProtStrings}}[$diagNum] = ${$Chromosome->{ProtStarts}}[$diagNum].'-'.${$Chromosome->{ProtEnds}}[$diagNum];
+		
+		# There's no actual need to know the end nucleotide on terminals -- just walk it in!
+		${$Chromosome->{NuclStarts}}[$diagNum] = $NuclStart;
+		if ($revcomp) {
+		    ${$Chromosome->{NuclEnds}}[$diagNum] = $NuclStart-(3*(1+$proteinLength-$genTuple[0])-1);
+		} else {
+		    ${$Chromosome->{NuclEnds}}[$diagNum] = $NuclStart+(3*(1+$proteinLength-$genTuple[0])-1);
+		}
+		
+		${$Chromosome->{StartOffsetLengths}}[$diagNum] = $startoffsetLength;
+		${$Chromosome->{StartOffsets}}[$diagNum]       = $startoffsetChars;
+		${$Chromosome->{EndOffsetLengths}}[$diagNum]   = 0;
+		${$Chromosome->{EndOffsets}}[$diagNum]         = 0;
+		
+		${$Chromosome->{NuclStrings}}[$diagNum] = $codonStart.'-X';
+		
+		${$Chromosome->{Scores}}[$diagNum]     = $genTuple[1];
+		${$Chromosome->{StopCodon}}[$diagNum]  = $stopCodonFound;
+		${$Chromosome->{IsTerminal}}[$diagNum] = 1;
+		
+		$Chromosome->{NumTerminals}++;
+		$diagNum++;
+	    }
 	    
-	    $Chromosome->{NumTerminals}++;
-	    $diagNum++;
+	    $Chromosome->{NumHits} = $diagNum;
 	}
 
-	$Chromosome->{NumHits} = $diagNum;
     }
 
     # Exon down!

@@ -41,18 +41,26 @@ FindDiagonals
  char * Protein,
  int    ProtLength,
  char * NuclString,
- int    NuclLength,
+ int    start_index,
+ int    end_index,
  int    start_offset,
  int    debug
 )
 {
   int i,j,k;
 
-  // Calculate whether our current offset cuts a little something off the end
-  int end_offset  = (NuclLength - start_offset) % 3;
+  // How long is our start-end run?
+  int nucl_length = (end_index - start_index) + 1;
+
+  // Calculate whether our current offset cuts a little something off the end  
+  int end_offset = (nucl_length - start_offset) % 3;
+
+  // Figure out where our "true" start and end positions are
+  int true_start_index = start_index + start_offset;
+  int true_end_index   = end_index - end_offset;
 
   // What will be the length of the translated string (barring stop codons)?
-  int TransLength = ((NuclLength - start_offset) - end_offset);
+  int TransLength = ((nucl_length - start_offset) - end_offset);
   if (TransLength % 3) printf("\n\tWARNING: NON-DIVISIBLE TRANSLATION!\n\n"); // Sanity check
   TransLength /= 3;
 
@@ -64,7 +72,7 @@ FindDiagonals
       return 1;
     }
     for (i=0; i<start_offset; i++)
-      start_nucls[i] = NuclString[i];
+      start_nucls[i] = NuclString[start_index+i];
   }
   
   // Record any ending offset characters
@@ -75,7 +83,7 @@ FindDiagonals
       return 1;
     }
     for (i=0; i<end_offset; i++)
-      end_nucls[i] = NuclString[start_offset+(3*TransLength)+i];
+      end_nucls[i] = NuclString[true_start_index+(3*TransLength)+i];
   }
   
   // Allocate some space for the translated sequence
@@ -89,7 +97,7 @@ FindDiagonals
   // codons and weirdness.
   j = 0;
   int stop_coded = 0;
-  for (i=start_offset; i<NuclLength-end_offset; i += 3) {
+  for (i=true_start_index; i<true_end_index; i += 3) {
 
     // Convert the next triple
     Translation[j] = DNAtoAA(NuclString[i],NuclString[i+1],NuclString[i+2]);
@@ -386,7 +394,7 @@ FindDiagonals
 int PrintUsageMsg ()
 {
   printf("\n\n");
-  printf("\tUSAGE:  ./FastDiagonals  <protein file>  <DNA file>  [-debug]\n\n");
+  printf("\tUSAGE:  ./FastDiagonals  <protein file>  <DNA file>  <DNA length>  <Num Exons>  {  <start> <end>  }  [-debug]\n\n");
   printf("\tABOUT:  This program performs a rapid pseudo-Smith-Waterman on a\n");
   printf("\t        protein sequence and a translated DNA sequence where only\n");
   printf("\t        diagonals (match states) are considered.\n");
@@ -404,14 +412,21 @@ int PrintUsageMsg ()
 int main (int argc, char ** argv) 
 {
 
-  // In case the user seems confused
-  if (argc < 3 || (argc == 4 && strcmp(argv[3],"-debug")) || argc > 4) 
+  // In case the user seems confused (actual usage should be quite a bit longer)
+  if (argc < 5)
     return PrintUsageMsg();
 
+  // Grab the number of exon index PAIRS (so the number of indices we grab should
+  // be double this)
+  int num_exon_index_pairs = atoi(argv[4]);
+  if (5+(2*num_exon_index_pairs) != argc)
+    return PrintUsageMsg();
+  
+  
   // In case the user's a human
   int debug = 0;
-  if (argc == 4) debug = 1;
-  
+  //if (argc == ) debug = 1; <<-- NEEDS TO BE RE-WORKED FOR INDEX-PAIR INPUT
+
   int i,j,k;
 
   // Open the protein FASTA file
@@ -488,9 +503,11 @@ int main (int argc, char ** argv)
   // we eat the header line char by char.
   while (fgetc(nuclfile) >= 32);
   
-  // Prep the DNA string
+  // Prep the DNA string -- NOTE that we expect this to be pretty gall-darn
+  // huge, since it should encapsulate the entire range of a given gene's
+  // coding region.
   int NuclLength = 0;
-  capacity = 512;
+  capacity = atoi(argv[3])+1;
   char * NuclString;
   if ((NuclString = malloc(capacity*sizeof(char))) == NULL) {
     printf("  ERROR:  Could not allocate string 'NuclString'!\n");
@@ -526,7 +543,12 @@ int main (int argc, char ** argv)
 
       if (NuclLength == capacity) {	
 
-	capacity *= 2;
+	// 2018/02/26 -- We shouldn't need to realloc now that FD is being passed the length
+	//               of the nucleotide sequence by Quilter
+	printf("  ERROR:  Why are you realloc-ing? (%d)\n",capacity);
+	return 1;
+
+	capacity += 100000; // Time for another dose of vitamin 100 KB!
 	
 	if ((NuclString = realloc(NuclString,capacity*sizeof(char))) == NULL) {
 	  printf("  ERROR:  Failed to reallocate string 'NuclString'!\n");
@@ -565,20 +587,27 @@ int main (int argc, char ** argv)
     printf("\n");
   }
 
-  // For offsets 0, 1, and 2, find all high-scoring diagonals
-  if (FindDiagonals(Protein,ProtLength,NuclString,NuclLength,0,debug)) {
-    printf("\n\tFAILURE at search 1\n\n");
-    return 1;
-  }
-  if (FindDiagonals(Protein,ProtLength,NuclString,NuclLength,1,debug)) {
-    printf("\n\tFAILURE at search 2\n\n");
-    return 1;
-  }
-  if (FindDiagonals(Protein,ProtLength,NuclString,NuclLength,2,debug)) {
-    printf("\n\tFAILURE at search 3\n\n");
-    return 1;
-  }
+  // Iterate over all of our fun little exon friends.
+  for (i=0; i<num_exon_index_pairs; i++) {
 
+    int start_index = atoi(argv[5+(2*i)]);
+    int end_index   = atoi(argv[6+(2*i)]);
+
+    // For offsets 0, 1, and 2, find all high-scoring diagonals
+    if (FindDiagonals(Protein,ProtLength,NuclString,start_index,end_index,0,debug)) {
+      printf("\n\tFAILURE at search 1\n\n");
+      return 1;
+    }
+    if (FindDiagonals(Protein,ProtLength,NuclString,start_index,end_index,1,debug)) {
+      printf("\n\tFAILURE at search 2\n\n");
+      return 1;
+    }
+    if (FindDiagonals(Protein,ProtLength,NuclString,start_index,end_index,2,debug)) {
+      printf("\n\tFAILURE at search 3\n\n");
+      return 1;
+    }
+    
+  }
 
   // Get outta here, you rascals!
   free(Protein);
