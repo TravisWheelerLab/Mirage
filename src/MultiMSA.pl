@@ -1679,7 +1679,7 @@ sub QuickAlign
 		    else                                     { $score = $mismatch_score; }
 
 		    $NWMatrix[$x+1][$y+1] = MAX($NWMatrix[$x][$y]+$score,
-						$NWMatrix[$x][$y+1]+$score+$gap_cost);
+						$NWMatrix[$x+1][$y]+$score+$gap_cost);
 		    
 		}
 	    }
