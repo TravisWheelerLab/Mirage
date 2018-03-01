@@ -1830,12 +1830,13 @@ sub RunFastDiagonals
 	my $NuclStart = $1;
 	my $NuclEnd   = $2;
 
-	# We'll flip these if we're in revcomp-land
-	if ($revcomp) {
-	    my $temp = $NuclStart;
-	    $NuclStart = $NuclEnd;
-	    $NuclEnd = $temp;
-	}
+	# We'll flip these if we're in revcomp-land, which means
+	# that 'NuclStart' is always going to be less than 'NuclEnd' <- good idea?
+	#if ($revcomp) {
+	#my $temp = $NuclStart;
+	#$NuclStart = $NuclEnd;
+	#$NuclEnd = $temp;
+	#}
 
 	my $startoffsetChars;
 	my $numDiagonals;
