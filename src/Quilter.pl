@@ -831,8 +831,6 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 }
 close($isoformfile);
 
-#close($GeneHitFile);
-#close($GeneMissFile);
 
 # Non-0 threads print their stats to a temporary file
 if ($threadID) {
@@ -1830,14 +1828,6 @@ sub RunFastDiagonals
 	my $NuclStart = $1;
 	my $NuclEnd   = $2;
 
-	# We'll flip these if we're in revcomp-land, which means
-	# that 'NuclStart' is always going to be less than 'NuclEnd' <- good idea?
-	#if ($revcomp) {
-	#my $temp = $NuclStart;
-	#$NuclStart = $NuclEnd;
-	#$NuclEnd = $temp;
-	#}
-
 	my $startoffsetChars;
 	my $numDiagonals;
 	my $fullDiagLength;
@@ -1885,7 +1875,7 @@ sub RunFastDiagonals
 		$startoffsetChars = 0;
 	    }
 	    
-	    # 4.
+	    # 2.
 	    # How long is the end offset? This is also where
 	    # we check whether a stop codon was hit, which
 	    # is recorded.  Eventually we might want to just not
@@ -1911,7 +1901,7 @@ sub RunFastDiagonals
 	    }
 	    
 	    
-	    # 2.
+	    # 3.
 	    # Read in how many diagonals there are, and how many
 	    # amino acids a full diagonal contains.  Then, read
 	    # in the diagonal starting positions and scores.
@@ -1965,7 +1955,7 @@ sub RunFastDiagonals
 		
 	    }
 	    
-	    # 3.
+	    # 4.
 	    # Read in how many diagonals we started and then
 	    # terminated because they reached the end of the 
 	    # protein sequence.
@@ -2176,14 +2166,6 @@ sub FindFullAlignments
 			    push(@FinalScores,$finalScore);
 			    $AlreadyRecd{$nextNuclString.$nextProtString} = 1;
 			}
-			
-			# Remove the chain of positions and offsets that got us here
-			# from the blacklist
-			#my @safePositions = split(/,/,$nextProtStart);
-			#my @safeOffsets   = split(/,/,$nextOffset);
-			#foreach $i (0..@safePositions-1) {
-			#$RedHerrings{$safePositions[$i].'/'.$safeOffsets[$i]} = 0;
-			#}
 			
 		    } else {
 			    
@@ -2823,7 +2805,6 @@ sub BLATAssistedSPALN
 		    if (system($eslsfetchCmd)) { die "\n\tERROR: Command '$eslsfetchCmd' failed (BAS)\n\n"; } 
 
 		    # Assemble the sytem call to run SPALN
-		    #my $spalnCmd = 'spaln -Q3 -O1 -S3 '.$nuclfilename.' '.$protfilename.' |';
 		    my $spalnCmd = 'spaln -Q3 -O1 -S3 -ya3 '.$nuclfilename.' '.$protfilename;
 		    $spalnCmd = $spalnCmd.' 2>/dev/null';# if (!$verbose);
 		    $spalnCmd = $spalnCmd.' |';	
@@ -2856,7 +2837,6 @@ sub BLATAssistedSPALN
 	    
 	    # Print out the hit line and head on home
 	    if ($highscore) {
-		#$hitline =~ s/Isoform ID \: GN\:/Isoform ID \: /; # NOTE: "GN:" ARTIFACT EXCISION
 		$hitline =~ s/Method     \: SPALN/Method     \: SPALN\+BLAT/;
 		print $HitFile  "$hitline";
 	    } else { 
@@ -2971,11 +2951,6 @@ sub ParseSPALNOutput
 	    #
 	    $hitscore = $1;
 
-	    # Grab the percent identity -- NOPE, THESE ARE WRONG ALL THE G.D. TIME
-	    #
-	    #$line =~ /\((\d+)\.\d+ \%\)[\s\n\r]+$/;
-	    #$percent  = $1;
-
 	    # It turns out we need to manually confirm that every
 	    # character is included, because SPALN loves pranking
 	    # me around.
@@ -3004,7 +2979,6 @@ sub ParseSPALNOutput
     if (eof($stdout)) {
 	close($stdout); 
 	return(0,0); 
-    #} elsif ($percent < 97 || $true_num_chars < $prot_len) {
     } elsif ($true_num_chars < $prot_len) {
 	close($stdout);
 	return(0,1); # <- This '1' might give us a second chance (pull in more sequence)
@@ -3214,12 +3188,6 @@ sub ParseSPALNOutput
     #
     return (0,1) if (100.0 - ($mismatches/$prot_len) < 97.0);
     
-
-    # Check if we failed to get the right number
-    # of amino acids.
-    #
-    #return(0,0) if ($num_aas != $prot_len);
-
 
     # Selenocysteine does some crazy stuff, man.  I translated some once
     # and I'm still coming down.
@@ -3650,6 +3618,14 @@ sub LooksRepetitive
 
 
 
+#########################################################################
+#
+#  Function Name:  GenSortIndex
+#
+#  About:  Figure out how an array should be sorted (note that this does
+#          not sort the array, but instead provides the order to access
+#          elements in that array).
+#
 sub GenSortIndex
 {
     my ($i,$j,$k);
