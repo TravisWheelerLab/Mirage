@@ -920,12 +920,18 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 			} else { 
 			    if (scalar(@IntronPositions) > 1) { $full_str = $full_str.'*'.$gap_str.$char_str; }
 			    else                              { $full_str = $gap_str.$char_str;               }
+
+			    # NOTE: We're going to use the terrible counting scheme where
+			    #       we start counting at 1, instead of 0 (which is why we
+			    #       use "ContentStart[$seq_id]+1")
+			    #
 			    if ($ARFNameField[$seq_id]) {
 				$ARFNameField[$seq_id] =~ s/ARF\:/ARFs\:/;
-				$ARFNameField[$seq_id] = $ARFNameField[$seq_id].','.$ContentStart[$seq_id].'..'.$ContentPosition[$seq_id];
+				$ARFNameField[$seq_id] = $ARFNameField[$seq_id].','.($ContentStart[$seq_id]+1).'..'.$ContentPosition[$seq_id];
 			    } else {
-				$ARFNameField[$seq_id] = 'ARF:'.$ContentStart[$seq_id].'..'.$ContentPosition[$seq_id];
+				$ARFNameField[$seq_id] = 'ARF:'.($ContentStart[$seq_id]+1).'..'.$ContentPosition[$seq_id];
 			    }
+
 			}
 
 			# NOW we can add in the ARF-y bit to the MSA

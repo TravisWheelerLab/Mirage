@@ -1167,7 +1167,7 @@ if ($timing) {
     print "    * Number of SPALN (non-BLAT) system calls... : $TimingData[6]\n";
     print "\n";
     print "      Time associated with BLAT+SPALN........ : $TimingData[8] seconds\n";
-    print "      System time spend running BLAT......... : $TimingData[7] seconds\n";
+    print "      System time spent running BLAT......... : $TimingData[7] seconds\n";
     print "      System time spent running SPALN (+BLAT) : $TimingData[9] seconds\n";
     print "      Number of SPALN (+BLAT) system calls... : $TimingData[10]\n";
     print "\n\n";
