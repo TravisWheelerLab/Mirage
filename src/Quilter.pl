@@ -1711,7 +1711,7 @@ sub BuildGeneIndex
 sub GetChromosomeLengths
 {
     my $nuclfilename = shift;
-    my $seqstatCmd = 'esl-seqstat -a '.$nuclfilename.' |';
+    my $seqstatCmd = 'esl-seqstat --dna -a '.$nuclfilename.' |';
 
     my %ChrLengths;    
     open(my $seqstats,$seqstatCmd);
