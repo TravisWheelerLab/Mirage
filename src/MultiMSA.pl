@@ -486,18 +486,33 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 		||($revcomp && $next_intron_pos > $genome_pos))) {
 
 	    # If there's an imminent boundary, we'll hold off until that one
-	    $intron_index++;
 	    if ($intron_index < @IntronIndex) {
-		
-		if ((!$revcomp && $IntronIndex[$intron_index-1]+10 < $IntronIndex[$intron_index])
-		    || ($revcomp && $IntronIndex[$intron_index-1]-10 > $IntronIndex[$intron_index])) {
+
+		# Easier catch for alt 5'
+		$intron_index++;
+
+		# Catch any cases where we have an suspected alt. 5' SS
+		if ((!$revcomp && $IntronIndex[$intron_index-1]+10 > $genome_pos)
+		    || ($revcomp && $IntronIndex[$intron_index-1]-10 < $genome_pos)) {
 		    
+		    $intron_index--;
+		    if ($revcomp) { $IntronIndex[$intron_index] -= 10; }
+		    else          { $IntronIndex[$intron_index] += 10; }
+		    
+		} else {
+
 		    for ($i=0; $i<$chr_hits; $i++) { $FinalMSA[$i][$msa_len] = '*'; }
 		    $msa_len++;
-		    
+
+		    while ($intron_index < @IntronIndex &&
+			   (($revcomp && $IntronIndex[$intron_index] > $genome_pos)
+			    || (!$revcomp && $IntronIndex[$intron_index] < $genome_pos))) {
+			$intron_index++;
+		    }
+
 		}
 		
-		$next_intron_pos = $IntronIndex[$intron_index];
+		$next_intron_pos = $IntronIndex[$intron_index] if ($intron_index < @IntronIndex);
 
 	    } else {
 
