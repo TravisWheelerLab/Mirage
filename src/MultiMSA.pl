@@ -16,11 +16,12 @@ use POSIX;
 use Cwd;
 
 
-sub MIN;         # Get the minimum of two values
-sub MAX;         # Get the maximum of two values
-sub AssembleMSA; # Pull together the final MSA
-sub SimpleClean; # Very basic cleanup, geared towards correcting little SPALN mistakes
-sub QuickAlign;  # Used to resolve indels
+sub MIN;            # Get the minimum of two values
+sub MAX;            # Get the maximum of two values
+sub AssembleMSA;    # Pull together the final MSA
+sub SimpleClean;    # Very basic cleanup, geared towards correcting little SPALN mistakes
+sub QuickAlign;     # Used to resolve indels
+sub GenARFClusters; # Cluster sequences when we've detected an ARF
 
 
 if (@ARGV < 2) { die "\n  USAGE:  perl  MultiMSA.pl  <Quilter output>  <Protein database>  [Opt.s]\n\n"; }
@@ -748,13 +749,30 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	while ($dis_index < scalar(@Disagreements)) {
 	    
 	    my $runner = $dis_index+1;
-	    $runner++ while ($runner < scalar(@Disagreements) && abs($Disagreements[$runner] - $Disagreements[$runner-1]) <= 4);
+	    my $intron_check = $Disagreements[$dis_index];
+	    while ($runner < scalar(@Disagreements) && abs($Disagreements[$runner] - $Disagreements[$runner-1]) <= 4) {
+
+		# Check to see if we encounter an intron marker around here...
+		my $intron_spotted = 0;
+		while ($intron_check < $Disagreements[$runner]) {
+		    if ($FinalMSA[0][$intron_check] eq '*') {
+			$intron_spotted = 1;
+			last;
+		    }
+		    $intron_check++;
+		}
+		last if ($intron_spotted);
+
+		$runner++;
+
+	    }
 
 	    if ($runner - $dis_index > 5) { push(@ARFIndices,$Disagreements[$dis_index].'-'.$Disagreements[$runner-1]); }
 	    
 	    $dis_index = $runner;
 
 	}
+
 
 	# If we have ARF indices, we'll need to make some adjustments...
 	# Included in this are considerations for how much we'll be increasing
@@ -767,12 +785,20 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 		$ContentPosition[$seq_id] = 0; 
 	    }
 
-	    my @ARFMSA;
-	    my $arfmsalen = 0;
-	    my $orig_pos  = 0;
-	    my $last_end  = 0;
+	    # This will be our MSA -- but don't tell anybody!
+	    my @ARFAdjustedMSA;
+	    my $adjusted_len=0;
+	    my $walking_pos=0;
+	    my $last_end=0;
+
+	    # A couple of variables we use to keep ARF/non-ARF choices
+	    # consistent
+	    my @IsNonARF;
+	    my $continuing_arf = 0;
+	    my $top_exon = -1;
+	    
 	    foreach my $msa_arf_pair (@ARFIndices) {
-		
+
 		#
 		#  In this loop we scan through each of the ARF indices (in the "original final" MSA)
 		#  and [1.] get caught up (in our ARFMSA) to the starting point, [2.] figure out if
@@ -783,228 +809,109 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 		my @ARFPair = split(/\-/,$msa_arf_pair);
 		my $start   = $ARFPair[0];
 		my $end     = $ARFPair[1]+1; # NOTE that ARFPair[1] is the INTERNAL end point!
-		my $arf_len = $end-$start;
+
+		# Are we continuing a known ARF over an intron boundary?
+		if ($start == $last_end + 1) { $continuing_arf = 1; }
+		else                         { $continuing_arf = 0; }
+
 		$last_end   = $end;
+		my $arf_len = $end-$start;
 
-		while ($orig_pos < $start) {
+		# Fill-in the adjusted MSA up to the start of the ARF region
+		while ($walking_pos < $start) {
+		    for  (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) {
+			$ARFAdjustedMSA[$seq_id][$adjusted_len] = $FinalMSA[$seq_id][$walking_pos];
+			if ($FinalMSA[$seq_id][$walking_pos] =~ /[A-Za-z]/) { $ContentPosition[$seq_id]++; }
+		    }
+		    $walking_pos++;
+		    $adjusted_len++;
+		}
+		$walking_pos = $end;
+
+		# Because ARF/non-ARF ties are broken secondarily by number of aminos
+		# in the exon (primarily by plurality), we need to figure out which
+		# sequence is most represented in the current exon
+		if (!$continuing_arf) {
+		    my $exon_start = $walking_pos-1;
+		    my $exon_end   = $walking_pos;
+		    while ($FinalMSA[0][$exon_start] ne '*') { $exon_start--; }
+		    while ($FinalMSA[0][$exon_end]   ne '*') { $exon_end++;   }
+		    my $top_exon_content = -1;
+		    $top_exon = -1;
 		    for (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) {
-			$ARFMSA[$seq_id][$arfmsalen] = $FinalMSA[$seq_id][$orig_pos];
-			$ContentPosition[$seq_id]++ if ($FinalMSA[$seq_id][$orig_pos] =~ /[A-Za-z]/);
+			my $seq_exon_content = 0;
+			for (my $pos=$exon_start+1; $pos<$exon_end; $pos++) {
+			    $seq_exon_content++ if ($FinalMSA[$seq_id][$pos] =~ /[A-Za-z]/);
+			}
+			if ($seq_exon_content > $top_exon_content) {
+			    $top_exon_content = $seq_exon_content;
+			    $top_exon = $seq_id;
+			}
 		    }
-		    $orig_pos++;
-		    $arfmsalen++;
 		}
 		
+
+		# How all my content creatorzzzz doin'?
 		my @ContentStart;
-		for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) { 
-		    $ContentStart[$seq_id] = $ContentPosition[$seq_id]; 
+		for (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) { 
+		    $ContentStart[$seq_id] = $ContentPosition[$seq_id];
 		}
-
-		# We'll cluster sequences by finding out (1.) which sequence in the
-		# ARF-candidate region is most common, and (2.) dividing between
-		# sequences that are like this (>50% ID) and those that are < 50%.
-		#
-		my %CandidateSeqHash;
-		my @CandidateSeqs;
-		my @Intronic;
-		for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) {
-		    my $letter_count = 0;
-		    my $nonletter_count = 0;
-		    my $seq_str = '';
-		    for (my $pos = $start; $pos < $end; $pos++) {
-			my $next_char = uc($FinalMSA[$seq_id][$pos]);
-			$seq_str = $seq_str.$next_char;
-			if ($next_char =~ /[A-Za-z]/) {
-			    $ContentPosition[$seq_id]++;
-			    $Intronic[$pos-$start] = 0;
-			    $letter_count++;
-			} else {
-			    $nonletter_count++;
-			    if ($next_char eq '*')  { $Intronic[$pos-$start] = 1; }
-			}
-		    }
-		    
-		    # Any sequences that don't have any sequence here will just
-		    # go to the most common (i.e., non-ARF-candidate) sequence.
-		    #
-		    if ($nonletter_count < $letter_count) { 
-			$CandidateSeqs[$seq_id] = $seq_str;
-			if ($CandidateSeqHash{$seq_str}) { $CandidateSeqHash{$seq_str}++; }
-			else                             { $CandidateSeqHash{$seq_str}=1; }
-		    } else {
-			$CandidateSeqs[$seq_id] = 0;
-		    }
-		}
-
-		# Get a list of intron positions (if there were any)
-		#
-		my @IntronPositions;
-		for (my $pos = 0; $pos<$arf_len; $pos++) { 
-		    if ($Intronic[$pos]) { push(@IntronPositions,$pos); } 
-		}
-		push(@IntronPositions,$arf_len);
 		
-		# Figure out which of the candidates is the canonical non-ARF
-		#
-		my $top_seq   = '!';
-		my $top_count = 0;
-		foreach my $cand_seq (keys %CandidateSeqHash) {
-		    my $cand_count = $CandidateSeqHash{$cand_seq};
-		    if ($cand_count > $top_count) {
-			$top_count = $cand_count;
-			$top_seq = $cand_seq;
-		    }
-		}
+		# Cluster those rowdy sequences
+		my ($arfmsa_ref,$arfmsalen,$is_non_arf_ref,$content_position_ref) 
+		    = GenARFClusters(\@FinalMSA,$chr_hits,$start,$end,\@ContentPosition,$top_exon);
+		my @ARFMSA = @{$arfmsa_ref};
+		@IsNonARF = @{$is_non_arf_ref} unless ($continuing_arf);
+		@ContentPosition = @{$content_position_ref};
 
-		# Not sure why this would happen, but whatever...
-		#
-		next if ($top_seq eq '!');
-		
-		# Alright -- who's aligned with the canonical non-ARF?
-		#
-		my @IsNonARF;
-		my @ReferenceChars = split(//,$top_seq);
-		my $ref_non_gaps = 0;
-		foreach my $ref_char (@ReferenceChars) {
-		    $ref_non_gaps++ if ($ref_char =~ /[a-zA-Z]/);
-		}
 
-		my $num_arf_seqs = 0; # In case we just want to leave this alone...
-		for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) {
-		    if ($CandidateSeqs[$seq_id]) {
-
-			my $id_positions = 0;
-			my @CandidateChars = split(//,$CandidateSeqs[$seq_id]);
-			for (my $pos = 0; $pos < $arf_len; $pos++) {
-			    next if ($ReferenceChars[$pos] !~ /[a-zA-Z]/);
-			    $id_positions++ if ($CandidateChars[$pos] eq $ReferenceChars[$pos]);
-			}
-
-			if ($id_positions / $ref_non_gaps > 0.75) {
-			    $IsNonARF[$seq_id] = 1;
+		for (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) {
+		    if (!$IsNonARF[$seq_id] && $ContentStart[$seq_id] < $ContentPosition[$seq_id]) {
+			if ($ARFNameField[$seq_id]) {
+			    $ARFNameField[$seq_id] =~ s/ARF\:/ARFs\:/;
+			    $ARFNameField[$seq_id] = $ARFNameField[$seq_id].','.($ContentStart[$seq_id]+1).'..'.$ContentPosition[$seq_id];
 			} else {
-			    $IsNonARF[$seq_id] = 0;
-			    $num_arf_seqs++;
+			    $ARFNameField[$seq_id] = 'ARF:'.($ContentStart[$seq_id]+1).'..'.$ContentPosition[$seq_id];
 			}
-
-		    } else {
-
-			# Gappy or low-content sequences will be noted as
-			# non-ARFs.
-			$IsNonARF[$seq_id] = 1;
-			
 		    }
 		}
 
-		# If we saw at least one strong arf candidate then we adjust the 
-		# MSA -- otherwise leave it alone!
-		#
-		# Note that by virtue of how we tabulate things this pseudo-arf
-		# will automatically be added to the alignment if we skip this
-		# conditional.
-		#
-		if ($num_arf_seqs) {
-
-		    for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) {
-
-			my $non_arf  = $IsNonARF[$seq_id];
-			my $full_str = '';
-			my $char_str = '';
-			my $gap_str  = '';
-			my $pos      = 0;
-			my $exon_num = 0;
-			while ($pos < $arf_len) {
-			    if ($pos == $IntronPositions[$exon_num]) {
-				$exon_num++;
-				if ($non_arf) { $full_str = $full_str.'*'.$char_str.$gap_str; }
-				else          { $full_str = $full_str.'*'.$gap_str.$char_str; }
-				$char_str = '';
-				$gap_str  = '';
-			    } else {
-				$char_str = $char_str.$FinalMSA[$seq_id][$start+$pos];
-				$gap_str  = $gap_str.'-';
-			    }
-			    $pos++;
-			}
-
-			# Record the altered sequence!  Also, record the range if we're the ARF
-			#
-			if ($non_arf) { 
-			    if (scalar(@IntronPositions) > 1) { $full_str = $full_str.'*'.$char_str.$gap_str; }
-			    else                              { $full_str = $char_str.$gap_str;               }
-			} else { 
-			    if (scalar(@IntronPositions) > 1) { $full_str = $full_str.'*'.$gap_str.$char_str; }
-			    else                              { $full_str = $gap_str.$char_str;               }
-
-			    # NOTE: We're going to use the terrible counting scheme where
-			    #       we start counting at 1, instead of 0 (which is why we
-			    #       use "ContentStart[$seq_id]+1")
-			    #
-			    if ($ARFNameField[$seq_id]) {
-				$ARFNameField[$seq_id] =~ s/ARF\:/ARFs\:/;
-				$ARFNameField[$seq_id] = $ARFNameField[$seq_id].','.($ContentStart[$seq_id]+1).'..'.$ContentPosition[$seq_id];
-			    } else {
-				$ARFNameField[$seq_id] = 'ARF:'.($ContentStart[$seq_id]+1).'..'.$ContentPosition[$seq_id];
-			    }
-
-			}
-
-			# NOW we can add in the ARF-y bit to the MSA
-			#
-			$pos = $arfmsalen;	
-			foreach my $char (split(//,$full_str)) { $ARFMSA[$seq_id][$pos++] = $char; }
-
-			# Shifting our 'big-picture' of the MSA forward
-			if ($seq_id == $chr_hits-1) { $arfmsalen = $pos; }
-
+		# Fill in the ARF content in our adusted MSA
+		for (my $j=0; $j<$arfmsalen; $j++) {
+		    for (my $i=0; $i<$chr_hits; $i++) {
+			$ARFAdjustedMSA[$i][$adjusted_len] = $ARFMSA[$i][$j];
 		    }
-		    
-		} else {
-
-		    # Just a straightforward copy from 'FinalMSA'
-		    #
-		    while ($start < $end) {
-			for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) {			    
-			    $ARFMSA[$seq_id][$arfmsalen] = $FinalMSA[$seq_id][$start];
-			}
-			$start++;
-			$arfmsalen++;
-		    }
-		    
+		    $adjusted_len++;
 		}
-
-		$orig_pos = $end;
 
 	    }
 
-
-	    # We'll need to really quickly incorporate everything after the last
-	    # ARF candidate.
+	    # We need to pick up everything after the final ARF, too...
 	    #
-	    while ($last_end < $final_len) {
-		for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) {
-		    $ARFMSA[$seq_id][$arfmsalen] = $FinalMSA[$seq_id][$last_end];
+	    for (my $j=$last_end; $j<$final_len; $j++) {
+		for (my $i=0; $i<$chr_hits; $i++) {
+		    $ARFAdjustedMSA[$i][$adjusted_len] = $FinalMSA[$i][$j];
 		}
-		$arfmsalen++;
-		$last_end++;
+		$adjusted_len++;
 	    }
+	    
 
-	    # Swap ARFMSA into the FinalMSA variables
+	    # Move ARFAdjustedMSA into the FinalMSA variables
 	    #
 	    # NOTE:  It's been observed that there are some pathological ARFs that
 	    #        are recognized as having inserted AAs relative to the genome,
 	    #        so we need to do ANOTHER check for all-gap columns
 	    #
 	    $final_len = 0;
-	    for (my $j=0; $j<$arfmsalen; $j++) {
+	    for (my $j=0; $j<$adjusted_len; $j++) {
 		my $not_all_gaps = 0;
-		for (my $i=0; $i<$chr_hits; $i++) {
-		    $FinalMSA[$i][$final_len] = $ARFMSA[$i][$j];
-		    $not_all_gaps = 1 if ($ARFMSA[$i][$j] ne '-');
-		}
+		    for (my $i=0; $i<$chr_hits; $i++) {
+			$FinalMSA[$i][$final_len] = $ARFAdjustedMSA[$i][$j];
+			$not_all_gaps = 1 if ($ARFAdjustedMSA[$i][$j] ne '-');
+		    }
 		$final_len += $not_all_gaps;
 	    }
-	    
+
 	}
 
     }
@@ -1754,6 +1661,174 @@ sub QuickAlign
     #
     return \@FinalColumn;
 	
+}
+
+
+
+
+
+################################################################
+#
+# FUNCTION: GenARFClusters
+#
+sub GenARFClusters
+{
+    
+    my $msa_ref = shift;
+    my @MSA = @{$msa_ref};
+
+    my $num_seqs = shift;
+    my $start    = shift;
+    my $end      = shift;
+
+    my $content_position_ref = shift;
+    my @ContentPosition = @{$content_position_ref};
+
+    # Just a reminder, this is the ID of the sequence with the most
+    # content across the whole exon.
+    my $top_exon = shift;
+    my $top_exon_cluster;
+
+    # Clusters of sequences, grouped by agreement about exon content
+    my @Clusters;
+    my @ClusterReps;
+    my @ClusterContent;
+    my $num_clusters = 0;
+
+    # A special cluster for sequences that don't have this exon (so
+    # that they don't sway ARF/non-ARF voting).
+    my $EmptyCluster = '';
+ 
+    for (my $i=0; $i<$num_seqs; $i++) {
+
+	# We need to do an independent catch for this (how many aminos do we advance?)
+	my $seq_content = 0;
+	for (my $j=$start; $j<$end; $j++) {
+	    if ($MSA[$i][$j] =~ /[A-Za-z]/) { 
+		$ContentPosition[$i]++; 
+		$seq_content++;
+	    }
+	}
+
+	# Empty cluster!
+	if ($seq_content == 0) {
+	    if ($EmptyCluster) { $EmptyCluster = $EmptyCluster.','.$i; }
+	    else               { $EmptyCluster = $i;                   }
+	    next;
+	}
+
+	my $min_mismatches = ($end - $start) + 1;
+	my $min_mismatch_cluster = -1;
+	for (my $j=0; $j<$num_clusters; $j++) {
+
+	    # x is the sequence id of the sequence that represents
+	    # this cluster
+	    my $x = $ClusterReps[$j];
+
+	    # Check how many mismatches we have between the two sequences
+	    # we're considering clustering
+	    my $num_mismatches = 0;
+	    for (my $k=$start; $k<$end; $k++) {
+		if ($MSA[$i][$k] =~ /[A-Za-z]/ && $MSA[$x][$k] =~ /[A-Za-z]/) {
+		    $num_mismatches++ if (uc($MSA[$i][$k]) ne uc($MSA[$x][$k]));
+		}		
+	    }
+
+	    # Is this (1.) good enough to consider clustering, and (2.)
+	    # the best clustering we've seen
+	    if ($num_mismatches < 3 && $num_mismatches < $min_mismatches) {
+		$min_mismatches = $num_mismatches;
+		$min_mismatch_cluster = $j;
+	    }
+	    
+	}
+
+	# If we had a sweeeeet clustering, use that.  Otherwise,
+	# make a hip new one that all the teens will love.
+	if ($min_mismatch_cluster >= 0) {
+	    $Clusters[$min_mismatch_cluster] = $Clusters[$min_mismatch_cluster].','.$i;
+	    if ($seq_content > $ClusterContent[$min_mismatch_cluster]) {
+		$ClusterContent[$min_mismatch_cluster] = $seq_content;
+		$ClusterReps[$min_mismatch_cluster] = $i;
+	    }
+	    if ($i == $top_exon) {
+		$top_exon_cluster = $min_mismatch_cluster;
+		$top_exon = -1;
+	    }
+	} else {
+	    push(@Clusters,$i);
+	    $ClusterReps[$num_clusters] = $i;
+	    $ClusterContent[$num_clusters] = $seq_content;
+	    if ($i == $top_exon) {
+		$top_exon_cluster = $num_clusters;
+		$top_exon = -1;
+	    }
+	    $num_clusters++;
+	}
+	
+    }
+
+    # Radical!  Now that all of our sequences are clustered, we can figure
+    # out (1.) which cluster constitutes the canonical non-ARF, and build
+    # up the MSA that we'll use to represent this ARF-tastic region.
+
+    my $non_arf_cluster = 0;
+    my $tied_with = -1; 
+    for (my $i=1; $i<$num_clusters; $i++) {
+	if (scalar(split(/\,/,$Clusters[$i])) > scalar(split(/\,/,$Clusters[$non_arf_cluster]))) {
+	    $non_arf_cluster = $i;
+	    $tied_with = -1;
+	} elsif (scalar(split(/\,/,$Clusters[$i])) >= scalar(split(/\,/,$Clusters[$non_arf_cluster]))) {
+	    $tied_with = $i;
+	}
+    }
+
+    # If we had a tie between two clusters, we see which representative had
+    # the exon with more content (and if that's a tie, we don't know what to do).
+    if ($tied_with >= 0) {
+	if ($tied_with == $top_exon_cluster) {
+	    $non_arf_cluster = $tied_with;
+	}
+    }
+
+    # Now that we have a winner of the non-ARF award, we attach the empty
+    # clusters onto that group.
+    if ($EmptyCluster) {
+	$Clusters[$non_arf_cluster] = $Clusters[$non_arf_cluster].','.$EmptyCluster;
+    }
+
+    # Let's just go ahead and record a binary array of 'IsNonARF'
+    my @IsNonARF;
+    for (my $seq_id=0; $seq_id<$num_seqs; $seq_id++) { $IsNonARF[$seq_id] = 0; }
+    foreach my $seq_id (split(/\,/,$Clusters[$non_arf_cluster])) { $IsNonARF[$seq_id] = 1; }
+
+    # Building up that nasty ARFMSA
+    my @ARFMSA;
+    my $arf_len = ($end - $start) + 1;
+    for (my $i=0; $i<$num_seqs; $i++) {
+	for (my $j=0; $j<$arf_len * $num_clusters; $j++) {
+	    $ARFMSA[$i][$j] = '-';
+	}	
+    }
+
+    for (my $cluster_id = 0; $cluster_id < $num_clusters; $cluster_id++) {
+	
+	foreach my $seq_id (split(/\,/,$Clusters[$cluster_id])) {
+
+	    my $cluster_start = $cluster_id * $arf_len;
+	    my $orig_start = $start;
+	    for (my $j=0; $j<$arf_len; $j++) {
+		$ARFMSA[$seq_id][$cluster_start+$j] = $MSA[$seq_id][$orig_start+$j];
+	    }
+	    
+	}
+	
+    }
+
+    # Cool! Now we have an ARFMSA that's ready to be inserted into that nasty old
+    # MSA!
+    return(\@ARFMSA,($arf_len*$num_clusters),\@IsNonARF,\@ContentPosition);
+    
 }
 
 
