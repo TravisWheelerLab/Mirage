@@ -1698,7 +1698,7 @@ sub GenARFClusters
     # Just a reminder, this is the ID of the sequence with the most
     # content across the whole exon.
     my $top_exon = shift;
-    my $top_exon_cluster;
+    my $top_exon_cluster = -1;
 
     # If we're continuing an existing ARF, we don't need to worry
     # about identifying the clusters -- just splitting things up.
@@ -1815,8 +1815,13 @@ sub GenARFClusters
 	
 	# If we had a tie between two clusters, we see which representative had
 	# the exon with more content (and if that's a tie, we don't know what to do).
+	#
+	# NOTE: There's a weird possibility that the sequence with the most content
+	#       across the ARF-ish exon has no content in the specific region of the
+	#       disagreeing sequence.
+	#
 	if ($tied_with >= 0) {
-	    if ($tied_with == $top_exon_cluster) {
+	    if ($top_exon_cluster >= 0 && $tied_with == $top_exon_cluster) {
 		$non_arf_cluster = $tied_with;
 	    }
 	}
