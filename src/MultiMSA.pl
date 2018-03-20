@@ -794,6 +794,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	    # A couple of variables we use to keep ARF/non-ARF choices
 	    # consistent
 	    my @IsNonARF;
+	    my @ARFClusters;
 	    my $continuing_arf = 0;
 	    my $top_exon = -1;
 	    
@@ -858,11 +859,21 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 		}
 		
 		# Cluster those rowdy sequences
-		my ($arfmsa_ref,$arfmsalen,$is_non_arf_ref,$content_position_ref) 
-		    = GenARFClusters(\@FinalMSA,$chr_hits,$start,$end,\@ContentPosition,$top_exon);
-		my @ARFMSA = @{$arfmsa_ref};
-		@IsNonARF = @{$is_non_arf_ref} unless ($continuing_arf);
-		@ContentPosition = @{$content_position_ref};
+		my ($arfmsa_ref,$arfmsalen,$is_non_arf_ref,$content_position_ref,$arf_clusters_ref);
+		my @ARFMSA;
+		if ($continuing_arf) {
+		    ($arfmsa_ref,$arfmsalen,$is_non_arf_ref,$content_position_ref,$arf_clusters_ref) 
+			= GenARFClusters(\@FinalMSA,$chr_hits,$start,$end,\@ContentPosition,$top_exon,\@ARFClusters);
+		    @ARFMSA = @{$arfmsa_ref};
+		    @ContentPosition = @{$content_position_ref};
+		} else {
+		    ($arfmsa_ref,$arfmsalen,$is_non_arf_ref,$content_position_ref,$arf_clusters_ref)
+			= GenARFClusters(\@FinalMSA,$chr_hits,$start,$end,\@ContentPosition,$top_exon,0);
+		    @ARFMSA = @{$arfmsa_ref};
+		    @ContentPosition = @{$content_position_ref};
+		    @IsNonARF = @{$is_non_arf_ref};
+		    @ARFClusters = @{$arf_clusters_ref};
+		}
 
 
 		for (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) {
@@ -1689,19 +1700,21 @@ sub GenARFClusters
     my $top_exon = shift;
     my $top_exon_cluster;
 
+    # If we're continuing an existing ARF, we don't need to worry
+    # about identifying the clusters -- just splitting things up.
+    my $continuing_arf = shift;
+
     # Clusters of sequences, grouped by agreement about exon content
     my @Clusters;
-    my @ClusterReps;
-    my @ClusterContent;
-    my $num_clusters = 0;
+    my $num_clusters;
 
-    # A special cluster for sequences that don't have this exon (so
-    # that they don't sway ARF/non-ARF voting).
-    my $EmptyCluster = '';
- 
+    # A binary array of whether or not a sequence is considered one of the
+    # ARF-havers.
+    my @IsNonARF;
+
+    # We need to do an independent catch for this (how many aminos do we advance?)
+    my @SeqContents;
     for (my $i=0; $i<$num_seqs; $i++) {
-
-	# We need to do an independent catch for this (how many aminos do we advance?)
 	my $seq_content = 0;
 	for (my $j=$start; $j<$end; $j++) {
 	    if ($MSA[$i][$j] =~ /[A-Za-z]/) { 
@@ -1709,98 +1722,122 @@ sub GenARFClusters
 		$seq_content++;
 	    }
 	}
+	$SeqContents[$i] = $seq_content;
+    }
+	    
+    # Oh, dear!  Time to do some clustering
+    if (!$continuing_arf) {
 
-	# Empty cluster!
-	if ($seq_content == 0) {
-	    if ($EmptyCluster) { $EmptyCluster = $EmptyCluster.','.$i; }
-	    else               { $EmptyCluster = $i;                   }
-	    next;
-	}
+	my @ClusterReps;
+	my @ClusterContent;
+	$num_clusters = 0;
 
-	my $min_mismatches = ($end - $start) + 1;
-	my $min_mismatch_cluster = -1;
-	for (my $j=0; $j<$num_clusters; $j++) {
-
-	    # x is the sequence id of the sequence that represents
-	    # this cluster
-	    my $x = $ClusterReps[$j];
-
-	    # Check how many mismatches we have between the two sequences
-	    # we're considering clustering
-	    my $num_mismatches = 0;
-	    for (my $k=$start; $k<$end; $k++) {
-		if ($MSA[$i][$k] =~ /[A-Za-z]/ && $MSA[$x][$k] =~ /[A-Za-z]/) {
-		    $num_mismatches++ if (uc($MSA[$i][$k]) ne uc($MSA[$x][$k]));
-		}		
+	# A special cluster for sequences that don't have this exon (so
+	# that they don't sway ARF/non-ARF voting).
+	my $EmptyCluster = '';
+	
+	# Iterate over each of our sequences figuring out the best cluster to
+	# slot them into.
+	for (my $i=0; $i<$num_seqs; $i++) {
+	
+	    # Empty cluster!
+	    if ($SeqContents[$i] == 0) {
+		if ($EmptyCluster) { $EmptyCluster = $EmptyCluster.','.$i; }
+		else               { $EmptyCluster = $i;                   }
+		next;
 	    }
 
-	    # Is this (1.) good enough to consider clustering, and (2.)
-	    # the best clustering we've seen
-	    if ($num_mismatches < 3 && $num_mismatches < $min_mismatches) {
-		$min_mismatches = $num_mismatches;
-		$min_mismatch_cluster = $j;
+	    my $min_mismatches = ($end - $start) + 1;
+	    my $min_mismatch_cluster = -1;
+	    for (my $j=0; $j<$num_clusters; $j++) {
+		
+		# x is the sequence id of the sequence that represents
+		# this cluster
+		my $x = $ClusterReps[$j];
+		
+		# Check how many mismatches we have between the two sequences
+		# we're considering clustering
+		my $num_mismatches = 0;
+		for (my $k=$start; $k<$end; $k++) {
+		    if ($MSA[$i][$k] =~ /[A-Za-z]/ && $MSA[$x][$k] =~ /[A-Za-z]/) {
+			$num_mismatches++ if (uc($MSA[$i][$k]) ne uc($MSA[$x][$k]));
+		    }		
+		}
+		
+		# Is this (1.) good enough to consider clustering, and (2.)
+		# the best clustering we've seen
+		if ($num_mismatches < 3 && $num_mismatches < $min_mismatches) {
+		    $min_mismatches = $num_mismatches;
+		    $min_mismatch_cluster = $j;
+		}
+		
+	    }
+	    
+	    # If we had a sweeeeet clustering, use that.  Otherwise,
+	    # make a hip new one that all the teens will love.
+	    if ($min_mismatch_cluster >= 0) {
+		$Clusters[$min_mismatch_cluster] = $Clusters[$min_mismatch_cluster].','.$i;
+		if ($SeqContents[$i] > $ClusterContent[$min_mismatch_cluster]) {
+		    $ClusterContent[$min_mismatch_cluster] = $SeqContents[$i];
+		    $ClusterReps[$min_mismatch_cluster] = $i;
+		}
+		if ($i == $top_exon) {
+		    $top_exon_cluster = $min_mismatch_cluster;
+		    $top_exon = -1;
+		}
+	    } else {
+		push(@Clusters,$i);
+		$ClusterReps[$num_clusters] = $i;
+		$ClusterContent[$num_clusters] = $SeqContents[$i];
+		if ($i == $top_exon) {
+		    $top_exon_cluster = $num_clusters;
+		    $top_exon = -1;
+		}
+		$num_clusters++;
 	    }
 	    
 	}
-
-	# If we had a sweeeeet clustering, use that.  Otherwise,
-	# make a hip new one that all the teens will love.
-	if ($min_mismatch_cluster >= 0) {
-	    $Clusters[$min_mismatch_cluster] = $Clusters[$min_mismatch_cluster].','.$i;
-	    if ($seq_content > $ClusterContent[$min_mismatch_cluster]) {
-		$ClusterContent[$min_mismatch_cluster] = $seq_content;
-		$ClusterReps[$min_mismatch_cluster] = $i;
+	
+	# Radical!  Now that all of our sequences are clustered, we can figure
+	# out (1.) which cluster constitutes the canonical non-ARF, and build
+	# up the MSA that we'll use to represent this ARF-tastic region.
+	
+	my $non_arf_cluster = 0;
+	my $tied_with = -1; 
+	for (my $i=1; $i<$num_clusters; $i++) {
+	    if (scalar(split(/\,/,$Clusters[$i])) > scalar(split(/\,/,$Clusters[$non_arf_cluster]))) {
+		$non_arf_cluster = $i;
+		$tied_with = -1;
+	    } elsif (scalar(split(/\,/,$Clusters[$i])) >= scalar(split(/\,/,$Clusters[$non_arf_cluster]))) {
+		$tied_with = $i;
 	    }
-	    if ($i == $top_exon) {
-		$top_exon_cluster = $min_mismatch_cluster;
-		$top_exon = -1;
-	    }
-	} else {
-	    push(@Clusters,$i);
-	    $ClusterReps[$num_clusters] = $i;
-	    $ClusterContent[$num_clusters] = $seq_content;
-	    if ($i == $top_exon) {
-		$top_exon_cluster = $num_clusters;
-		$top_exon = -1;
-	    }
-	    $num_clusters++;
 	}
 	
-    }
-
-    # Radical!  Now that all of our sequences are clustered, we can figure
-    # out (1.) which cluster constitutes the canonical non-ARF, and build
-    # up the MSA that we'll use to represent this ARF-tastic region.
-
-    my $non_arf_cluster = 0;
-    my $tied_with = -1; 
-    for (my $i=1; $i<$num_clusters; $i++) {
-	if (scalar(split(/\,/,$Clusters[$i])) > scalar(split(/\,/,$Clusters[$non_arf_cluster]))) {
-	    $non_arf_cluster = $i;
-	    $tied_with = -1;
-	} elsif (scalar(split(/\,/,$Clusters[$i])) >= scalar(split(/\,/,$Clusters[$non_arf_cluster]))) {
-	    $tied_with = $i;
+	# If we had a tie between two clusters, we see which representative had
+	# the exon with more content (and if that's a tie, we don't know what to do).
+	if ($tied_with >= 0) {
+	    if ($tied_with == $top_exon_cluster) {
+		$non_arf_cluster = $tied_with;
+	    }
 	}
-    }
-
-    # If we had a tie between two clusters, we see which representative had
-    # the exon with more content (and if that's a tie, we don't know what to do).
-    if ($tied_with >= 0) {
-	if ($tied_with == $top_exon_cluster) {
-	    $non_arf_cluster = $tied_with;
+	
+	# Now that we have a winner of the non-ARF award, we attach the empty
+	# clusters onto that group.
+	if ($EmptyCluster) {
+	    $Clusters[$non_arf_cluster] = $Clusters[$non_arf_cluster].','.$EmptyCluster;
 	}
-    }
+	
+	# Let's just go ahead and record a binary array of 'IsNonARF'
+	for (my $seq_id=0; $seq_id<$num_seqs; $seq_id++) { $IsNonARF[$seq_id] = 0; }
+	foreach my $seq_id (split(/\,/,$Clusters[$non_arf_cluster])) { $IsNonARF[$seq_id] = 1; }
+	
+    } else {
+	
+	# Nice 'n' easy, baby!
+	@Clusters = @{$continuing_arf};
+	$num_clusters = scalar(@Clusters);
 
-    # Now that we have a winner of the non-ARF award, we attach the empty
-    # clusters onto that group.
-    if ($EmptyCluster) {
-	$Clusters[$non_arf_cluster] = $Clusters[$non_arf_cluster].','.$EmptyCluster;
     }
-
-    # Let's just go ahead and record a binary array of 'IsNonARF'
-    my @IsNonARF;
-    for (my $seq_id=0; $seq_id<$num_seqs; $seq_id++) { $IsNonARF[$seq_id] = 0; }
-    foreach my $seq_id (split(/\,/,$Clusters[$non_arf_cluster])) { $IsNonARF[$seq_id] = 1; }
 
     # Building up that nasty ARFMSA
     my @ARFMSA;
@@ -1827,7 +1864,7 @@ sub GenARFClusters
 
     # Cool! Now we have an ARFMSA that's ready to be inserted into that nasty old
     # MSA!
-    return(\@ARFMSA,($arf_len*$num_clusters),\@IsNonARF,\@ContentPosition);
+    return(\@ARFMSA,($arf_len*$num_clusters),\@IsNonARF,\@ContentPosition,\@Clusters);
     
 }
 
