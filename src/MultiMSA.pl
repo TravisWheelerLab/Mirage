@@ -1846,7 +1846,7 @@ sub GenARFClusters
 
     # Building up that nasty ARFMSA
     my @ARFMSA;
-    my $arf_len = ($end - $start) + 1;
+    my $arf_len = $end - $start;
     for (my $i=0; $i<$num_seqs; $i++) {
 	for (my $j=0; $j<$arf_len * $num_clusters; $j++) {
 	    $ARFMSA[$i][$j] = '-';
