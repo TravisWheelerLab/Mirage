@@ -2560,7 +2560,7 @@ sub BLATAssistedSPALN
 		$ConfirmedHits{$seqID} = 1;
 
 		if ($Chromosomes{$seqID}) { push(@{$Chromosomes{$seqID}},$chrname); }
-		else                      { @{$Chromosomes{$seqID}} = [$chrname];   }
+		else                      { @{$Chromosomes{$seqID}} = ($chrname);   }
 	    
 		if ($rev == 0) { #################################### Forward Hit
 		    if ($NuclStarts{$seqID}) {
@@ -2568,9 +2568,9 @@ sub BLATAssistedSPALN
 			push(@{$NuclStarts{$seqID}},$nuclstart);
 			push(@{$NuclEnds{$seqID}},$nuclend);
 		    } else {
-			@{$Revcomp{$seqID}}    = [0];
-			@{$NuclStarts{$seqID}} = [$nuclstart];
-			@{$NuclEnds{$seqID}}   = [$nuclend];
+			@{$Revcomp{$seqID}}    = (0);
+			@{$NuclStarts{$seqID}} = ($nuclstart);
+			@{$NuclEnds{$seqID}}   = ($nuclend);
 		    }
 		    
 		} else { ############################################ Reverse Hit
@@ -2579,9 +2579,9 @@ sub BLATAssistedSPALN
 			push(@{$NuclStarts{$seqID}},$nuclend);
 			push(@{$NuclEnds{$seqID}},$nuclstart);	
 		    } else {
-			@{$Revcomp{$seqID}}    = [1];
-			@{$NuclStarts{$seqID}} = [$nuclend];
-			@{$NuclEnds{$seqID}}   = [$nuclstart];
+			@{$Revcomp{$seqID}}    = (1);
+			@{$NuclStarts{$seqID}} = ($nuclend);
+			@{$NuclEnds{$seqID}}   = ($nuclstart);
 		    }
 		    
 		}
@@ -2591,8 +2591,8 @@ sub BLATAssistedSPALN
 		    push(@{$ProtStarts{$seqID}},$protstart);
 		    push(@{$ProtEnds{$seqID}},$protend);
 		} else {
-		    @{$ProtStarts{$seqID}} = [$protstart];
-		    @{$ProtEnds{$seqID}}   = [$protend];
+		    @{$ProtStarts{$seqID}} = ($protstart);
+		    @{$ProtEnds{$seqID}}   = ($protend);
 		}
 		
 
@@ -2605,7 +2605,7 @@ sub BLATAssistedSPALN
 		    if ($Scores{$seqID}) { 
 			push(@{$Scores{$seqID}},$score);
 		    } else { 
-			@{$Scores{$seqID}} = [$score];
+			@{$Scores{$seqID}} = ($score);
 			$BestScore{$seqID} = $score;
 			$TargetChr{$seqID} = $chrname;
 			$TargetRev{$seqID} = $rev;
@@ -2625,7 +2625,7 @@ sub BLATAssistedSPALN
 				$TEtracker{$seqID} = 1;
 			    }
 			}
-		    } elsif ($e_value eq "0.0") {
+		    } elsif ($e_value =~ /^0\.0/) {
 			if ($TEtracker{$seqID}) {
 			    $TEtracker{$seqID}++;
 			} else {
@@ -2739,6 +2739,7 @@ sub BLATAssistedSPALN
 		my $minProt = $ProtStart[$i];
 		my $maxProt = $ProtEnd[$i];
 		my $AddHit  = 0;
+		$AddHit = 1 if ($Score[$i] == $BestScore);
 
 		$i++;
 		while ($i < @sortIndex && $NuclStart[$i] < $NuclEnd[$i-1]+200000) {
