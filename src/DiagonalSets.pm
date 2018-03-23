@@ -87,55 +87,63 @@ sub SortHitsByField
 
     # Do we want the field to be sorted in ascending order?
     my $ascending = shift;
-    
-    # Create an index array.  This is used so we don't jostle things around
-    # during the sorting step.
-    my @index;
-    foreach $i (0..$numHits-1) { $index[$i] = $i; }
-    
-    # Run mergesort on the set, using ProtStarts to determine order.
-    my ($start,$end,$placer);
-    my @temp;
-    my $groupSize = 1;
-    while ($groupSize < $numHits) {
-	foreach my $groupID (0..POSIX::ceil(($numHits/(2*$groupSize)))-1) {
-	    $start = $groupID * (2 * $groupSize);
-	    $end   = $start + (2 * $groupSize) - 1;
-	    $end   = $numHits-1 if ($end >= $numHits);
-	    foreach $i (0..$end-$start) {
-		$temp[$i] = $index[$start+$i];
-	    }
-	    $i = 0;
-	    $j = $groupSize;
-	    $placer = $start;
-	    while ($i < $groupSize && $j <= $end-$start) {
-		if ($fieldRef[$temp[$i]] < $fieldRef[$temp[$j]]) {
-		    $index[$placer] = $temp[$i];
-		    $i++;
+
+    # The index we'll use in our sorting
+    my @Index;
+    for (my $i=0; $i<$numHits; $i++) { $Index[$i] = $i; }
+
+    my $group_size = 1;
+    while ($group_size < $numHits) {
+
+	my $num_groups = POSIX::ceil($numHits / $group_size);
+	for (my $group_id = 0; $group_id < $num_groups; $group_id += 2) {
+
+	    my $start1 = $group_size * $group_id;
+	    my $start2 = $group_size * ($group_id+1);
+
+	    next if ($start2 > $numHits);
+
+	    my $end1 = $start2;
+	    my $end2 = ($group_size * ($group_id+2));
+
+	    if ($end2 > $numHits) { $end2 = $numHits; }
+
+	    my $run1 = $start1;
+	    my $run2 = $start2;
+
+	    my @Temp;
+	    while ($run1 < $end1 && $run2 < $end2) {
+		if ($fieldRef[$Index[$run1]] < $fieldRef[$Index[$run2]]) {
+		    push(@Temp,$Index[$run1]);
+		    $run1++;
 		} else {
-		    $index[$placer] = $temp[$j];
-		    $j++;
-		}
-		$placer++;
-	    }
-	    if ($i < $groupSize) {
-		while ($i < $groupSize) {
-		    $index[$placer] = $temp[$i];
-		    $i++;
-		    $placer++;
-		}
-	    } else {
-		while ($j <= $end-$start) {
-		    $index[$placer] = $temp[$j];
-		    $j++;
-		    $placer++;
+		    push(@Temp,$Index[$run2]);
+		    $run2++;
 		}
 	    }
+
+	    while ($run1<$end1) {
+		push(@Temp,$Index[$run1]);
+		$run1++;
+	    }
+
+	    while ($run2<$end2) {
+		push(@Temp,$Index[$run2]);
+		$run2++;
+	    }
+
+	    for (my $i=0; $i<scalar(@Temp); $i++) {
+		$Index[$start1+$i] = $Temp[$i];
+	    }
+
 	}
-	$groupSize *= 2;
+
+	# Increase the group size and repeat
+	$group_size *= 2;
+
     }
-    
-    $self->OrganizeOnIndex(\@index,$ascending);
+
+    $self->OrganizeOnIndex(\@Index,$ascending);
 
 }
 

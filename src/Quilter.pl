@@ -3618,6 +3618,8 @@ sub LooksRepetitive
 
 
 
+
+
 #########################################################################
 #
 #  Function Name:  GenSortIndex
@@ -3628,61 +3630,65 @@ sub LooksRepetitive
 #
 sub GenSortIndex
 {
-    my ($i,$j,$k);
 
     my $targetRef = shift;
     my @Target    = @{$targetRef};
 
     my @Index;
-    my $length = 0;
-    while ($length < @Target) {
-	$Index[$length] = $length;
-	$length++;
-    }
+    my $length = scalar(@Target);
+    for (my $i=0; $i<$length; $i++) { $Index[$i] = $i; }
 
-    # Mergesort (pulled over from DiagonalSets.pm)
-    # Run mergesort on the set, using ProtStarts to determine order.
-    my ($start,$end,$placer);
-    my @temp;
-    my $groupSize = 1;
-    while ($groupSize < $length) {
-        foreach my $groupID (0..POSIX::ceil(($length/(2*$groupSize)))-1) {
-            $start = $groupID * (2 * $groupSize);
-            $end   = $start + (2 * $groupSize) - 1;
-            $end   = $length-1 if ($end >= $length);
-            foreach $i (0..$end-$start) {
-                $temp[$i] = $Index[$start+$i];
-            }
-            $i = 0;
-            $j = $groupSize;
-            $placer = $start;
-            while ($i < $groupSize && $j <= $end-$start) {
-                if ($Target[$temp[$i]] < $Target[$temp[$j]]) {
-                    $Index[$placer] = $temp[$i];
-                    $i++;
-                } else {
-                    $Index[$placer] = $temp[$j];
-                    $j++;
-                }
-                $placer++;
-            }
-            if ($i < $groupSize) {
-                while ($i < $groupSize) {
-                    $Index[$placer] = $temp[$i];
-                    $i++;
-                    $placer++;
-                }
-            } else {
-                while ($j <= $end-$start) {
-                    $Index[$placer] = $temp[$j];
-                    $j++;
-                    $placer++;
-                }
-            }
-        }
-        $groupSize *= 2;
-    }
+    my $group_size = 1;
+    while ($group_size < $length) {
 
+	my $num_groups = POSIX::ceil($length / $group_size);
+	for (my $group_id = 0; $group_id < $num_groups; $group_id += 2) {
+
+	    my $start1 = $group_size * $group_id;
+	    my $start2 = $group_size * ($group_id+1);
+
+	    next if ($start2 > $length);
+
+	    my $end1 = $start2;
+	    my $end2 = ($group_size * ($group_id+2));
+
+	    if ($end2 > $length) { $end2 = $length; }
+
+	    my $run1 = $start1;
+	    my $run2 = $start2;
+
+	    my @Temp;
+	    while ($run1 < $end1 && $run2 < $end2) {
+		if ($Target[$Index[$run1]] < $Target[$Index[$run2]]) {
+		    push(@Temp,$Index[$run1]);
+		    $run1++;
+		} else {
+		    push(@Temp,$Index[$run2]);
+		    $run2++;
+		}
+	    }
+
+	    while ($run1<$end1) {
+		push(@Temp,$Index[$run1]);
+		$run1++;
+	    }
+
+	    while ($run2<$end2) {
+		push(@Temp,$Index[$run2]);
+		$run2++;
+	    }
+
+	    for (my $i=0; $i<scalar(@Temp); $i++) {
+		$Index[$start1+$i] = $Temp[$i];
+	    }
+
+	}
+
+	# Increase the group size and repeat
+	$group_size *= 2;
+
+    }
+    
     # Great! Now pass that bad-boy back!
     return \@Index;
 
