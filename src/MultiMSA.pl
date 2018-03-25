@@ -16,12 +16,12 @@ use POSIX;
 use Cwd;
 
 
-sub MIN;            # Get the minimum of two values
-sub MAX;            # Get the maximum of two values
-sub AssembleMSA;    # Pull together the final MSA
-sub SimpleClean;    # Very basic cleanup, geared towards correcting little SPALN mistakes
-sub QuickAlign;     # Used to resolve indels
-sub GenARFClusters; # Cluster sequences when we've detected an ARF
+sub MIN;              # Get the minimum of two values
+sub MAX;              # Get the maximum of two values
+sub GetNextExonRange; # Identify the start and end points of the next exon (nucleotide values)
+sub AssembleMSA;      # Pull together the final MSA
+sub SimpleClean;      # Very basic cleanup, geared towards correcting little SPALN mistakes
+sub QuickAlign;       # Used to resolve indels
 
 
 if (@ARGV < 2) { die "\n  USAGE:  perl  MultiMSA.pl  <Quilter output>  <Protein database>  [Opt.s]\n\n"; }
@@ -234,7 +234,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
     my $hash_entry = $Hits{$group_id};
     my @each_entry = split('&',$hash_entry);
 
-    my $i = 0;
+    $i = 0;
     my $chr_hits = 0;
     foreach $i (0..$numhits-1) {
 
@@ -329,108 +329,49 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	close($eslinput);
 	
 	# Store the protein
+	$Protein =~ s/\s//g;
 	$ProteinSeqs[$chr_hits] = $Protein;
 	$chr_hits++;	    
 	
     }
     
-    # It's worth remarking that even though we're hashing positions
-    # we still need relative positioning, so it makes sense to use
-    # ExonStarts and ExonEnds.
-
-    # Now that we've got the overall min/max and each hit's string, we
-    # can walk along, filling in an array for each of the strings.
+    # Hash each codon to a designated nucleotide position
     my %MSA;
-    my %IntronTracker;
+    my %MultiAminos; # Indicates where we've seen indels (multiple aminos on one codon)
     foreach $i (0..$chr_hits-1) {
 
 	# Converting the string of positions into individual codon centers
-	my @Codons = split(',',$PosStrings[$i]);
+	my @Codons = split(/\,/,$PosStrings[$i]);
+	my @Seq    = split(//,$ProteinSeqs[$i]);
 
-	$ProteinSeqs[$i] =~ s/\s//g;
-	my @Seq = split('',$ProteinSeqs[$i]);
-		
-	$j = 0; # How far along the series of codons we are
-	$k = 0; # Position in Seq
+	# Walking through the position indices, filling in our hash of
+	# chromosome positions to amino acids
+	my $amino_pos = 0;
+	my $last_codon = -1;
+	foreach my $codon_pos (@Codons) {
 
-	my $next_pos;
-	my $last_write;
-	my $last_read;
+	    next if ($codon_pos =~ /\*/);
 
-	# Walking through the position indices
-	while ($j < @Codons) {
+	    my $amino = $Seq[$amino_pos];
+	    $amino_pos++;
 
-	    $next_pos = $Codons[$j];
-	    
-	    if ($next_pos =~ /\*/) {
+	    if ($MSA{$codon_pos}) {
 
-		# We don't want to double-down on splice boundaries
-		if ($Codons[$j-1] ne '*') {
+		if ($last_codon == $codon_pos) { 
 
-		    # Which direction are we going?
-		    my $next_intron = $Codons[$j-1];
-		    if ($revcomp) { $next_intron -= 3; }
-		    else          { $next_intron += 3; }
+		    # Indel ahoy!
+		    $MSA{$codon_pos} = $MSA{$codon_pos}.$amino;
+		    $MultiAminos{$codon_pos} = 1;
 
-		    # Well, better record the dang thing!
-		    $IntronTracker{$next_intron} = 1;
-		    
+		} else {
+		    $MSA{$codon_pos} = $MSA{$codon_pos}.','.$i.':'.$amino; 
 		}
 
 	    } else {
-		
-		# If we're walking through the shadow of the valley of indels
-		# take special notice.
-		if ($last_read && abs($last_read-$next_pos) < 3) {
-
-
-		    # We'll stack the next character on top of this
-		    # one and deal with it later.
-		    $MSA{$last_write} = $MSA{$last_write}.$Seq[$k];
-
-
-		} else { #===============[ normal entry ]================#
-
-		    # Standard placement, adding onto existing position
-		    if ($MSA{$next_pos}) {
-			$MSA{$next_pos} = $MSA{$next_pos}.','.$i.':'.$Seq[$k];
-			$last_write = $next_pos;
-
-			
-			# Special considerations for weird cases (like mouse OBSCN) where
-			# we have regions that don't quite align.  Note that we do a
-			# little checking to make sure we aren't doubling down
-		    } elsif ($MSA{$next_pos+1} && $MSA{$next_pos+1} !~ /\,$i\:/) {
-			$MSA{$next_pos+1} = $MSA{$next_pos+1}.','.$i.':'.$Seq[$k];
-			$last_write = $next_pos+1;
-			
-		    } elsif ($MSA{$next_pos-1} && $MSA{$next_pos-1} !~ /\,$i\:/) {
-			$MSA{$next_pos-1} = $MSA{$next_pos-1}.','.$i.':'.$Seq[$k];
-			$last_write = $next_pos-1;
-
-			
-			# New placement -- note that we need to start with a comma for the
-			# preceding 'elsif's to work in every case (we'll trim this later)
-		    } else {
-			$MSA{$next_pos} = ','.$i.':'.$Seq[$k];
-			$last_write = $next_pos;
-		    }
-		    
-		}
-	    
-		
-		$k++;
-
-		# NOTE: This catch shouldn't be necessary...
-		#last if ($k >= @Seq);
-		
+		$MSA{$codon_pos} = $i.':'.$amino;
 	    }
 
-	    # Record what we just worked with as what we last saw
-	    $last_read = $next_pos if ($next_pos ne '*');
-
-	    # Next stop, next codon (but hopefully not next stop codon!)
-	    $j++;
+	    $last_codon = $codon_pos;
 
 	}
 
@@ -439,14 +380,8 @@ foreach my $group_index ($startpoint..$endpoint-1) {
     
     # Generate a sorted list of our hash entries (positions in the table)
     my @PositionIndex = keys %MSA;
-    my @IntronIndex   = keys %IntronTracker;
-    if ($revcomp) { 
-	@PositionIndex = sort {$b <=> $a} @PositionIndex; 
-	@IntronIndex   = sort {$b <=> $a} @IntronIndex;
-    } else { 
-	@PositionIndex = sort {$a <=> $b} @PositionIndex; 
-	@IntronIndex   = sort {$a <=> $b} @IntronIndex;
-    }
+    if ($revcomp) { @PositionIndex = sort {$b <=> $a} @PositionIndex; }
+    else          { @PositionIndex = sort {$a <=> $b} @PositionIndex; }
 
 
 
@@ -459,261 +394,135 @@ foreach my $group_index ($startpoint..$endpoint-1) {
     #                                                                             #
     ###############################################################################
 
-    
-    
-    # Run along the MSA hash putting together a rough sketch of the alignment
-    #
-    my @FinalMSA = (); # Psssst... This isn't actually the final MSA, yet...
+
+    my @FinalMSA = ();
+    for ($i=0; $i<$chr_hits; $i++) { $FinalMSA[$i][0] = '*'; }
     my $msa_len  = 1;
 
-    # Prime the MSA with a column of splice-site markers
-    #
-    for ($i=0; $i<$chr_hits; $i++) { $FinalMSA[$i][0] = '*'; }
+    my @ARFNameField;
+    for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) { $ARFNameField[$seq_id] = 0; }
 
-    # We should be able to fill out a pretty darn nice MSA from all this!
-    #
-    my $aa_index     = 0;
-    my $intron_index = 0;
-    my $next_intron_pos = $IntronIndex[$intron_index];
-    while ($aa_index < @PositionIndex) {
+    my $pos_index = 0;
+    while ($pos_index < scalar(@PositionIndex)) {
 
-	# Where are we in the genome?
-	my $genome_pos = $PositionIndex[$aa_index];
-	$aa_index++;
+	# Figuring out the range of indices in our PositionIndex
+	# corresponding to the exon we're currently building.
+	my ($next_index,$segment_ref) = GetNextExonRange($pos_index,\@PositionIndex);
+	my @SegmentList = @{$segment_ref};
 
-	# Have we hit an intron boundary 
-	if ($intron_index < @IntronIndex 
-	    && ((!$revcomp && $next_intron_pos < $genome_pos)
-		||($revcomp && $next_intron_pos > $genome_pos))) {
+	foreach my $segment (@SegmentList) {
 
-	    # If there's an imminent boundary, we'll hold off until that one
-	    if ($intron_index < @IntronIndex) {
+	    my @SegmentParts = split(/\,/,$segment);
+	    my $start_index = $SegmentParts[0];
+	    my $end_index   = $SegmentParts[1];
+	    my $num_frames  = $SegmentParts[2];
 
-		# Easier catch for alt 5'
-		$intron_index++;
+	    # I mean, pretty slick, right?
+	    for (my $frame=0; $frame<$num_frames; $frame++) {
+		for (my $index=$start_index+$frame; $index<$end_index; $index+=$num_frames) {
 
-		# Catch any cases where we have an suspected alt. 5' SS
-		if ((!$revcomp && $IntronIndex[$intron_index-1]+10 > $genome_pos)
-		    || ($revcomp && $IntronIndex[$intron_index-1]-10 < $genome_pos)) {
-		    
-		    $intron_index--;
-		    if ($revcomp) { $IntronIndex[$intron_index] -= 10; }
-		    else          { $IntronIndex[$intron_index] += 10; }
-		    
-		} else {
+		    my $genome_pos   = $PositionIndex[$index];
+		    my @SeqsAndChars = split(/\,/,$MSA{$genome_pos});
+		    my @Seqs;
+		    my @Chars;
 
-		    for ($i=0; $i<$chr_hits; $i++) { $FinalMSA[$i][$msa_len] = '*'; }
-		    $msa_len++;
-
-		    while ($intron_index < @IntronIndex &&
-			   (($revcomp && $IntronIndex[$intron_index] > $genome_pos)
-			    || (!$revcomp && $IntronIndex[$intron_index] < $genome_pos))) {
-			$intron_index++;
-		    }
-
-		}
-		
-		$next_intron_pos = $IntronIndex[$intron_index] if ($intron_index < @IntronIndex);
-
-	    } else {
-
-		for ($i=0; $i<$chr_hits; $i++) { $FinalMSA[$i][$msa_len] = '*'; }
-		$msa_len++;
-
-	    }
-	    
-	}
-
-	# Next position up!  We need to do some careful work if there's a stack
-	# (i.e., indel indicator) associated with this position.
-	my @Seqs;
-	my @Chars;
-
-	my $cleaned_entry = $MSA{$genome_pos}; # We need to chop off the leading comma first
-	$cleaned_entry =~ s/^\,//;
-	my @Entries = split(',',$cleaned_entry);
-
-	my $num_entries = @Entries;
-	my @MultiChars;
-	my $num_multis = 0;
-	for ($i=0; $i<$num_entries; $i++) {
-
-	    # Split each of the items into the sequence ID number and
-	    # its character at this position.
-	    my @Entry  = split(':',$Entries[$i]);
-	    $Seqs[$i]  = $Entry[0];
-	    $Chars[$i] = $Entry[1];
-
-	    # Check for multiple characters being stacked at this position
-	    if (length($Chars[$i]) > 1) {
-		push(@MultiChars,$i);
-		$num_multis++;
-	    }
-	    
-	}
-
-	# Is this an easy one (i.e., everyone is only one character)?
-	if ($num_multis == 0) {
-
-	    # If we're in the seqs, we get a present, otherwise
-	    # a gap
-	    for ($i=0; $i<$chr_hits; $i++)    { $FinalMSA[$i][$msa_len]        = '-';        }
-	    for ($i=0; $i<$num_entries; $i++) { $FinalMSA[$Seqs[$i]][$msa_len] = $Chars[$i]; }
-	    $msa_len++;
-	    
-	} else { # Dangerous territory!  Mind your insertions!
-
-	    # If this isn't the last position then we can (try to) get sneaky
-	    if ($aa_index < @PositionIndex) {
-
-		# Sample the acceptable characters at this site
-		$cleaned_entry = $MSA{$PositionIndex[$aa_index]};
-		$cleaned_entry =~ s/^\,//;
-		my @NextEntries = split(',',$cleaned_entry);
-		my %AcceptedChars;
-		for ($i=0; $i<@NextEntries; $i++) {
-		    my @NextEntry = split(':',$NextEntries[$i]);
-		    if (length($NextEntry[1]) == 1) { 
-			$AcceptedChars{lc($NextEntry[1])} = 1; 
-		    }
-		}
-		
-		# Grab the next genome position, if there is one, and see
-		# if we can align there (cascadery) <- for each insert-y seq.
-		my @UnresolvedMultis;
-		my $num_unresolved=0;
-		for ($i=0; $i<$num_multis; $i++) {
-
-		    $j = $MultiChars[$i];
-
-		    my @PosStr = split('',$Chars[$j]);
-		    my $second = $PosStr[1];
-
-		    # If this character can be used in the next position, do some
-		    # swaggadelic cascadery!
-		    if ($AcceptedChars{lc($second)}) {
-
-			my $remainder = '';
-			for ($k=1; $k<@PosStr; $k++) {$remainder=$remainder.$PosStr[$k];}
-
-			$Chars[$j] = $PosStr[0];
-			
-			# We decide what to do based next based on whether this
-			# sequence occurs in the next amino-acid associated site.
-			my $next_entry = $MSA{$PositionIndex[$aa_index]};
-			if ($next_entry =~ /\,$Seqs[$j]\:/) {
-			    $next_entry =~ s/\,$Seqs[$j]\:/\,$Seqs[$j]\:$remainder/;
-			} else {
-			    $next_entry = $next_entry.','.$Seqs[$j].':'.$remainder;
-			}
-			$MSA{$PositionIndex[$aa_index]} = $next_entry;
-			    
-		    } else {
-
-			# Very sad :'(
-			push(@UnresolvedMultis,$j);
-			$num_unresolved++;
-			
-		    }
-
-		}
-
-		# If we have an Multi-character things that didn't get resolved
-		# we'll have to take care of them here using our 'QuickAlign'
-		if ($num_unresolved) {
-
-		    # We need to know who among the unresolved is longest
-		    my $max_unres_id  = $Seqs[$UnresolvedMultis[0]];
-		    my $max_unres_len = length($Chars[$UnresolvedMultis[0]]);
-		    for ($i=1; $i<$num_unresolved; $i++) {
-			my $comp_len = length($Chars[$UnresolvedMultis[$i]]);
-			if ($comp_len > $max_unres_len) {
-			    $max_unres_len = $comp_len;
-			    $max_unres_id  = $Seqs[$UnresolvedMultis[$i]];
-			}
-		    }
-
-		    # Let's load up a column with every sequence.  We need to
-		    # start by loading every position with gaps in case our
-		    # cascading has put things out of order
+		    # If we have a longest entry >1 then we use our quick N-W like
+		    # thing to generate an alignment for the whole column.
 		    my @Column;
-		    for ($i=0; $i<$chr_hits; $i++)    { $Column[$i]        = '-';        }
-		    for ($i=0; $i<$num_entries; $i++) { $Column[$Seqs[$i]] = $Chars[$i]; }
+		    for ($i=0; $i<$chr_hits; $i++) { $Column[$i] = '-'; }
 
-		    # Pseudo-align those suckers!
-		    my $columnref = QuickAlign(\@Column,$max_unres_id,$max_unres_len,$chr_hits);
-		    @Column = @{$columnref};
+		    # We'll need to check the lengths of the characters at
+		    # this entry to see if we're in the land of indels
+		    my $longest_entry_len = 0;
+		    my $longest_entry_seq = -1;
+		    for ($i=0; $i<scalar(@SeqsAndChars); $i++) {
 
-		    # And load up that FinalMSA with all sorts of tasty treats!
+			$SeqsAndChars[$i] =~ /(\d+)\:(\S+)/;
+			my $seq_id = $1;
+			my $chars  = $2;
+
+			# If there are multiple characters in this entry, we'll
+			# see if there's a more creative solution to this puzzle
+			# (namely, pushing all but the leftmost over to the next
+			# position).
+			if (length($chars) > 1 && $index+$num_frames < $end_index) {
+
+			    $chars =~ /^(\S)(\S)/;
+			    my $first_char  = $1;
+			    my $second_char = uc($2);
+
+			    # If the second character is what more than half of the
+			    # entries at the upcoming position have, then we'll move
+			    # our indel content that-a-way
+			    my $check_pos    = $PositionIndex[$index+$num_frames];
+			    my $check_entry  = uc($MSA{$check_pos});
+			    my $num_elements = scalar(split(/\,/,$check_entry));
+			    my $num_matches  = scalar(split(/\:$second_char/,$check_entry));
+			    if ($num_matches >= int($num_elements/2)) {
+
+				$chars =~ /^\S(\S+)$/;
+				my $next_entry = $1;
+
+				# We'll need to be careful, in case this sequence
+				# already has an entry at that position.
+				if ($MSA{$check_pos} =~ /^$seq_id\:/) {
+				    $MSA{$check_pos} =~ s/^$seq_id\:/$seq_id\:$next_entry/;
+				} elsif ($MSA{$check_pos} =~ /\,$seq_id\:/) {
+				    $MSA{$check_pos} =~ s/\,$seq_id\:/\,$seq_id\:$next_entry/;
+				} else {
+				    $MSA{$check_pos} = $MSA{$check_pos}.','.$seq_id.':'.$next_entry;
+				}
+
+				$chars = $first_char;
+
+			    }
+			}
+
+			# We want to know what the longest entry was in case we need to
+			# do some pseudo-alignment to make us happy with this set of
+			# columns.
+			if (length($chars) > $longest_entry_len) {
+			    $longest_entry_len = length($chars);
+			    $longest_entry_seq = $seq_id;
+			}
+
+			# Add this set of characters to the column
+			$Column[$seq_id] = $chars;
+
+		    }
+
+		    # If we had a column with more than one character in it, then
+		    # we'll need to do a quick little bit of alignment work.
+		    if ($longest_entry_len > 1) {
+			my $column_ref = QuickAlign(\@Column,$longest_entry_seq,$longest_entry_len,$chr_hits);
+			@Column = @{$column_ref};
+		    }
+
+		    # And, finally, load up the MSA!
 		    for ($i=0; $i<$chr_hits; $i++) {
-			my @Stuff = split('',$Column[$i]);
-			for ($j=0; $j<$max_unres_len; $j++) {
-			    $FinalMSA[$i][$msa_len+$j] = $Stuff[$j];
+			my @RowItems = split(//,$Column[$i]);
+			for ($j=0; $j<$longest_entry_len; $j++) {
+			    $FinalMSA[$i][$msa_len+$j] = $RowItems[$j];
 			}
 		    }
-		    $msa_len += $max_unres_len;
+		    $msa_len += $longest_entry_len;
 
-		} else { # Total resolution is a beautiful thing!
-
-		    # It's just like not having a multi-character pile-up!
-		    for ($i=0; $i<$chr_hits; $i++)    { $FinalMSA[$i][$msa_len]        = '-';        }
-		    for ($i=0; $i<$num_entries; $i++) { $FinalMSA[$Seqs[$i]][$msa_len] = $Chars[$i]; }
-		    $msa_len++;		    
-		    
 		}
-		
-	    } else { # The last genome position with associated amino acids
-
-		# Do our standard fallback pseudo-alignment
-		# We need to know who among the unresolved is longest
-		my $max_multi_id  = $Seqs[$MultiChars[0]];
-		my $max_multi_len = length($Chars[$MultiChars[0]]);
-		for ($i=1; $i<$num_multis; $i++) {
-		    my $comp_len = length($Chars[$MultiChars[$i]]);
-		    if ($comp_len > $max_multi_len) {
-			$max_multi_len = $comp_len;
-			$max_multi_id  = $Seqs[$MultiChars[$i]];
-		    }
-		}
-		
-		# Let's load up a column with every sequence.  We need to
-		# start by loading every position with gaps in case our
-		# cascading has put things out of order
-		my @Column;
-		for ($i=0; $i<$chr_hits; $i++)    { $Column[$i]       = '-';        }
-		for ($i=0; $i<$num_entries; $i++) { $Column[$Seqs[$i]]= $Chars[$i]; }
-		
-		# Pseudo-align those suckers!
-		my $columnref = QuickAlign(\@Column,$max_multi_id,$max_multi_len,$chr_hits);
-		@Column = @{$columnref};
-		
-		# And load up that FinalMSA with all sorts of tasty treats!
-		for ($i=0; $i<$chr_hits; $i++) {
-		    my @Stuff = split('',$Column[$i]);
-		    for ($j=0; $j<$max_multi_len; $j++) {
-			$FinalMSA[$i][$msa_len+$j] = $Stuff[$j];
-		    }
-		}
-		$msa_len += $max_multi_len;
-		
 	    }
 
 	}
-	
+
+	for($i=0; $i<$chr_hits; $i++) { $FinalMSA[$i][$msa_len] = '*'; }
+	$msa_len++;
+
+	$pos_index = $next_index;
+
     }
 
-    # Wrap things up with a column of splice-site markers
-    for ($i=0; $i<$chr_hits; $i++) { $FinalMSA[$i][$msa_len] = '*'; }
-    $msa_len++;
 
-
-
-    
     #
     #  WOWEE!  All done with the first sketch of the final MSA!
     #
-
-    
 
 
     # Now we can actually assemble our final MSA.  The MSA and 'Disagreements' that
@@ -728,213 +537,6 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	@Disagreements = @{$DisagreementsRef};
 	$final_len = $tmp_len;
     }
-
-
-    # Unless we want visible ARF-candidates, we'll run through the disagreements to
-    # get ARFs into their own groups.
-    #
-    #    BEGIN ARF-SPLITTING HERE
-    #   +========================+
-    #
-    my @ARFNameField;
-    for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) { $ARFNameField[$seq_id] = 0; }
-    if ($mask_arfs && scalar(@Disagreements)) {
-	
-	# Run through the disagreement position indices and check for 
-	# any 5+ runs of contiguous disagreements (to account for spurious
-	# matches in ARFs).
-	#
-	my @ARFIndices;
-	my $dis_index = 0;
-	while ($dis_index < scalar(@Disagreements)) {
-	    
-	    my $runner = $dis_index+1;
-	    my $intron_check = $Disagreements[$dis_index];
-	    while ($runner < scalar(@Disagreements) && abs($Disagreements[$runner] - $Disagreements[$runner-1]) <= 4) {
-
-		# Check to see if we encounter an intron marker around here...
-		my $intron_spotted = 0;
-		while ($intron_check < $Disagreements[$runner]) {
-		    if ($FinalMSA[0][$intron_check] eq '*') {
-			$intron_spotted = 1;
-			last;
-		    }
-		    $intron_check++;
-		}
-		last if ($intron_spotted);
-
-		$runner++;
-
-	    }
-
-	    if ($runner - $dis_index > 5) { push(@ARFIndices,$Disagreements[$dis_index].'-'.$Disagreements[$runner-1]); }
-	    
-	    $dis_index = $runner;
-
-	}
-
-
-	# If we have ARF indices, we'll need to make some adjustments...
-	# Included in this are considerations for how much we'll be increasing
-	# the length of the MSA as we go along.
-	#
-	if (scalar(@ARFIndices)) {
-
-	    my @ContentPosition;
-	    for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) { 
-		$ContentPosition[$seq_id] = 0; 
-	    }
-
-	    # This will be our MSA -- but don't tell anybody!
-	    my @ARFAdjustedMSA;
-	    my $adjusted_len=0;
-	    my $walking_pos=0;
-	    my $last_end=0;
-
-	    # A couple of variables we use to keep ARF/non-ARF choices
-	    # consistent
-	    my @IsNonARF;
-	    my $continuing_arf = 0;
-	    my $top_exon = -1;
-	    
-	    foreach my $msa_arf_pair (@ARFIndices) {
-
-		#
-		#  In this loop we scan through each of the ARF indices (in the "original final" MSA)
-		#  and [1.] get caught up (in our ARFMSA) to the starting point, [2.] figure out if
-		#  we need to resolve (i.e., break apart) sequences to make the ARF not an abomination
-		#  for our alignment, and [3.] break it up if we decide that's what makes sense.
-		#
-
-		my @ARFPair = split(/\-/,$msa_arf_pair);
-		my $start   = $ARFPair[0];
-		my $end     = $ARFPair[1]+1; # NOTE that ARFPair[1] is the INTERNAL end point!
-
-		# Are we continuing a known ARF over an intron boundary?
-		if ($start == $last_end + 1) { $continuing_arf = 1; }
-		else                         { $continuing_arf = 0; }
-
-		$last_end   = $end;
-		my $arf_len = $end-$start;
-
-		# Fill-in the adjusted MSA up to the start of the ARF region
-		while ($walking_pos < $start) {
-		    for  (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) {
-			$ARFAdjustedMSA[$seq_id][$adjusted_len] = $FinalMSA[$seq_id][$walking_pos];
-			if ($FinalMSA[$seq_id][$walking_pos] =~ /[A-Za-z]/) { $ContentPosition[$seq_id]++; }
-		    }
-		    $walking_pos++;
-		    $adjusted_len++;
-		}
-		$walking_pos = $end;
-
-		# Because ARF/non-ARF ties are broken secondarily by number of aminos
-		# in the exon (primarily by plurality), we need to figure out which
-		# sequence is most represented in the current exon
-		if (!$continuing_arf) {
-		    my $exon_start = $walking_pos-1;
-		    my $exon_end   = $walking_pos;
-		    while ($FinalMSA[0][$exon_start] ne '*') { $exon_start--; }
-		    while ($FinalMSA[0][$exon_end]   ne '*') { $exon_end++;   }
-		    my $top_exon_content = -1;
-		    $top_exon = -1;
-		    for (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) {
-			my $seq_exon_content = 0;
-			for (my $pos=$exon_start+1; $pos<$exon_end; $pos++) {
-			    $seq_exon_content++ if ($FinalMSA[$seq_id][$pos] =~ /[A-Za-z]/);
-			}
-			if ($seq_exon_content > $top_exon_content) {
-			    $top_exon_content = $seq_exon_content;
-			    $top_exon = $seq_id;
-			}
-		    }
-		}
-		
-
-		# How all my content creatorzzzz doin'?
-		my @ContentStart;
-		for (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) { 
-		    $ContentStart[$seq_id] = $ContentPosition[$seq_id];
-		}
-		
-		# Cluster those rowdy sequences
-		my ($arfmsa_ref,$arfmsalen,$is_non_arf_ref,$content_position_ref);
-		if ($continuing_arf) {
-
-		    ($arfmsa_ref,$arfmsalen,$is_non_arf_ref,$content_position_ref) 
-			= GenARFClusters(\@FinalMSA,$chr_hits,$start,$end,\@ContentPosition,$top_exon,1,\@IsNonARF);
-
-		} else {
-
-		    ($arfmsa_ref,$arfmsalen,$is_non_arf_ref,$content_position_ref)
-			= GenARFClusters(\@FinalMSA,$chr_hits,$start,$end,\@ContentPosition,$top_exon,0,0);
-
-		}
-
-		my @ARFMSA = @{$arfmsa_ref};
-		@ContentPosition = @{$content_position_ref};
-		@IsNonARF = @{$is_non_arf_ref};
-
-		for (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) {
-		    if (!$IsNonARF[$seq_id] && $ContentStart[$seq_id] < $ContentPosition[$seq_id]) {
-			if ($ARFNameField[$seq_id]) {
-			    $ARFNameField[$seq_id] =~ s/ARF\:/ARFs\:/;
-			    # If the previous ARF we saw for this sequence was the last
-			    # exon, we'll just extend that field to the new endpoint.
-			    if ($ARFNameField[$seq_id] =~ /\.\.$ContentStart[$seq_id]$/) {
-				$ARFNameField[$seq_id] =~ s/\.\.$ContentStart[$seq_id]$/\.\.$ContentPosition[$seq_id]/;
-			    } else {
-				$ARFNameField[$seq_id] = $ARFNameField[$seq_id].','.($ContentStart[$seq_id]+1).'..'.$ContentPosition[$seq_id];
-			    }
-			} else {
-			    $ARFNameField[$seq_id] = 'ARF:'.($ContentStart[$seq_id]+1).'..'.$ContentPosition[$seq_id];
-			}
-		    }
-		}
-
-		# Fill in the ARF content in our adusted MSA
-		for (my $j=0; $j<$arfmsalen; $j++) {
-		    for (my $i=0; $i<$chr_hits; $i++) {
-			$ARFAdjustedMSA[$i][$adjusted_len] = $ARFMSA[$i][$j];
-		    }
-		    $adjusted_len++;
-		}
-
-	    }
-
-	    # We need to pick up everything after the final ARF, too...
-	    #
-	    for (my $j=$last_end; $j<$final_len; $j++) {
-		for (my $i=0; $i<$chr_hits; $i++) {
-		    $ARFAdjustedMSA[$i][$adjusted_len] = $FinalMSA[$i][$j];
-		}
-		$adjusted_len++;
-	    }
-	    
-
-	    # Move ARFAdjustedMSA into the FinalMSA variables
-	    #
-	    # NOTE:  It's been observed that there are some pathological ARFs that
-	    #        are recognized as having inserted AAs relative to the genome,
-	    #        so we need to do ANOTHER check for all-gap columns
-	    #
-	    $final_len = 0;
-	    for (my $j=0; $j<$adjusted_len; $j++) {
-		my $not_all_gaps = 0;
-		    for (my $i=0; $i<$chr_hits; $i++) {
-			$FinalMSA[$i][$final_len] = $ARFAdjustedMSA[$i][$j];
-			$not_all_gaps = 1 if ($ARFAdjustedMSA[$i][$j] ne '-');
-		    }
-		$final_len += $not_all_gaps;
-	    }
-
-	}
-
-    }
-    #
-    #     END OF ARF-SPLITTING
-    #    +====================+
-    #
 
 
     # Now that we have our clean and tidy MSA we can go
@@ -1119,6 +721,96 @@ sub MIN
     return $b;
 }
 
+
+
+
+
+################################################################
+#
+# FUNCTION: GetNextExonRange
+#
+sub GetNextExonRange
+{
+    my $start_index   = shift;
+    my $position_ref  = shift;
+    my @PositionIndex = @{$position_ref};
+
+    # First, we just want to know how far we go from the start of this
+    # exon before we hit an intron
+    my $next_index = $start_index;
+    my $last_nucl  = $PositionIndex[$start_index];
+    $next_index++;
+    while ($next_index < scalar(@PositionIndex) && abs($PositionIndex[$next_index]-$last_nucl)<10) {
+	$last_nucl = $PositionIndex[$next_index];
+	$next_index++;
+    }
+
+    # Next, we'll segment the exon based on any ARF-looking stuff.
+    # Each segment will have (1.) a start position, (2.) a length,
+    # and (3.) a number of reading frames.
+    my @SegmentList;
+    my $index = $start_index;
+    while ($index < $next_index) {
+
+	my $segment_start = $index;
+	
+	# In case we end up with a length-1 segment
+	$index++;
+	if ($index == $next_index) { 
+	    push(@SegmentList,$segment_start.','.$index.',1');
+	    last;
+	}
+
+	my $last_nucl    = $PositionIndex[$index-1];
+	my $current_nucl = $PositionIndex[$index];
+
+	# Peeking around super carefully for arfs
+	if (abs($last_nucl-$current_nucl)==3) {
+
+	    # If the next entry is 3 nucleotides away, we're in ARF-free territory, baby!
+	    $index++;
+	    while ($index < $next_index && abs($last_nucl-$current_nucl)==3) {
+		$last_nucl = $current_nucl;
+		$current_nucl = $PositionIndex[$index];
+		$index++;
+	    }
+	    push(@SegmentList,$segment_start.','.$index.',1');
+
+	} else {
+
+	    # Could this be... a... TRIPLE ARF?!
+	    if ($index+1 < $next_index && abs($PositionIndex[$index+1]-$last_nucl)==2) {
+
+		# IMPOSSIBLE!!!
+		$index++;
+		while ($index < $next_index && abs($last_nucl-$current_nucl)==1) {
+		    $last_nucl = $current_nucl;
+		    $current_nucl = $PositionIndex[$index];
+		    $index++;
+		}
+		push(@SegmentList,$segment_start.','.$index.',3');
+
+	    } else {
+
+		# Nope, just the regular ol' kind (not that there's an ARF out there
+		# that doesn't blow my socks off).
+		$index++;
+		while ($index < $next_index && abs($last_nucl-$current_nucl)<3) {
+		    $last_nucl = $current_nucl;
+		    $current_nucl = $PositionIndex[$index];
+		    $index++;
+		}
+		push(@SegmentList,$segment_start.','.$index.',2');
+
+	    }
+	    
+	}
+	
+    }
+
+    return ($next_index,\@SegmentList);
+    
+}
 
 
 
@@ -1678,239 +1370,6 @@ sub QuickAlign
     return \@FinalColumn;
 	
 }
-
-
-
-
-
-################################################################
-#
-# FUNCTION: GenARFClusters
-#
-sub GenARFClusters
-{
-    
-    my $msa_ref = shift;
-    my @MSA = @{$msa_ref};
-
-    my $num_seqs = shift;
-    my $start    = shift;
-    my $end      = shift;
-
-    my $content_position_ref = shift;
-    my @ContentPosition = @{$content_position_ref};
-
-    # Just a reminder, this is the ID of the sequence with the most
-    # content across the whole exon.
-    my $top_exon = shift;
-    my $top_exon_cluster = -1;
-
-    # Are we continuing an existing ARF?  If so, we'll need to
-    # be careful about consistency of ARF/non-ARF designation.
-    my $continuing_arf = shift;
-
-    # A binary array of whether or not a sequence is considered one of the
-    # ARF-havers.
-    my $is_non_arf_ref = shift;
-    my @IsNonARF;
-
-    # We need to do an independent catch for this (how many aminos do we advance?)
-    my @SeqContents;
-    for (my $i=0; $i<$num_seqs; $i++) {
-	my $seq_content = 0;
-	for (my $j=$start; $j<$end; $j++) {
-	    if ($MSA[$i][$j] =~ /[A-Za-z]/) { 
-		$ContentPosition[$i]++; 
-		$seq_content++;
-	    }
-	}
-	$SeqContents[$i] = $seq_content;
-    }
-	    
-    # We'll generate new clusters every time, even if we're continuing an ARF.
-    # To try to keep ARF-labelling consistent across multi-exon ARFs, however,
-    # we'll call the non-ARF cluster whichever cluster keeps the most sequences
-    # from the previous non-ARF cluster.
-
-    # Clusters of sequences, grouped by agreement about exon content
-    my @Clusters;
-    my @ClusterReps;
-    my @ClusterContent;
-    my $num_clusters = 0;
-    
-    # A special cluster for sequences that don't have this exon (so
-    # that they don't sway ARF/non-ARF voting).
-    my $EmptyCluster = '';
-    
-    # Iterate over each of our sequences figuring out the best cluster to
-    # slot them into.
-    for (my $i=0; $i<$num_seqs; $i++) {
-	
-	# Empty cluster!
-	if ($SeqContents[$i] == 0) {
-	    if ($EmptyCluster) { $EmptyCluster = $EmptyCluster.','.$i; }
-	    else               { $EmptyCluster = $i;                   }
-	    next;
-	}
-	
-	my $min_mismatches = ($end - $start) + 1;
-	my $min_mismatch_cluster = -1;
-	for (my $j=0; $j<$num_clusters; $j++) {
-	    
-	    # x is the sequence id of the sequence that represents
-	    # this cluster
-	    my $x = $ClusterReps[$j];
-	    
-	    # Check how many mismatches we have between the two sequences
-	    # we're considering clustering
-	    my $num_mismatches = 0;
-	    for (my $k=$start; $k<$end; $k++) {
-		if ($MSA[$i][$k] =~ /[A-Za-z]/ && $MSA[$x][$k] =~ /[A-Za-z]/) {
-		    $num_mismatches++ if (uc($MSA[$i][$k]) ne uc($MSA[$x][$k]));
-		}		
-	    }
-	    
-	    # Is this (1.) good enough to consider clustering, and (2.)
-	    # the best clustering we've seen
-	    if ($num_mismatches < 3 && $num_mismatches < $min_mismatches) {
-		$min_mismatches = $num_mismatches;
-		$min_mismatch_cluster = $j;
-	    }
-	    
-	}
-	
-	# If we had a sweeeeet clustering, use that.  Otherwise,
-	# make a hip new one that all the teens will love.
-	if ($min_mismatch_cluster >= 0) {
-	    $Clusters[$min_mismatch_cluster] = $Clusters[$min_mismatch_cluster].','.$i;
-	    if ($SeqContents[$i] > $ClusterContent[$min_mismatch_cluster]) {
-		$ClusterContent[$min_mismatch_cluster] = $SeqContents[$i];
-		$ClusterReps[$min_mismatch_cluster] = $i;
-	    }
-	    if ($i == $top_exon) {
-		$top_exon_cluster = $min_mismatch_cluster;
-		$top_exon = -1;
-	    }
-	} else {
-	    push(@Clusters,$i);
-	    $ClusterReps[$num_clusters] = $i;
-	    $ClusterContent[$num_clusters] = $SeqContents[$i];
-	    if ($i == $top_exon) {
-		$top_exon_cluster = $num_clusters;
-		$top_exon = -1;
-	    }
-	    $num_clusters++;
-	}
-	
-    }
-    
-
-    my $non_arf_cluster;
-    if ($continuing_arf) {
-
-	# If we're continuing an ARF, we should have an 'IsNonARF'
-	# array already in place
-	@IsNonARF = @{$is_non_arf_ref};
-
-	# Iterate over each of our new clusters, figuring out which
-	# has the most carry-overs from the previous set of designated
-	# non-ARF sequences
-
-	# Priming our search with cluster 0
-	$non_arf_cluster = 0;
-	my $max_carries = 0;
-	foreach my $seq_id (split(/\,/,$Clusters[0])) { $max_carries += $IsNonARF[$seq_id]; }
-	
-	for (my $cluster_id=1; $cluster_id < $num_clusters; $cluster_id++) {
-	    my $carries = 0;
-	    foreach my $seq_id (split(/\,/,$Clusters[$cluster_id])) {
-		$carries += $IsNonARF[$seq_id];
-	    }
-	    if ($carries > $max_carries) {
-		$max_carries = $carries;
-		$non_arf_cluster = $cluster_id;
-	    }
-	}
-
-	for (my $seq_id=0; $seq_id<$num_seqs; $seq_id++) { $IsNonARF[$seq_id] = 0; }
-	foreach my $seq_id (split(/\,/,$Clusters[$non_arf_cluster])) { $IsNonARF[$seq_id] = 1; }
-	
-
-    } else {
-
-	
-	# Radical!  Now that all of our sequences are clustered, we can figure
-	# out (1.) which cluster constitutes the canonical non-ARF, and build
-	# up the MSA that we'll use to represent this ARF-tastic region.
-	
-	$non_arf_cluster = 0;
-	my $tied_with = -1; 
-	for (my $i=1; $i<$num_clusters; $i++) {
-	    if (scalar(split(/\,/,$Clusters[$i])) > scalar(split(/\,/,$Clusters[$non_arf_cluster]))) {
-		$non_arf_cluster = $i;
-		$tied_with = -1;
-	    } elsif (scalar(split(/\,/,$Clusters[$i])) >= scalar(split(/\,/,$Clusters[$non_arf_cluster]))) {
-		$tied_with = $i;
-	    }
-	}
-	
-	# If we had a tie between two clusters, we see which representative had
-	# the exon with more content (and if that's a tie, we don't know what to do).
-	#
-	# NOTE: There's a weird possibility that the sequence with the most content
-	#       across the ARF-ish exon has no content in the specific region of the
-	#       disagreeing sequence.
-	#
-	if ($tied_with >= 0) {
-	    if ($top_exon_cluster >= 0 && $tied_with == $top_exon_cluster) {
-		$non_arf_cluster = $tied_with;
-	    }
-	}
-	
-	# Let's just go ahead and record a binary array of 'IsNonARF'
-	# Note that we'll label the empty sequences as 'IsNonARF == 0' so
-	# they don't have any extra pull if we have a multi-exon ARF
-	for (my $seq_id=0; $seq_id<$num_seqs; $seq_id++) { $IsNonARF[$seq_id] = 0; }
-	foreach my $seq_id (split(/\,/,$Clusters[$non_arf_cluster])) { $IsNonARF[$seq_id] = 1; }
-
-    }
-    
-    # Now that we have a winner of the non-ARF award, we attach the empty
-    # clusters onto that group (very sneaky).
-    if ($EmptyCluster) {
-	$Clusters[$non_arf_cluster] = $Clusters[$non_arf_cluster].','.$EmptyCluster;
-    }
-    
-    # Building up that nasty ARFMSA
-    my @ARFMSA;
-    my $arf_len = $end - $start;
-    for (my $i=0; $i<$num_seqs; $i++) {
-	for (my $j=0; $j<$arf_len * $num_clusters; $j++) {
-	    $ARFMSA[$i][$j] = '-';
-	}	
-    }
-
-    for (my $cluster_id = 0; $cluster_id < $num_clusters; $cluster_id++) {
-	
-	foreach my $seq_id (split(/\,/,$Clusters[$cluster_id])) {
-
-	    my $cluster_start = $cluster_id * $arf_len;
-	    my $orig_start = $start;
-	    for (my $j=0; $j<$arf_len; $j++) {
-		$ARFMSA[$seq_id][$cluster_start+$j] = $MSA[$seq_id][$orig_start+$j];
-	    }
-	    
-	}
-	
-    }
-
-    # Cool! Now we have an ARFMSA that's ready to be inserted into that nasty old
-    # MSA!
-    return(\@ARFMSA,($arf_len*$num_clusters),\@IsNonARF,\@ContentPosition);
-    
-}
-
-
 
 
 
