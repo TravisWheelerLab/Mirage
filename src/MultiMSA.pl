@@ -16,12 +16,14 @@ use POSIX;
 use Cwd;
 
 
-sub MIN;              # Get the minimum of two values
-sub MAX;              # Get the maximum of two values
-sub GetNextExonRange; # Identify the start and end points of the next exon (nucleotide values)
-sub AssembleMSA;      # Pull together the final MSA
-sub SimpleClean;      # Very basic cleanup, geared towards correcting little SPALN mistakes
-sub QuickAlign;       # Used to resolve indels
+sub MIN;                # Get the minimum of two values
+sub MAX;                # Get the maximum of two values
+sub GetNextExonRange;   # Identify the start and end points of the next exon (nucleotide values)
+sub MinorClean;
+sub SimpleClean;        # Very basic cleanup, geared towards correcting little SPALN mistakes
+sub QuickAlign;         # Used to resolve indels
+sub ResolveExon;
+sub CheckColumnProfile; # Build a profile of an MSA column
 
 
 if (@ARGV < 2) { die "\n  USAGE:  perl  MultiMSA.pl  <Quilter output>  <Protein database>  [Opt.s]\n\n"; }
@@ -532,7 +534,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
     my @Disagreements = ();
     my $final_len = $msa_len;
     if ($chr_hits > 1) {
-	my ($FinalMSARef,$DisagreementsRef,$tmp_len) = AssembleMSA(\@FinalMSA,$chr_hits,$msa_len);
+	my ($FinalMSARef,$DisagreementsRef,$tmp_len) = MinorClean(\@FinalMSA,$chr_hits,$msa_len);
 	@FinalMSA = @{$FinalMSARef};
 	@Disagreements = @{$DisagreementsRef};
 	$final_len = $tmp_len;
@@ -815,100 +817,199 @@ sub GetNextExonRange
 
 
 
+
+
 ################################################################
 #
-# FUNCTION: AssembleMSA
+#  FUNCTION:  MinorClean
 #
-sub AssembleMSA
+sub MinorClean
 {
+    my $msa_ref  = shift;
+    my $num_seqs = shift;
+    my $msa_len  = shift;
 
-    my ($i,$j,$k);
+    my @MSA = @{$msa_ref};
 
-    
-    # Grab what we have to work with, so far
-    #
-    my $InputMSAref = shift;
-    my @InputMSA = @{$InputMSAref};
-    
+    # It'll be useful for later components of 'cleanup' to know where
+    # our introns are
+    my @IntronPositions;
 
-    # The dimensions of the input MSA
-    #
-    my $num_seqs  = shift;
-    my $input_len = shift;
-
-
-    # The final MSA -- same number of seqs (duh), but possibly
-    # a different length, depending on how things clean up...
-    #
-    my @FinalMSA;
-    my $final_len = 0;
-
-
-    # Walk along the input MSA, taking care of business
-    #
-    for ($j=0; $j<$input_len; $j++) {
-
+    # We'll begin by doing a forward sweep looking for disagreements,
+    # and seeing if we can resolve them by shifting characters across
+    # gaps.
+    # Note that we won't create new columns -- just consider shifting
+    # around pieces that have obvious landing zones.
+    my $exon_start;
+    my $exon_end;
+    my $exon_len;
+    my $exon_conflicts = 0;
+    my $exon_agreements = 0;
+    my @TopChars;
+    for (my $j=0; $j<$msa_len; $j++) {
 	
-	my @Column = ();
-	my $max_col_ID   = -1;
-	my $max_col_size = 0;
+	# If we hit an intron marker we look back and consider fixing this exon
+	if ($MSA[0][$j] eq '*') {
 
-	
-	# Get a quick look at this input column
-	#
-	for ($i=0; $i<$num_seqs; $i++) {
-	    
-	    my $next = $InputMSA[$i][$j];
-	    push(@Column,$next);
-	    
-	    if (length($next) > $max_col_size) {
-		$max_col_size = length($next);
-		$max_col_ID   = $i;
+	    push(@IntronPositions,$j);
+	    $exon_end = $j;
+
+	    # A somewhat arbitrary selection, but whatever...
+	    if ($exon_conflicts > 4) {
+
+		# We know this exon is having some issues -- let's see if we can
+		# help out!
+		$msa_ref = ResolveExon(\@MSA,$num_seqs,$exon_start,$exon_end,\@TopChars);
+		@MSA = @{$msa_ref};
+
 	    }
 	    
+	    # Rest our stats for the next round
+	    $exon_start = $j+1;
+	    $exon_conflicts = 0;
+	    $exon_agreements = 0;
+	    $exon_len = 0;	    
+	    next;
 	}
-
 	
-	# Any multiple-character entries to resolve?
-	#
-	if ($max_col_size > 1) {
+	# Otherwise, tally whether we have an agreement or disagreement and
+	# record the top character
+	my ($num_chars,$top_char,$top_char_count) = CheckColumnProfile(\@MSA,$num_seqs,$j,-1);
+	if ($num_chars > 1) { $exon_conflicts++;  }
+	else                { $exon_agreements++; }
+	$TopChars[$exon_len] = $top_char;
+	$exon_len++;
 
-	    # Do some quick NW-esque alignment
-	    #
-	    my $ColumnRef = QuickAlign(\@Column,$max_col_ID,$max_col_size,$num_seqs);
-	    @Column = @{$ColumnRef};
-
-	}
-
-	
-	# Store everything right proper!
-	#
-	for ($i=0; $i<$num_seqs; $i++) {
-
-	    my @Row = split('',$Column[$i]);
-	    for ($k=0; $k<$max_col_size; $k++) { $FinalMSA[$i][$final_len+$k] = $Row[$k];}
-	    
-	}
-
-	
-	# And, finally, increment the length of the final sequence
-	#
-	$final_len += $max_col_size;
-	
-	
     }
 
-    
-    # Pass this over to a cleanup function that checks for obvious spacing goofs.
-    #
-    # This function gives us back everything that we need, so we can just forward
-    # the results.
-    #
-    return SimpleClean(\@FinalMSA,$num_seqs,$final_len);
 
+    # FINALLY do a pass to see which columns are still disagreeing
+    my @Disagreements;
+    for (my $j=0; $j<$msa_len; $j++) {
+	my ($num_chars,$top_char,$top_char_count) = CheckColumnProfile(\@MSA,$num_seqs,$j,-1);
+	push(@Disagreements,$j) if ($num_chars > 1);
+    }
+
+    return(\@MSA,\@Disagreements,$msa_len);
 
 }
 
+
+
+
+
+################################################################
+#
+# FUNCTION: SortOutExon
+#
+sub ResolveExon
+{
+    my $msa_ref  = shift;
+    my $num_seqs = shift;
+    my $start    = shift;
+    my $end      = shift;
+    my $cons_ref = shift;
+
+    my @MSA = @{$msa_ref};
+    my @TopChar = @{$cons_ref};
+
+    # For each sequence, figure out if it's having trouble,
+    # and (if it is) see whether the run of characters having
+    # the trouble are encountering a problematic gap.
+    for (my $i=0; $i<$num_seqs; $i++) {
+
+	# Tracking regions within the exon
+	my $region_start = 0;
+	my $region_end   = 0;
+	my $num_probs  = 0;
+
+	#
+	# We'll start with a forward pass...
+	#
+	for (my $j=0; $j<$end-$start; $j++) {
+
+	    # How we access the MSA
+	    my $pos = $start+$j;
+
+	    # Is this a gap character?
+	    if ($MSA[$i][$pos] eq '-') {
+
+		$region_end = $j-1;
+
+		# If we saw any problems, we'll check whether we can resolve
+		# these problems by moving characters to either side of a gap
+		if ($num_probs) {
+
+		    my $back_check = $region_start-1;
+		    $back_check-- while ($back_check >= 0 && $MSA[$i][$start+$back_check] eq '-');
+		    $back_check++; # Bringing us back from the brink
+		    while ($TopChar[$back_check] eq uc($MSA[$i][$start+$region_start]) && $region_start <= $region_end) {
+			$MSA[$i][$start+$back_check] = $MSA[$i][$start+$region_start];
+			$MSA[$i][$start+$region_start] = '-';
+			$region_start++;
+			$back_check++;
+		    }
+
+		}
+		
+		# Reset the 'region'
+		$region_start = $j+1;
+		$num_probs    = 0;
+
+	    } elsif (uc($MSA[$i][$pos]) ne $TopChar[$j]) {
+		$num_probs++;
+	    }
+
+	}
+	
+	#
+	# ... followed by a reverse pass
+	#
+	# Note that region_start and region_end follow the logic of rev. comp.,
+	# in all of its obnoxiousness.
+	#
+	for (my $j=($end-$start)-1; $j>=0; $j--) {
+
+	    # How we access the MSA
+	    my $pos = $start+$j;
+
+	    # Is this a gap character?
+	    if ($MSA[$i][$pos] eq '-') {
+
+		$region_start = $j+1;
+
+		# If we saw any problems, we'll check whether we can resolve
+		# these problems by moving characters to either side of a gap
+		if ($num_probs) {
+
+		    my $fwd_check = $region_end+1;
+		    $fwd_check++ while ($fwd_check <= $end-$start && $MSA[$i][$start+$fwd_check] eq '-');
+		    $fwd_check--; # Bringing us back from the brink
+		    while ($TopChar[$fwd_check] eq uc($MSA[$i][$start+$region_end]) && $region_start <= $region_end) {
+			$MSA[$i][$start+$fwd_check] = $MSA[$i][$start+$region_end];
+			$MSA[$i][$start+$region_end] = '-';
+			$region_end--;
+			$fwd_check--;
+		    }
+
+		}
+		
+		# Reset the 'region'
+		$region_end = $j-1;
+		$num_probs  = 0;
+
+	    } elsif (uc($MSA[$i][$pos]) ne $TopChar[$j]) {
+		$num_probs++;
+	    }
+
+	}
+
+    }
+
+    # Pass back the (hopefully) resolved MSA
+    return \@MSA;
+
+}
 
 
 
@@ -1375,6 +1476,49 @@ sub QuickAlign
 
 
 
+
+
+################################################################
+#
+#  FUNCTION:  CheckColumnProfile
+#
+sub CheckColumnProfile
+{
+    my $msa_ref    = shift;
+    my $num_seqs   = shift;
+    my $column_num = shift;
+    my $ignore_id  = shift;
+
+    my @MSA = @{$msa_ref};
+    my %Column;
+    for (my $i=0; $i<$num_seqs; $i++) {
+	next if ($i == $ignore_id);
+	my $char = uc($MSA[$i][$column_num]);
+	if ($char ne '-') {
+	    if ($Column{$char}) { $Column{$char}++; }
+	    else                { $Column{$char}=1; }
+	}
+    }
+
+    # What was the most popular character?
+    my $top_char = 'x';
+    my $num_chars = 0;
+    my $top_char_count = 0;
+    foreach my $char (keys %Column) {
+	$num_chars++;
+	my $char_count = $Column{$char};
+	if ($char_count > $top_char_count) {
+	    $top_char = $char;
+	    $top_char_count = $char_count;
+	}
+    }
+
+    # Return how many characters there were in this column,
+    # what the most popular character was, and how many
+    # times we saw the most popular character
+    return ($num_chars,$top_char,$top_char_count);
+
+}
 
 
 
