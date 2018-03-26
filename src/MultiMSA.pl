@@ -19,10 +19,9 @@ use Cwd;
 sub MIN;                # Get the minimum of two values
 sub MAX;                # Get the maximum of two values
 sub GetNextExonRange;   # Identify the start and end points of the next exon (nucleotide values)
-sub MinorClean;
-sub SimpleClean;        # Very basic cleanup, geared towards correcting little SPALN mistakes
+sub MinorClean;         # Clean up obvious minor errors in the alignment
 sub QuickAlign;         # Used to resolve indels
-sub ResolveExon;
+sub ResolveExon;        # When an error has been detected in an exon, try to adjust using gap tricks
 sub CheckColumnProfile; # Build a profile of an MSA column
 
 
@@ -859,7 +858,7 @@ sub MinorClean
 
 		# We know this exon is having some issues -- let's see if we can
 		# help out!
-		$msa_ref = ResolveExon(\@MSA,$num_seqs,$exon_start,$exon_end,\@TopChars);
+		$msa_ref = ResolveExon(\@MSA,$num_seqs,$exon_start,$exon_end);
 		@MSA = @{$msa_ref};
 
 	    }
@@ -908,15 +907,21 @@ sub ResolveExon
     my $num_seqs = shift;
     my $start    = shift;
     my $end      = shift;
-    my $cons_ref = shift;
 
     my @MSA = @{$msa_ref};
-    my @TopChar = @{$cons_ref};
 
     # For each sequence, figure out if it's having trouble,
     # and (if it is) see whether the run of characters having
     # the trouble are encountering a problematic gap.
     for (my $i=0; $i<$num_seqs; $i++) {
+
+	# We need to recompute the profile for this exon without
+	# this sequence included
+	my @TopChar;
+	for (my $j=$start; $j<$end; $j++) {
+	    my ($num_chars,$top_char,$top_char_count) = CheckColumnProfile(\@MSA,$num_seqs,$j,$i);
+	    push(@TopChar,$top_char); 
+	}
 
 	# Tracking regions within the exon
 	my $region_start = 0;
@@ -932,9 +937,10 @@ sub ResolveExon
 	    my $pos = $start+$j;
 
 	    # Is this a gap character?
-	    if ($MSA[$i][$pos] eq '-') {
+	    if ($MSA[$i][$pos] eq '-' || $j == ($end-$start)-1) {
 
-		$region_end = $j-1;
+		$region_end = $j;
+		$region_end-- unless ($MSA[$i][$pos] ne '-');
 
 		# If we saw any problems, we'll check whether we can resolve
 		# these problems by moving characters to either side of a gap
@@ -943,11 +949,14 @@ sub ResolveExon
 		    my $back_check = $region_start-1;
 		    $back_check-- while ($back_check >= 0 && $MSA[$i][$start+$back_check] eq '-');
 		    $back_check++; # Bringing us back from the brink
-		    while ($TopChar[$back_check] eq uc($MSA[$i][$start+$region_start]) && $region_start <= $region_end) {
-			$MSA[$i][$start+$back_check] = $MSA[$i][$start+$region_start];
-			$MSA[$i][$start+$region_start] = '-';
-			$region_start++;
-			$back_check++;
+
+		    if ($back_check != $region_start) {
+			while ($TopChar[$back_check] eq uc($MSA[$i][$start+$region_start]) && $region_start <= $region_end) {
+			    $MSA[$i][$start+$back_check] = $MSA[$i][$start+$region_start];
+			    $MSA[$i][$start+$region_start] = '-';
+			    $region_start++;
+			    $back_check++;
+			}
 		    }
 
 		}
@@ -961,7 +970,7 @@ sub ResolveExon
 	    }
 
 	}
-	
+
 	#
 	# ... followed by a reverse pass
 	#
@@ -974,9 +983,10 @@ sub ResolveExon
 	    my $pos = $start+$j;
 
 	    # Is this a gap character?
-	    if ($MSA[$i][$pos] eq '-') {
+	    if ($MSA[$i][$pos] eq '-' || $j==0) {
 
-		$region_start = $j+1;
+		$region_start = $j;
+		$region_start++ unless ($MSA[$i][$pos] ne '-');
 
 		# If we saw any problems, we'll check whether we can resolve
 		# these problems by moving characters to either side of a gap
@@ -985,13 +995,16 @@ sub ResolveExon
 		    my $fwd_check = $region_end+1;
 		    $fwd_check++ while ($fwd_check <= $end-$start && $MSA[$i][$start+$fwd_check] eq '-');
 		    $fwd_check--; # Bringing us back from the brink
-		    while ($TopChar[$fwd_check] eq uc($MSA[$i][$start+$region_end]) && $region_start <= $region_end) {
-			$MSA[$i][$start+$fwd_check] = $MSA[$i][$start+$region_end];
-			$MSA[$i][$start+$region_end] = '-';
-			$region_end--;
-			$fwd_check--;
-		    }
 
+		    if ($fwd_check != $region_end) {
+			while ($TopChar[$fwd_check] eq uc($MSA[$i][$start+$region_end]) && $region_start <= $region_end) {
+			    $MSA[$i][$start+$fwd_check] = $MSA[$i][$start+$region_end];
+			    $MSA[$i][$start+$region_end] = '-';
+			    $region_end--;
+			    $fwd_check--;
+			}
+		    }
+		    
 		}
 		
 		# Reset the 'region'
@@ -1008,332 +1021,6 @@ sub ResolveExon
 
     # Pass back the (hopefully) resolved MSA
     return \@MSA;
-
-}
-
-
-
-
-
-################################################################
-#
-# FUNCTION: SimpleClean
-#
-sub SimpleClean
-{
-
-    # Grab the MSA and its associated metadata
-    #
-    my $msa_ref = shift;
-    my @MSA = @{$msa_ref};
-
-    my $num_seqs = shift;
-    my $msa_len  = shift;
-
-    
-    # The first thing we'll do is build a 'consensus sequence'
-    # of all sites with unanimous agreement about their contents
-    # (that is, all columns that store the same character) as
-    # well as all columns that disagree somewhere (not counting
-    # gaps).
-    #
-    my @ConsensusSeq;
-    my @Disagreements;
-    for (my $i=0; $i<$msa_len; $i++) {
-
-	# Not interested in splice sites
-	#
-	if ($MSA[0][$i] eq '*') {
-	    push(@ConsensusSeq,'*');
-	    next;
-	}
-
-	# Run through each sequence, checking if we're in agreement
-	#
-	my $disagreement  = 0;
-	my $consensuschar = 0;
-	for (my $j=0; $j<$num_seqs; $j++) {
-
-	    if ($MSA[$j][$i] =~ /\w/) {
-
-		if (!$consensuschar) { 
-		    $consensuschar = uc($MSA[$j][$i]);
-		} elsif (uc($MSA[$j][$i]) ne $consensuschar) {
-		    $disagreement = 1;
-		    last;
-		}
-
-	    }
-
-	}
-
-	# How are we looking? Did we find a disagreement?
-	#
-	if ($disagreement) {
-	    push(@ConsensusSeq,'#');
-	    push(@Disagreements,$i);
-	} else {
-	    push(@ConsensusSeq,$consensuschar);    
-	}
-
-    }
-
-
-    # If there weren't any disagreements we can just skip over this
-    # whole error-correction stuff.
-    #
-    if (@Disagreements) {
-
-	# Now that we have a list disagreeing positions, we can go through
-	# and check whether there are any characters that we can swap
-	# around to make those pesky disagreements disappear.
-	#
-	my @Unresolved;
-	for (my $dis_num=0; $dis_num<scalar(@Disagreements); $dis_num++) {
-	            
-	    my $i = $Disagreements[$dis_num];
-	            
-	    # If there's a disagreement about the next column over (left) we
-	    # don't consider placement.  Or if it's a splice site.
-	    #
-	    if ($ConsensusSeq[$i-1] eq '#') {
-		push(@Unresolved,$i);
-		next;
-	    }
-	    
-	    # Iterate through each position checking if we can shift it
-	    # safely into a consensus column
-	    #
-	    for (my $j=0; $j<$num_seqs; $j++) {
-		
-		# Check if the position to the left meets the following
-		# criteria:
-		#
-		#     OPTION 1:
-		#     1. Gap character
-		#     2. Part of consensus column with this character
-		#
-		#     OPTION 2:
-		#     1. Splice site marker immediately after a gap
-		#     2. The gap before the splice site meets (1).
-		#
-		if ($MSA[$j][$i-1] =~ /\W/) {
-		    if ($MSA[$j][$i-1] eq '-' && uc($MSA[$j][$i]) eq $ConsensusSeq[$i-1]) {
-			$MSA[$j][$i-1] = $MSA[$j][$i];
-			$MSA[$j][$i]   = '-';
-		    } elsif ($MSA[$j][$i-1] eq '*' && $i-2 >= 0 
-			     && $MSA[$j][$i-2] eq '-' &&  uc($MSA[$j][$i]) eq $ConsensusSeq[$i-2]) {
-			$MSA[$j][$i-2] = $MSA[$j][$i];
-			$MSA[$j][$i]   = '-';
-		    }
-		}
-		
-	    }
-	            
-	    # Now that we've corrected this column (as best we can) see if we've
-	    # resolved what it should contain...
-	    #
-	    my $consensuschar = 0;
-	    my $disagreement  = 0;
-	    for (my $j=0; $j<$num_seqs; $j++) {
-		
-		next if ($MSA[$j][$i] =~ /\W/);
-		
-		if (!$consensuschar) {
-		    $consensuschar = uc($MSA[$j][$i]);
-		} elsif (uc($MSA[$j][$i]) ne $consensuschar) {
-		    $disagreement = 1;
-		    last;
-		}
-		
-	    }
-	        
-	    # If there isn't a consensus character, that means that this column
-	    # has become an all-gap column (and will need to be cleared out).
-	    #
-	    # If there's still disagreement we'll try to catch it on the flipside
-	    # (i.e., when we run through in reverse checking right neighbors).
-	    #
-	    if (!$consensuschar) {
-		$ConsensusSeq[$i] = '-';
-		
-	    } elsif ($disagreement) {
-		push(@Unresolved,$i);
-		
-	    } else {
-		$ConsensusSeq[$i] = $consensuschar;
-		
-	    }
-
-	}
-	
-	
-	# We're really cruising now!  Let's check the reverse...
-	#
-	for (my $dis_num=scalar(@Unresolved)-1; $dis_num>=0; $dis_num--) {
-	            
-	    my $i = $Unresolved[$dis_num];
-	    
-	    # If there's a disagreement about the next column over (right) we
-	    # don't consider placement.  Again, we also don't mess with splice sites.
-	    #
-	    next if ($ConsensusSeq[$i+1] eq '#');
-	    
-	    # Iterate through each position checking if we can shift it
-	    # safely into a consensus column
-	    #
-	    for (my $j=0; $j<$num_seqs; $j++) {
-		
-		# Check if the position to the left meets the criteria from before.
-		#
-		if ($MSA[$j][$i+1] =~ /\W/) {
-		    if ($MSA[$j][$i+1] eq '-' && uc($MSA[$j][$i]) eq $ConsensusSeq[$i+1]) {
-			$MSA[$j][$i+1] = $MSA[$j][$i];
-			$MSA[$j][$i]   = '-';
-		    } elsif ($MSA[$j][$i+1] eq '*' && $i+2 < $msa_len 
-			     && $MSA[$j][$i+2] eq '-' &&  uc($MSA[$j][$i]) eq $ConsensusSeq[$i+2]) {
-			$MSA[$j][$i+2] = $MSA[$j][$i];
-			$MSA[$j][$i]   = '-';
-		    }
-		}
-		
-	    }
-	            
-	            
-	    # We don't need to worry about locating unresolved disagreements
-	    # (two passes is sufficient), but we benefit from knowing whether
-	    # we've converted this into an all-gap-characters column.
-	    #
-	    my $consensuschar = 0;
-	    my $disagreement  = 0;
-	    for (my $j=0; $j<$num_seqs; $j++) {
-		
-		next if ($MSA[$j][$i] eq '-');
-		
-		if (!$consensuschar) {
-		    $consensuschar = uc($MSA[$j][$i]);
-		} elsif (uc($MSA[$j][$i]) ne $consensuschar) {
-		    $disagreement = 1;
-		    last;
-		}
-		
-	    }
-	            
-	    # If there isn't a consensus character, that means that this column
-	    # has become an all-gap column (and will need to be cleared out).
-	    #
-	    # If there's still disagreement we'll try to catch it on the flipside
-	    # (i.e., when we run through in reverse checking right neighbors).
-	    #
-	    if (!$consensuschar) { 
-		$ConsensusSeq[$i] = '-'; 
-	    } elsif (!$disagreement) {
-		$ConsensusSeq[$i] = $consensuschar;
-	    }
-	    
-	}
-    }
-    
-    
-    # Actually, for one last sneak, let's see if we can't clean up any
-    # jigsaw-type weirdness...
-    #
-    for (my $i=2; $i<$msa_len; $i++) {
-	
-	# Per usual, don't worry about those silly old splice sites
-	#
-	next if ($MSA[0][$i] eq '*');
-	
-	# Check if we can give it a little scoot
-	#
-	my $switcheroo = 0;
-	for (my $j=0; $j<$num_seqs; $j++) {
-	    if ($ConsensusSeq[$i-1] eq uc($MSA[$j][$i]) && $MSA[$j][$i-1] eq '-' && $MSA[$j][$i-2] =~ /\w/) {
-		$MSA[$j][$i-1] = $MSA[$j][$i];
-		$MSA[$j][$i]   = '-';
-		$switcheroo = 1;
-	    }
-	}
-	
-	# If we switched this column around, maybe we just created an
-	# all-gap column, which will need to be fixed...
-	#
-	if ($switcheroo) {
-	    for (my $j=0; $j<$num_seqs; $j++) {
-		if ($MSA[$j][$i] ne '-') {
-		    $switcheroo = 0;
-		    last;
-		}
-	    }
-	    if ($switcheroo) { 
-		$ConsensusSeq[$i] = '-';
-	    }
-	}
-    }
-
-
-    # EXCELLENT!
-    #
-    # Let's go ahead and make a final MSA without any all-gap columns
-    # (or double-'*' columns).
-    #
-    my @FinalMSA;
-    my @FinalDisagreements;
-    my $final_len = 0;
-    my $after_gap = 0;
-    for (my $i=0; $i<$msa_len; $i++) {
-
-	# Is this a splice-site boundary?
-	#
-	if ($ConsensusSeq[$i] eq '*') {
-	        
-	    # If we're immediately following another splice boundary,
-	    # just forget about this column...
-	    #
-	    if (!$after_gap) {
-		
-		# We can just tear through this column.
-		#
-		for (my $j=0; $j<$num_seqs; $j++) { $FinalMSA[$j][$final_len] = '*'; }
-
-		# One small step for this multiple sequence alignment.
-		# One giant leap for...  Let me get back to you.
-		#
-		$final_len++;
-
-	    }
-
-	    # Splice-column observed!
-	    #
-	    $after_gap = 1;
-
-	} elsif ($ConsensusSeq[$i] ne '-') {
-
-	    # Looks like we're just looking at a regular old column.
-	    # Boring!
-	    #
-	    $after_gap = 0;
-	        
-	    # Copy-paste (plagarism alert!)
-	    #
-	    for (my $j=0; $j<$num_seqs; $j++) { $FinalMSA[$j][$final_len] = $MSA[$j][$i]; }
-	        
-	    # Were there any disagreements at this column?
-	    #
-	    push(@FinalDisagreements,$i) if ($ConsensusSeq[$i] eq '#');
-	        
-	    # Moving forward with our lives
-	    #
-	    $final_len++;
-
-	}
-
-    }
-
-
-    # Hope this helps!  Take care, now!
-    #
-    return (\@FinalMSA,\@FinalDisagreements,$final_len);
 
 }
 
