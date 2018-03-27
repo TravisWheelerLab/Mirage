@@ -241,36 +241,45 @@ FindDiagonals
       //  Note that we don't adjust memory, but just shift things we're still
       //  interested in down towards the start of the list, and ignore anything
       //  low-scoring.
-      int pos,score;
+      int pos,net_score,match_score;
       for (j=2; j<TransLength; j++) {
 	k = 0;
 	for (i=0; i<Diags->num_diagonals; i++) {
 	  pos = Diags->diagonal_starts[i]+j;
 	  if (pos < ProtLength) {
-	    score = Diags->diagonal_scores[i] + CalcScore(Protein[pos],Translation[j]);
-	    if (score > 0) {
-	      if (pos < ProtLength-1) {    // Regular old extension
-		
-		Diags->diagonal_starts[k] = pos-j;
-		Diags->diagonal_scores[k] = score;
-		k++;
-		
-	      } else {                     // Somebody capped out
-		
-		TerminalStarts[numTerms] = pos-j;
-		TerminalScores[numTerms] = score;
-		numTerms++;
-		
-		if (numTerms == termCap) { // Somebody capped out the capout cap! (out)
+
+	    match_score = CalcScore(Protein[pos],Translation[j]);
+	    if (match_score < 0) { Diags->diagonal_strikes[k]++; }
+
+	    // Any hits that have two mismatches or a zero net score get canned
+	    if (Diags->diagonal_strikes[k] < 2) {
+
+	      net_score = Diags->diagonal_scores[i] + match_score;
+
+	      if (net_score > 0) {
+		if (pos < ProtLength-1) {    // Regular old extension
 		  
-		  termCap *= 2;
+		  Diags->diagonal_starts[k] = pos-j;
+		  Diags->diagonal_scores[k] = net_score;
+		  k++;
 		  
-		  if ((TerminalStarts = realloc(TerminalStarts,termCap*sizeof(int))) == NULL)
-		    return 1;
+		} else {                     // Somebody capped out
 		  
-		  if ((TerminalScores = realloc(TerminalScores,termCap*sizeof(int))) == NULL)
-		    return 1;
+		  TerminalStarts[numTerms] = pos-j;
+		  TerminalScores[numTerms] = net_score;
+		  numTerms++;
 		  
+		  if (numTerms == termCap) { // Somebody capped out the capout cap! (out)
+		    
+		    termCap *= 2;
+		    
+		    if ((TerminalStarts = realloc(TerminalStarts,termCap*sizeof(int))) == NULL)
+		      return 1;
+		    
+		    if ((TerminalScores = realloc(TerminalScores,termCap*sizeof(int))) == NULL)
+		      return 1;
+		    
+		  }
 		}
 	      }
 	    }
