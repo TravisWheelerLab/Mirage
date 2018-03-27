@@ -249,18 +249,19 @@ FindDiagonals
 	  if (pos < ProtLength) {
 
 	    match_score = CalcScore(Protein[pos],Translation[j]);
-	    if (match_score < 0) { Diags->diagonal_strikes[k]++; }
+	    if (match_score < 0) { Diags->diagonal_strikes[i]++; }
 
 	    // Any hits that have two mismatches or a zero net score get canned
-	    if (Diags->diagonal_strikes[k] < 2) {
+	    if (Diags->diagonal_strikes[i] < 2) {
 
 	      net_score = Diags->diagonal_scores[i] + match_score;
 
 	      if (net_score > 0) {
 		if (pos < ProtLength-1) {    // Regular old extension
 		  
-		  Diags->diagonal_starts[k] = pos-j;
-		  Diags->diagonal_scores[k] = net_score;
+		  Diags->diagonal_starts[k]  = pos-j;
+		  Diags->diagonal_scores[k]  = net_score;
+		  Diags->diagonal_strikes[k] = Diags->diagonal_strikes[i];
 		  k++;
 		  
 		} else {                     // Somebody capped out
