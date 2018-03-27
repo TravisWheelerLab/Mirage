@@ -459,7 +459,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 			    my $check_entry  = uc($MSA{$check_pos});
 			    my $num_elements = scalar(split(/\,/,$check_entry));
 			    my $num_matches  = scalar(split(/\:$second_char/,$check_entry));
-			    if ($num_matches >= POSIX::ceil($num_elements/2)) {
+			    if ($num_matches > $num_elements/2) {
 
 				$chars =~ /^\S(\S+)$/;
 				my $next_entry = $1;
