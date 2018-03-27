@@ -29,7 +29,7 @@ sub GetChromosomeLengths;
 sub RunFastDiagonals;
 sub FindFullAlignments;
 sub ListCodonCenters;
-sub ExonAssisteSPALN;
+sub ExonAssistedSPALN;
 sub BLATAssistedSPALN;
 sub ParseSPALNOutput;
 sub AdjustSPALNOutput;
@@ -2388,12 +2388,8 @@ sub ExonAssistedSPALN
     }
 
     # Pull in a little extra sequence, just to be safe
-    $minNucl = MAX($minNucl-1000,1);
-    $maxNucl = MIN($maxNucl+1000,$ChrLengths{$chrname});
-
-    # In case we've been given an inordinate amount of sequence to investigate,
-    # we'll jump ship
-    return (0,0) if ($maxNucl - $minNucl > 1000000);
+    $minNucl = MAX($minNucl-100000,1);
+    $maxNucl = MIN($maxNucl+100000,$ChrLengths{$chrname});
 
     # Toss the selected sequence into our file
     my $eslsfetchCmd;
@@ -2430,8 +2426,8 @@ sub ExonAssistedSPALN
     # how about we expand our borders and see if we can't get up to 97%?
 
     # Pull in a LOT of extra sequence
-    $minNucl = MAX($minNucl-400000,1);
-    $maxNucl = MIN($maxNucl+400000,$ChrLengths{$chrname});
+    $minNucl = MAX($minNucl-1000000,1);
+    $maxNucl = MIN($maxNucl+1000000,$ChrLengths{$chrname});
 
     # Toss the selected sequence into our file
     $eslsfetchCmd = 'esl-sfetch -c '.$minNucl.'..'.$maxNucl;
@@ -3099,14 +3095,19 @@ sub ParseSPALNOutput
 	#
 	if ($first_jump == 0) {
 
-	    $line =~ /\s+(\d+)/;
-	    $first_jump = $1;
+	    if ($line =~ /\s+(\d+)/) {
 
-	    # Special catch for BLAT parsing
-	    if ($revcomp==3) { $current_pos  = ($start_pos+1)-$first_jump; }
-	    else             { $current_pos += $first_jump;                }
+		$first_jump = $1;
 
-	    $first_jump = 1;
+		# Special catch for BLAT parsing
+		if ($revcomp==3) { $current_pos  = ($start_pos+1)-$first_jump; }
+		else             { $current_pos += $first_jump;                }
+
+		$first_jump = 1;
+
+	    } else {
+		return(0,0);
+	    }
 
 	}
 
