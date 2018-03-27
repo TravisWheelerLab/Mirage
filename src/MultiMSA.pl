@@ -459,7 +459,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 			    my $check_entry  = uc($MSA{$check_pos});
 			    my $num_elements = scalar(split(/\,/,$check_entry));
 			    my $num_matches  = scalar(split(/\:$second_char/,$check_entry));
-			    if ($num_matches > int($num_elements/2)) {
+			    if ($num_matches >= POSIX::ceil($num_elements/2)) {
 
 				$chars =~ /^\S(\S+)$/;
 				my $next_entry = $1;
@@ -873,7 +873,7 @@ sub MinorClean
 	
 	# Otherwise, tally whether we have an agreement or disagreement and
 	# record the top character
-	my ($num_chars,$top_char,$top_char_count) = CheckColumnProfile(\@MSA,$num_seqs,$j,-1);
+	my ($num_chars,$top_char,$top_char_count) = CheckColumnProfile(\@MSA,$num_seqs,$j,-1,0);
 	if ($num_chars > 1) { $exon_conflicts++;  }
 	else                { $exon_agreements++; }
 	$TopChars[$exon_len] = $top_char;
@@ -885,7 +885,7 @@ sub MinorClean
     # FINALLY do a pass to see which columns are still disagreeing
     my @Disagreements;
     for (my $j=0; $j<$msa_len; $j++) {
-	my ($num_chars,$top_char,$top_char_count) = CheckColumnProfile(\@MSA,$num_seqs,$j,-1);
+	my ($num_chars,$top_char,$top_char_count) = CheckColumnProfile(\@MSA,$num_seqs,$j,-1,0);
 	push(@Disagreements,$j) if ($num_chars > 1);
     }
 
@@ -919,7 +919,7 @@ sub ResolveExon
 	# this sequence included
 	my @TopChar;
 	for (my $j=$start; $j<$end; $j++) {
-	    my ($num_chars,$top_char,$top_char_count) = CheckColumnProfile(\@MSA,$num_seqs,$j,$i);
+	    my ($num_chars,$top_char,$top_char_count) = CheckColumnProfile(\@MSA,$num_seqs,$j,$i,0);
 	    push(@TopChar,$top_char); 
 	}
 
@@ -951,11 +951,23 @@ sub ResolveExon
 		    $back_check++; # Bringing us back from the brink
 
 		    if ($back_check != $region_start) {
+
+			# We recompute the TopChar as we move along, since it's liable to change
+			my ($num_chars,$top_char,$top_char_count) 
+			    = CheckColumnProfile(\@MSA,$num_seqs,$start+$back_check,$i,$MSA[$i][$start+$region_start]);
+			$TopChar[$back_check] = $top_char;
+
 			while ($TopChar[$back_check] eq uc($MSA[$i][$start+$region_start]) && $region_start <= $region_end) {
+
 			    $MSA[$i][$start+$back_check] = $MSA[$i][$start+$region_start];
 			    $MSA[$i][$start+$region_start] = '-';
 			    $region_start++;
 			    $back_check++;
+
+			    ($num_chars,$top_char,$top_char_count) 
+				= CheckColumnProfile(\@MSA,$num_seqs,$start+$back_check,$i,$MSA[$i][$start+$region_start]);
+			    $TopChar[$back_check] = $top_char;
+
 			}
 		    }
 
@@ -995,16 +1007,28 @@ sub ResolveExon
 		    my $fwd_check = $region_end+1;
 		    $fwd_check++ while ($fwd_check <= $end-$start && $MSA[$i][$start+$fwd_check] eq '-');
 		    $fwd_check--; # Bringing us back from the brink
-
+		    
 		    if ($fwd_check != $region_end) {
+			
+			# We recompute the TopChar as we move along, since it's liable to change
+			my ($num_chars,$top_char,$top_char_count)
+			    = CheckColumnProfile(\@MSA,$num_seqs,$start+$fwd_check,$i,$MSA[$i][$start+$region_end]);
+			$TopChar[$fwd_check] = $top_char;
+			    
 			while ($TopChar[$fwd_check] eq uc($MSA[$i][$start+$region_end]) && $region_start <= $region_end) {
+				
 			    $MSA[$i][$start+$fwd_check] = $MSA[$i][$start+$region_end];
 			    $MSA[$i][$start+$region_end] = '-';
 			    $region_end--;
 			    $fwd_check--;
+
+			    ($num_chars,$top_char,$top_char_count) 
+				= CheckColumnProfile(\@MSA,$num_seqs,$start+$fwd_check,$i,$MSA[$i][$start+$region_end]);
+			    $TopChar[$fwd_check] = $top_char;
+
 			}
 		    }
-		    
+
 		}
 		
 		# Reset the 'region'
@@ -1035,7 +1059,7 @@ sub ResolveExon
 sub QuickAlign
 {
     my ($i,$j,$k,$x,$y);
-
+    
     my $match_score    = 3;
     my $mismatch_score = 0;
     my $gap_cost       = -1;
@@ -1175,6 +1199,7 @@ sub CheckColumnProfile
     my $num_seqs   = shift;
     my $column_num = shift;
     my $ignore_id  = shift;
+    my $preference = shift; # If there's a tie and we have a preferred winner
 
     my @MSA = @{$msa_ref};
     my %Column;
@@ -1197,6 +1222,8 @@ sub CheckColumnProfile
 	if ($char_count > $top_char_count) {
 	    $top_char = $char;
 	    $top_char_count = $char_count;
+	} elsif ($preference && $char_count == $top_char_count && $char eq $preference) {
+	    $top_char = $char;
 	}
     }
 
