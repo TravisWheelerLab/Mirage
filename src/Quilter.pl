@@ -3188,7 +3188,7 @@ sub ParseSPALNOutput
     # If we aren't satisfied with the overall percent identity of the
     # hit go back (possibly to pull in more sequence and try again).
     #
-    return (0,1) if (100.0 - (100.0*($mismatches/$prot_len)) < 97.0);
+    return (0,1) if ($mismatches/$prot_len > 0.05);
     
 
     # Selenocysteine does some crazy stuff, man.  I translated some once
