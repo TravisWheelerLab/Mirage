@@ -400,8 +400,14 @@ foreach my $group_index ($startpoint..$endpoint-1) {
     for ($i=0; $i<$chr_hits; $i++) { $FinalMSA[$i][0] = '*'; }
     my $msa_len  = 1;
 
+    # In order to log ARF positions, we need to keep track of where we are in
+    # a given sequence.
     my @ARFNameField;
-    for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) { $ARFNameField[$seq_id] = 0; }
+    my @ContentPositions;
+    for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) { 
+	$ARFNameField[$seq_id] = 0; 
+	$ContentPositions[$seq_id] = 0;
+    }
 
     my $pos_index = 0;
     while ($pos_index < scalar(@PositionIndex)) {
@@ -418,8 +424,33 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	    my $end_index   = $SegmentParts[1];
 	    my $num_frames  = $SegmentParts[2];
 
-	    # I mean, pretty slick, right?
+	    # If there are multiple frames, we'll do a quick scan to find out which
+	    # frame is the most common and designate that the non-ARF.
+	    my $non_arf_frame = 0;
+	    my $non_arf_frame_size = scalar(split(/\,/,$MSA{$PositionIndex[$start_index]}));
+	    for (my $frame=1; $frame<$num_frames; $frame++) {
+		my $frame_size = scalar(split(/\,/,$MSA{$PositionIndex[$start_index+$frame]}));
+		if ($frame_size > $non_arf_frame_size) {
+		    $non_arf_frame = $frame;
+		    $non_arf_frame_size = $frame_size;
+		}
+	    }
+
+	    # It's probably easiest to just do this here, rather than on a
+	    # conditional
+	    my @ContentStarts;
+	    for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) {
+		# Note that we do a '+1' for non-CS enumeration
+		$ContentStarts[$seq_id] = $ContentPositions[$seq_id]+1;
+	    }
+
+	    # I mean, pretty slick, right? (this is how we handle ARFs)
 	    for (my $frame=0; $frame<$num_frames; $frame++) {
+
+		# We benefit from knowing which sequences we've seen in this frame
+		my @SeqsInFrame;
+		for (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) { $SeqsInFrame[$seq_id] = 0; }
+
 		for (my $index=$start_index+$frame; $index<$end_index; $index+=$num_frames) {
 
 		    my $genome_pos   = $PositionIndex[$index];
@@ -441,6 +472,8 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 			$SeqsAndChars[$i] =~ /(\d+)\:(\S+)/;
 			my $seq_id = $1;
 			my $chars  = $2;
+
+			$SeqsInFrame[$seq_id] = 1;
 
 			# If there are multiple characters in this entry, we'll
 			# see if there's a more creative solution to this puzzle
@@ -489,6 +522,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 
 			# Add this set of characters to the column
 			$Column[$seq_id] = $chars;
+			$ContentPositions[$seq_id] += length($chars);
 
 		    }
 
@@ -509,6 +543,23 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 		    $msa_len += $longest_entry_len;
 
 		}
+
+		# If we just wrapped up an ARF frame, then we'll record how much 
+		# each of the sequences in this frame moved.
+		if ($frame != $non_arf_frame) {
+		    for (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) {
+			if ($SeqsInFrame[$seq_id]) {
+			    my $new_arf_entry = $ContentStarts[$seq_id].'..'.$ContentPositions[$seq_id];
+			    if ($ARFNameField[$seq_id]) {
+				$ARFNameField[$seq_id] =~ s/^ARF\:/ARFs\:/;
+				$ARFNameField[$seq_id] = $ARFNameField[$seq_id].','.$new_arf_entry;
+			    } else {
+				$ARFNameField[$seq_id] = 'ARF:'.$new_arf_entry;
+			    }
+			}
+		    }
+		}
+
 	    }
 
 	}
