@@ -83,6 +83,7 @@ if (-e $outputfolder) {
 system("mkdir $outputfolder");
 
 open(my $infile,'<',$ARGV[0]) || die "\n  Failed to open input file '$ARGV[0]'\n\n";
+my %ChrsByFam;
 while (!eof($infile)) {
 
     my $line = <$infile>;
@@ -133,6 +134,9 @@ while (!eof($infile)) {
 	    $Nums{$group_id}=1;
 	}
 	$Hits{$group_id} = $hash_entry;
+
+	if ($ChrsByFam{$group_id}) { $ChrsByFam{$group_id} = $ChrsByFam{$group_id}.'|'.$chr_name; }
+	else                       { $ChrsByFam{$group_id} = $chr_name;                           }
 	
     }
     
@@ -218,9 +222,29 @@ foreach my $group_index ($startpoint..$endpoint-1) {
     $outfilename = $outfilename.'.afa';
 
     my $numhits = $Nums{$group_id};
+
+    # Figure out the dominant chromosome for this family
+    my @ChrList = split(/\|/,$ChrsByFam{$group_id});
+    my %TopChr;
+    foreach my $chr (@ChrList) {
+	if ($TopChr{$chr}) { $TopChr{$chr}++; }
+	else               { $TopChr{$chr}=1; }
+    }
+    my $curr_chr = 0;
+    my $curr_chr_counts = -1;
+    foreach my $chr (keys %TopChr) {
+	if ($TopChr{$chr} > $curr_chr_counts) {
+	    $curr_chr = $chr;
+	    $curr_chr_counts = $TopChr{$chr};
+	}
+    }
+
+    my $revcomp;
+    if ($curr_chr =~ /\[revcomp\]/) { $revcomp = 1; }
+    else                            { $revcomp = 0; }
+
     
     my $ChrName;
-    my $revcomp;
     my @GeneNames;
     my @IsoNames;
     my @Species;
@@ -231,7 +255,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
     my @ExtraInfo;
     my @GroupField; # Because there's the possibility of case varying
     
-    my ($curr_chr,$NuclStart,$NuclEnd);
+    my ($NuclStart,$NuclEnd);
     my $hash_entry = $Hits{$group_id};
     my @each_entry = split('&',$hash_entry);
 
@@ -239,80 +263,42 @@ foreach my $group_index ($startpoint..$endpoint-1) {
     my $chr_hits = 0;
     foreach $i (0..$numhits-1) {
 
-	my $alt_chr = 0;
-	
 	my @this_entry  = split('#',$each_entry[$i]);
 	$ChrName        = $this_entry[0];
 
-	# Verifying that this group's isoforms all hit to the same chromosome
-	if ($i == 0) { 
-
-	    $PosStrings[$chr_hits] = $this_entry[2];
-	    $DBEntries[$chr_hits]  = $this_entry[1];
-
-	    # Some entries might have additional data fields before the
-	    # group identifier, so we'll have to pay attention to how
-	    # many fields there are.
-	    if ($DBEntries[$chr_hits]  =~ /([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|(\S*\|)([^\|]+)\s*$/) {
-		$GeneNames[$chr_hits]  = $1;
-		$IsoNames[$chr_hits]   = $2;
-		$Species[$chr_hits]    = $3;
-		$IsoIDs[$chr_hits]     = $4;
-		$ExtraInfo[$chr_hits]  = $5;
-		$GroupField[$chr_hits] = $6;
-	    } elsif ($DBEntries[$chr_hits]  =~ /([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\s*$/) {
-		$GeneNames[$chr_hits]  = $1;
-		$IsoNames[$chr_hits]   = $2;
-		$Species[$chr_hits]    = $3;
-		$IsoIDs[$chr_hits]     = $4;
-		$ExtraInfo[$chr_hits]  = 0;
-		$GroupField[$chr_hits] = $5;
-	    } else {
-		die "\n  ERROR:  Failed to parse sequence name '$DBEntries[$chr_hits]'\n\n";
-	    }
-	    
-	    $curr_chr = $ChrName;
-	    if ($ChrName =~ /\[revcomp\]/) { $revcomp = 1; }
-	    else                           { $revcomp = 0; }
-
-	} elsif ($ChrName ne $curr_chr) {
+	if ($ChrName ne $curr_chr) {
 
 	    # Write this guy out for future alignment using translated
 	    # Needleman-Wunsch
 	    print $missfile "$this_entry[1]\n";	    
-	    $alt_chr = 1;
+	    next;
 
-	} else {
-
-	    $PosStrings[$chr_hits] = $this_entry[2];
-	    $DBEntries[$chr_hits]  = $this_entry[1];
-
-	    # Some entries might have additional data fields before the
-	    # group identifier, so we'll have to pay attention to how
-	    # many fields there are.
-	    if ($DBEntries[$chr_hits]  =~ /([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|(\S*\|)([^\|]+)\s*$/) {
-		$GeneNames[$chr_hits]  = $1;
-		$IsoNames[$chr_hits]   = $2;
-		$Species[$chr_hits]    = $3;
-		$IsoIDs[$chr_hits]     = $4;
-		$ExtraInfo[$chr_hits]  = $5;
-		$GroupField[$chr_hits] = $6;
-	    } elsif ($DBEntries[$chr_hits]  =~ /([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\s*$/) {
-		$GeneNames[$chr_hits]  = $1;
-		$IsoNames[$chr_hits]   = $2;
-		$Species[$chr_hits]    = $3;
-		$IsoIDs[$chr_hits]     = $4;
-		$ExtraInfo[$chr_hits]  = 0;
-		$GroupField[$chr_hits] = $5;
-	    } else {
-		die "\n  ERROR:  Failed to parse sequence name '$DBEntries[$chr_hits]'\n\n";
-	    }
-	    
 	}
 
-	# No need to keep playing around with this one
-	next if ($alt_chr);
-
+	$PosStrings[$chr_hits] = $this_entry[2];
+	$DBEntries[$chr_hits]  = $this_entry[1];
+	
+	# Some entries might have additional data fields before the
+	# group identifier, so we'll have to pay attention to how
+	# many fields there are.
+	if ($DBEntries[$chr_hits]  =~ /([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|(\S*\|)([^\|]+)\s*$/) {
+	    $GeneNames[$chr_hits]  = $1;
+	    $IsoNames[$chr_hits]   = $2;
+	    $Species[$chr_hits]    = $3;
+	    $IsoIDs[$chr_hits]     = $4;
+	    $ExtraInfo[$chr_hits]  = $5;
+	    $GroupField[$chr_hits] = $6;
+	} elsif ($DBEntries[$chr_hits]  =~ /([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\s*$/) {
+	    $GeneNames[$chr_hits]  = $1;
+	    $IsoNames[$chr_hits]   = $2;
+	    $Species[$chr_hits]    = $3;
+	    $IsoIDs[$chr_hits]     = $4;
+	    $ExtraInfo[$chr_hits]  = 0;
+	    $GroupField[$chr_hits] = $5;
+	} else {
+	    die "\n  ERROR:  Failed to parse sequence name '$DBEntries[$chr_hits]'\n\n";
+	}
+	
 	# Get a hold of the proteins and record them as strings
 	my $eslsfetchCmd = "esl-sfetch $ARGV[1] \"$DBEntries[$chr_hits]\" \|";
 	open(my $eslinput,$eslsfetchCmd) || die "\n  esl-sfetch failed to grab $DBEntries[$chr_hits] from $ARGV[1]\n\n";

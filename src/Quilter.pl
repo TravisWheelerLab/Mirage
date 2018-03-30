@@ -2939,8 +2939,24 @@ sub ParseSPALNOutput
 
 
     # Go to the section that lays out the score and identity
+    #
+    # NOTE: Even though we generally know what's going on with the
+    #       complementarity going into our adventures with SPALN,
+    #       it at least one case there's been a flip.
+    #
     my ($hitscore,$percent,$true_num_chars);
     while ($line = <$stdout>) {
+
+	# Complementarity flip!
+	if ($line =~ /\;C complement\(/) {
+	    if ($revcomp) { 
+		$revcomp = 0;
+		$ChrName =~ s/\[revcomp\]//;
+	    } else {
+		$revcomp = 1;
+		$ChrName = $ChrName.'[revcomp]';
+	    }
+	}
 
 	if ($line =~ /Score \= (\d+)/) {
 	    
