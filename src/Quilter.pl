@@ -2393,7 +2393,9 @@ sub ExonAssistedSPALN
 
     # Toss the selected sequence into our file
     my $eslsfetchCmd;
-    $eslsfetchCmd = 'esl-sfetch -c '.$minNucl.'..'.$maxNucl;
+    $eslsfetchCmd = 'esl-sfetch -c ';
+    if ($revcomp) { $eslsfetchCmd = $eslsfetchCmd.$maxNucl.'..'.$minNucl; }
+    else          { $eslsfetchCmd = $eslsfetchCmd.$minNucl.'..'.$maxNucl; }
     $eslsfetchCmd = $eslsfetchCmd.' -o '.$nuclfilename;
     $eslsfetchCmd = $eslsfetchCmd.' '.$genomefilename.' '.$chrname;
     $eslsfetchCmd = $eslsfetchCmd." > /dev/null 2>&1";
@@ -2430,7 +2432,9 @@ sub ExonAssistedSPALN
     $maxNucl = MIN($maxNucl+1000000,$ChrLengths{$chrname});
 
     # Toss the selected sequence into our file
-    $eslsfetchCmd = 'esl-sfetch -c '.$minNucl.'..'.$maxNucl;
+    $eslsfetchCmd = 'esl-sfetch -c ';
+    if ($revcomp) { $eslsfetchCmd = $eslsfetchCmd.$maxNucl.'..'.$minNucl; }
+    else          { $eslsfetchCmd = $eslsfetchCmd.$minNucl.'..'.$maxNucl; }
     $eslsfetchCmd = $eslsfetchCmd.' -o '.$nuclfilename;
     $eslsfetchCmd = $eslsfetchCmd.' '.$genomefilename.' '.$chrname;
     $eslsfetchCmd = $eslsfetchCmd." > /dev/null 2>&1";
@@ -2916,8 +2920,6 @@ sub ParseSPALNOutput
 
 
     # Look for where SPALN has called the start and end of the region.
-    # Note that these will always be formatted as "low-high", even
-    # if we're using the reverse complement
     my ($range_low,$range_high);
     $line = readline($stdout);
     while (!eof($stdout) && $line !~ /\S+\/(\d+)\-(\d+)/) {
@@ -2932,7 +2934,7 @@ sub ParseSPALNOutput
 
 
     # Grab the range of positions on the chromosome that we hit in.
-    # Note that these are (still) always low-high
+    # Note that we want these to be formatted low=start, high=end
     $line =~ /\S+\/(\d+)\-(\d+)/;
     my $start_pos = $1;
     my $end_pos   = $2;
