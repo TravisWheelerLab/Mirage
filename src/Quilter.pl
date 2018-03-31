@@ -1009,7 +1009,7 @@ if ($spaln && $blat) {
 		print $ptfile ">$BlatID\n";
 		die "  $line\n" if ($BlatID eq 'GN:');
 		$BlatID++;
-		
+
 		# Read in the actual sequence content
 		$line = <$blatIn>;
 		$line =~ s/\n|\r//g;
@@ -2394,9 +2394,7 @@ sub ExonAssistedSPALN
 
     # Toss the selected sequence into our file
     my $eslsfetchCmd;
-    $eslsfetchCmd = 'esl-sfetch -c ';
-    if ($revcomp) { $eslsfetchCmd = $eslsfetchCmd.$maxNucl.'..'.$minNucl; }
-    else          { $eslsfetchCmd = $eslsfetchCmd.$minNucl.'..'.$maxNucl; }
+    $eslsfetchCmd = 'esl-sfetch -c '.$minNucl.'..'.$maxNucl;
     $eslsfetchCmd = $eslsfetchCmd.' -o '.$nuclfilename;
     $eslsfetchCmd = $eslsfetchCmd.' '.$genomefilename.' '.$chrname;
     $eslsfetchCmd = $eslsfetchCmd." > /dev/null 2>&1";
@@ -2407,7 +2405,6 @@ sub ExonAssistedSPALN
     $spalnCmd = $spalnCmd.' 2>/dev/null';# if (!$verbose);
     $spalnCmd = $spalnCmd.' |';
 
-    
     # Run and parse SPALN's output
     my ($hitscore,$hitline) = ParseSPALNOutput($spalnCmd,$revcomp,$minNucl-1,0,$Chromosome->{ChrName},
 					       $seqname,$ProtLength,$protfilename,$SpalnMisses,
@@ -2433,9 +2430,7 @@ sub ExonAssistedSPALN
     $maxNucl = MIN($maxNucl+1000000,$ChrLengths{$chrname});
 
     # Toss the selected sequence into our file
-    $eslsfetchCmd = 'esl-sfetch -c ';
-    if ($revcomp) { $eslsfetchCmd = $eslsfetchCmd.$maxNucl.'..'.$minNucl; }
-    else          { $eslsfetchCmd = $eslsfetchCmd.$minNucl.'..'.$maxNucl; }
+    $eslsfetchCmd = 'esl-sfetch -c '.$minNucl.'..'.$maxNucl;
     $eslsfetchCmd = $eslsfetchCmd.' -o '.$nuclfilename;
     $eslsfetchCmd = $eslsfetchCmd.' '.$genomefilename.' '.$chrname;
     $eslsfetchCmd = $eslsfetchCmd." > /dev/null 2>&1";
@@ -2446,7 +2441,6 @@ sub ExonAssistedSPALN
     $spalnCmd = $spalnCmd.' 2>/dev/null';# if (!$verbose);
     $spalnCmd = $spalnCmd.' |';
 
-    
     # Run and parse SPALN's output
     ($hitscore,$hitline) = ParseSPALNOutput($spalnCmd,$revcomp,$minNucl-1,0,$Chromosome->{ChrName},
 					    $seqname,$ProtLength,$protfilename,$SpalnMisses,
@@ -2640,13 +2634,15 @@ sub BLATAssistedSPALN
 
     # We'll sort these just to make sure things stay constant
     # across our threads.
-    my @SeqIDs = sort keys %BlatNameIndex;
-    my $num_seq_ids = scalar(@SeqIDs);
+    my @SeqNames;
+    foreach my $seq_num (sort keys %BlatNameIndex) { 
+	my $seqname = $BlatNameIndex{$seq_num};
+	push(@SeqNames,$seqname);
+    }
+    my $num_seq_ids = scalar(@SeqNames);
 
     # If we have fewer SeqIDs than CPUs make that not the case
-    if ($num_seq_ids < $CPUs) {
-	$CPUs = $num_seq_ids;
-    }
+    if ($num_seq_ids < $CPUs) { $CPUs = $num_seq_ids; }
 
     # Once again, Thread 0 calls on its friends to save the day
     my $processes = 1;
@@ -2657,7 +2653,7 @@ sub BLATAssistedSPALN
 	    if (not defined $pid) { die "\n\tFork failed\n\n"; }
 	    $threadID=0;
 	} else {
-	    $threadID = $processes;
+	    $threadID=$processes;
 	    last;
 	}
 	$processes++;
@@ -2668,9 +2664,9 @@ sub BLATAssistedSPALN
     # Name all the files each thread will have access to
     my $protfilename  = 'Quilter.BAS.'.$threadID.'.prot.fa';
     my $nuclfilename  = 'Quilter.BAS.'.$threadID.'.nucl.fa';
-    my $thread_hits   = 'BLAT.hits.'.$threadID.'.out';
-    my $thread_misses = 'BLAT.misses.'.$threadID.'.out';
-    my $thread_tes    = 'BLAT.TEs.'.$threadID.'.out';
+    my $thread_hits   = 'Quilter.BAS.hits.'.$threadID.'.out';
+    my $thread_misses = 'Quilter.BAS.misses.'.$threadID.'.out';
+    my $thread_tes    = 'Quilter.BAS.TEs.'.$threadID.'.out';
     open(my $ThreadHitFile,'>',$thread_hits)    || die "\n  ERROR:  Failed to open BLAT hit file '$thread_hits'\n\n";
     open(my $ThreadMissFile,'>',$thread_misses) || die "\n  ERROR:  Failed to open BLAT miss file '$thread_misses'\n\n";
     open(my $ThreadTEFile,'>',$thread_tes)      || die "\n  ERROR:  Failed to open BLAT TE file '$thread_misses'\n\n";
@@ -2679,7 +2675,7 @@ sub BLATAssistedSPALN
     my $division_size = int($num_seq_ids / $CPUs);
     my $first_seq_id  = $threadID * $division_size;
     my $last_seq_id   = (($threadID+1) * $division_size) - 1;
-    if ($last_seq_id > $num_seq_ids) { $last_seq_id = $num_seq_ids - 1; }
+    if ($threadID == $CPUs-1) { $last_seq_id = $num_seq_ids - 1; }
 
     # Iterate over sequences, SPALNing 'em up and down
     #
@@ -2687,8 +2683,7 @@ sub BLATAssistedSPALN
     #
     for (my $seqID_num = $first_seq_id; $seqID_num <= $last_seq_id; $seqID_num++) {
 
-	my $seqID   = $SeqIDs[$seqID_num]; 
-	my $seqname = $BlatNameIndex{$seqID};
+	my $seqname = $SeqNames[$seqID_num];
 
 	# Did we find any suitable hits?
 	if ($ConfirmedHits{$seqname}) {
@@ -2842,8 +2837,7 @@ sub BLATAssistedSPALN
 		    
 		    # Toss the selected sequence into our file (need to be a
 		    # little careful about reverse complement)
-		    if ($revcomp) { $eslsfetchCmd = 'esl-sfetch -c '.$maxNucl.'..'.$minNucl; }
-		    else          { $eslsfetchCmd = 'esl-sfetch -c '.$minNucl.'..'.$maxNucl; }	    
+		    $eslsfetchCmd = 'esl-sfetch -c '.$minNucl.'..'.$maxNucl;
 		    $eslsfetchCmd = $eslsfetchCmd.' -o '.$nuclfilename;
 		    $eslsfetchCmd = $eslsfetchCmd.' '.$genomefilename.' '.$original_chr;
 		    $eslsfetchCmd = $eslsfetchCmd." > /dev/null 2>&1";
@@ -2918,7 +2912,7 @@ sub BLATAssistedSPALN
     #
     for ($threadID=0; $threadID<$CPUs; $threadID++) {
 
-	$thread_hits = 'BLAT.hits.'.$threadID.'.out';
+	$thread_hits = 'Quilter.BAS.hits.'.$threadID.'.out';
 	if (-e $thread_hits) {
 	    open($ThreadHitFile,'<',$thread_hits) || die "\n  ERROR:  Failed to open BLAT hit file '$thread_hits' (input)\n\n";
 	    while (my $line = <$ThreadHitFile>) {
@@ -2928,7 +2922,7 @@ sub BLATAssistedSPALN
 	    system("rm \"$thread_hits\"");
 	}
 
-	$thread_misses = 'BLAT.misses.'.$threadID.'.out';
+	$thread_misses = 'Quilter.BAS.misses.'.$threadID.'.out';
 	if (-e $thread_misses) {
 	    open($ThreadMissFile,'<',$thread_misses) || die "\n  ERROR:  Failed to open BLAT miss file '$thread_misses' (input)\n\n";
 	    while (my $line = <$ThreadMissFile>) {
@@ -2938,7 +2932,7 @@ sub BLATAssistedSPALN
 	    system("rm \"$thread_misses\"");
 	}
 	
-	$thread_tes = 'BLAT.TEs.'.$threadID.'.out';
+	$thread_tes = 'Quilter.BAS.TEs.'.$threadID.'.out';
 	if (-e $thread_tes) {
 	    open($ThreadTEFile,'<',$thread_tes) || die "\n  ERROR:  Failed to open BLAT TE file '$thread_misses' (input)\n\n";
 	    while (my $line = <$ThreadTEFile>) {
@@ -3039,18 +3033,13 @@ sub ParseSPALNOutput
     #       complementarity going into our adventures with SPALN,
     #       it at least one case there's been a flip.
     #
+    my $saw_complement = 0;
     my ($hitscore,$percent,$true_num_chars);
     while ($line = <$stdout>) {
 
-	# Complementarity flip!
+	# Complementarity marker!
 	if ($line =~ /\;C complement\(/) {
-	    if ($revcomp) { 
-		$revcomp = 0;
-		$ChrName =~ s/\[revcomp\]//;
-	    } else {
-		$revcomp = 1;
-		$ChrName = $ChrName.'[revcomp]';
-	    }
+	    $saw_complement = 1;
 	}
 
 	if ($line =~ /Score \= (\d+)/) {
@@ -3078,6 +3067,20 @@ sub ParseSPALNOutput
 	    }
 
 	    last;
+	}
+    }
+
+
+    # Check for any unexpected complementarity stuff
+    if ($revcomp) {
+	if (!$saw_complement) {
+	    $revcomp = 0;
+	    $ChrName =~ s/\[revcomp\]//;
+	}
+    } else {
+	if ($saw_complement) {
+	    $revcomp = 1;
+	    $ChrName = $ChrName.'[revcomp]';
 	}
     }
 
