@@ -1083,7 +1083,8 @@ if ($spaln && $blat) {
 	# Run SPALN on the results of the BLAT search
 	open(my $Results,'>',$finalHits);
 	open(my $Misses,'>',$finalMisses);
-	BLATAssistedSPALN(\%ChrLengths,\%SeqLengths,\%BlatNameIndex,$ARGV[1],$ARGV[0],$BlatResults,$Results,$Misses,$SpalnLog,$ARGV[3],
+	BLATAssistedSPALN(\%ChrLengths,\%SeqLengths,\%BlatNameIndex,$ARGV[1],$ARGV[0],
+			  $BlatResults,$Results,$Misses,$SpalnLog,$ARGV[3],$CPUs,
 			  $spalner,$timing,\@TimingData);
 	close($Results);
 	close($Misses);
@@ -2496,6 +2497,8 @@ sub BLATAssistedSPALN
 
     my $InputSpecies = shift;
 
+    my $CPUs = shift;
+
     # Are we just looking at SPALN output?
     my $spalner = shift;
 
@@ -2504,9 +2507,6 @@ sub BLATAssistedSPALN
     my $timingdata = shift;
     $timing = 9 if ($timing);
 
-    my $protfilename = 'Quilter.BAS.prot.fa';
-    my $nuclfilename = 'Quilter.BAS.nucl.fa';
-    
     # Record that we haven't confirmed any hits for any seqs
     my %ConfirmedHits;
     foreach my $seqID (keys %BlatNameIndex) {
@@ -2638,12 +2638,56 @@ sub BLATAssistedSPALN
     }
     close($blatout);
 
+    # We'll sort these just to make sure things stay constant
+    # across our threads.
+    my @SeqIDs = sort keys %BlatNameIndex;
+    my $num_seq_ids = scalar(@SeqIDs);
+
+    # If we have fewer SeqIDs than CPUs make that not the case
+    if ($num_seq_ids < $CPUs) {
+	$CPUs = $num_seq_ids;
+    }
+
+    # Once again, Thread 0 calls on its friends to save the day
+    my $processes = 1;
+    my $threadID  = 0;
+    my $pid;
+    while ($processes < $CPUs) {
+	if ($pid=fork) {
+	    if (not defined $pid) { die "\n\tFork failed\n\n"; }
+	    $threadID=0;
+	} else {
+	    $threadID = $processes;
+	    last;
+	}
+	$processes++;
+    }
+
+    $timing = 0 unless ($threadID == 0);
+
+    # Name all the files each thread will have access to
+    my $protfilename  = 'Quilter.BAS.'.$threadID.'.prot.fa';
+    my $nuclfilename  = 'Quilter.BAS.'.$threadID.'.nucl.fa';
+    my $thread_hits   = 'BLAT.hits.'.$threadID.'.out';
+    my $thread_misses = 'BLAT.misses.'.$threadID.'.out';
+    my $thread_tes    = 'BLAT.TEs.'.$threadID.'.out';
+    open(my $ThreadHitFile,'>',$thread_hits)    || die "\n  ERROR:  Failed to open BLAT hit file '$thread_hits'\n\n";
+    open(my $ThreadMissFile,'>',$thread_misses) || die "\n  ERROR:  Failed to open BLAT miss file '$thread_misses'\n\n";
+    open(my $ThreadTEFile,'>',$thread_tes)      || die "\n  ERROR:  Failed to open BLAT TE file '$thread_misses'\n\n";
+
+    # Where do you want to start?  End?
+    my $division_size = int($num_seq_ids / $CPUs);
+    my $first_seq_id  = $threadID * $division_size;
+    my $last_seq_id   = (($threadID+1) * $division_size) - 1;
+    if ($last_seq_id > $num_seq_ids) { $last_seq_id = $num_seq_ids - 1; }
+
     # Iterate over sequences, SPALNing 'em up and down
     #
     # UPDATE -- Increasingly wide ranges as hits fail to connect
     #
-    foreach my $seqID (keys %BlatNameIndex) {
+    for (my $seqID_num = $first_seq_id; $seqID_num <= $last_seq_id; $seqID_num++) {
 
+	my $seqID   = $SeqIDs[$seqID_num]; 
 	my $seqname = $BlatNameIndex{$seqID};
 
 	# Did we find any suitable hits?
@@ -2665,7 +2709,7 @@ sub BLATAssistedSPALN
 	    # Record this sequence (and number of significant e-values) if
 	    # it meets our threshold (100)
 	    if ($TEtracker{$seqname} && $TEtracker{$seqname} >= 100) {
-		print $TEfile "$seqname\n";
+		print $ThreadTEFile "$seqname\n";
 	    }
 	    
 	    # Radical dude! Now we run through each chromosome and
@@ -2839,15 +2883,15 @@ sub BLATAssistedSPALN
 	    # Print out the hit line and head on home
 	    if ($highscore) {
 		$hitline =~ s/Method     \: SPALN/Method     \: SPALN\+BLAT/;
-		print $HitFile  "$hitline";
+		print $ThreadHitFile  "$hitline";
 	    } else { 
-		print $MissFile "$seqname\n"; 
+		print $ThreadMissFile "$seqname\n"; 
 	    }
 	    
 	} else {
 
 	    # No hits from blat for this sequence
-	    print $MissFile "$seqname\n";
+	    print $ThreadMissFile "$seqname\n";
 
 	}
     }
@@ -2856,6 +2900,55 @@ sub BLATAssistedSPALN
     #
     if (-e $nuclfilename) { system("rm $nuclfilename"); }
     if (-e $protfilename) { system("rm $protfilename"); }
+
+    # Close up the thread-specific files
+    #
+    close($ThreadHitFile);
+    close($ThreadMissFile);
+    close($ThreadTEFile);
+
+    # de-fork
+    if ($threadID) { exit(0); }
+    while (wait() > -1) { }
+
+    # Now it's up to thread 0 to tie up the loose ends (by iterating
+    # through the thread-specific hit and miss files and transferring
+    # the data over to the big-deal HitFile and MissFile -- don't forget
+    # old TEfile, either!)
+    #
+    for ($threadID=0; $threadID<$CPUs; $threadID++) {
+
+	$thread_hits = 'BLAT.hits.'.$threadID.'.out';
+	if (-e $thread_hits) {
+	    open($ThreadHitFile,'<',$thread_hits) || die "\n  ERROR:  Failed to open BLAT hit file '$thread_hits' (input)\n\n";
+	    while (my $line = <$ThreadHitFile>) {
+		print $HitFile "$line";
+	    }
+	    close($ThreadHitFile);
+	    system("rm \"$thread_hits\"");
+	}
+
+	$thread_misses = 'BLAT.misses.'.$threadID.'.out';
+	if (-e $thread_misses) {
+	    open($ThreadMissFile,'<',$thread_misses) || die "\n  ERROR:  Failed to open BLAT miss file '$thread_misses' (input)\n\n";
+	    while (my $line = <$ThreadMissFile>) {
+		print $MissFile "$line";
+	    }
+	    close($ThreadMissFile);
+	    system("rm \"$thread_misses\"");
+	}
+	
+	$thread_tes = 'BLAT.TEs.'.$threadID.'.out';
+	if (-e $thread_tes) {
+	    open($ThreadTEFile,'<',$thread_tes) || die "\n  ERROR:  Failed to open BLAT TE file '$thread_misses' (input)\n\n";
+	    while (my $line = <$ThreadTEFile>) {
+		print $TEfile "$line";
+	    }
+	    close($ThreadTEFile);
+	    system("rm \"$thread_tes\"");
+	}
+
+    }
 
 }
 
