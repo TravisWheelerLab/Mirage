@@ -2849,10 +2849,9 @@ sub BLATAssistedSPALN
 		    $spalnCmd = $spalnCmd.' |';	
 		    
 		    print $CmdLog "> (".localtime()." $spalnCmd\n\n";
-		    
-		    # Make sure we're recording intelligently...
-		    if ($revcomp) { $chrname = $chrname.'[revcomp]'; $revcomp = 3; } #DEBUGGING
 
+		    if ($revcomp) { $chrname = $chrname.'[revcomp]'; }
+		    
 		    # Parse SPALN's output
 		    my ($nextScore,$nextLine) = ParseSPALNOutput($spalnCmd,$revcomp,$minNucl-1,$highscore,
 								 $chrname,$seqname,$seqlength,$protfilename,
@@ -3080,7 +3079,7 @@ sub ParseSPALNOutput
     } else {
 	if ($saw_complement) {
 	    $revcomp = 1;
-	    $ChrName = $ChrName.'[revcomp]';
+	    $ChrName = $ChrName.'[revcomp]';	    
 	}
     }
 
