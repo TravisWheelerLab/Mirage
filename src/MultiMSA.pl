@@ -832,10 +832,19 @@ sub GetNextExonRange
 
 		# Nope, just the regular ol' kind (not that there's an ARF out there
 		# that doesn't blow my socks off).
+		#
+		# NOTE:  We need to be careful for transitions into triple ARFs by
+		#        tracking the patter of 1->2->1...
+		#
+		my $expected_jump = 2;
+		if (abs($last_nucl-$current_nucl)==1) { $expected_jump = 1; }
+
 		$index++;
-		while ($index < $next_index && abs($last_nucl-$current_nucl)<3) {
+		while ($index < $next_index && abs($last_nucl-$current_nucl) == $expected_jump) {
 		    $last_nucl = $current_nucl;
 		    $current_nucl = $PositionIndex[$index];
+		    if ($expected_jump == 2) { $expected_jump = 1; }
+		    else                     { $expected_jump = 2; }
 		    $index++;
 		}
 		push(@SegmentList,$segment_start.','.$index.',2');
