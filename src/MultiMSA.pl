@@ -535,12 +535,16 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 		if ($frame != $non_arf_frame) {
 		    for (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) {
 			if ($SeqsInFrame[$seq_id]) {
-			    my $new_arf_entry = $ContentStarts[$seq_id].'..'.$ContentPositions[$seq_id];
-			    if ($ARFNameField[$seq_id]) {
-				$ARFNameField[$seq_id] =~ s/^ARF\:/ARFs\:/;
-				$ARFNameField[$seq_id] = $ARFNameField[$seq_id].','.$new_arf_entry;
-			    } else {
-				$ARFNameField[$seq_id] = 'ARF:'.$new_arf_entry;
+			    # To avoid weirdness associated with SPALN sticking single amino acids in places,
+			    # we'll skip annotating single amino ARFs
+			    if ($ContentStarts[$seq_id] < $ContentPositions[$seq_id]) {
+				my $new_arf_entry = $ContentStarts[$seq_id].'..'.$ContentPositions[$seq_id];
+				if ($ARFNameField[$seq_id]) {
+				    $ARFNameField[$seq_id] =~ s/^ARF\:/ARFs\:/;
+				    $ARFNameField[$seq_id] = $ARFNameField[$seq_id].','.$new_arf_entry;
+				} else {
+				    $ARFNameField[$seq_id] = 'ARF:'.$new_arf_entry;
+				}
 			    }
 			}
 		    }
@@ -620,27 +624,27 @@ foreach my $group_index ($startpoint..$endpoint-1) {
     close($outfile);
     
 
-    # If we had any disagreements let the user know
-    if (@Disagreements) {
-
-	my $numdisagreements = @Disagreements;
-	my $disfilename = $outfilename;
-
-	$disfilename =~ s/\.afa/\_ARFs/;
-	#print "  > WARNING: $numdisagreements positions did not reach unanimous consensus (see $disfilename)\n" if ($verbose);
-
-	open(my $disfile,'>',$disfilename);
-	print $disfile "$numdisagreements mismatched sites\n";
-	print $disfile "$Disagreements[0]-";
-	foreach $j (1..$numdisagreements-1) {
-	    if ($Disagreements[$j] != $Disagreements[$j-1]+1) {
-		print $disfile "$Disagreements[$j-1],$Disagreements[$j]-";
-	    }
-	}
-	print $disfile "$Disagreements[$numdisagreements-1]\n";
-	close($disfile);
-
-    }
+    ## If we had any disagreements let the user know
+    #if (@Disagreements) {
+    #
+    #my $numdisagreements = @Disagreements;
+    #my $disfilename = $outfilename;
+    #
+    #$disfilename =~ s/\.afa/\_ARFs/;
+    ##print "  > WARNING: $numdisagreements positions did not reach unanimous consensus (see $disfilename)\n" if ($verbose);
+    #
+    #open(my $disfile,'>',$disfilename);
+    #print $disfile "$numdisagreements mismatched sites\n";
+    #print $disfile "$Disagreements[0]-";
+    #foreach $j (1..$numdisagreements-1) {
+    #if ($Disagreements[$j] != $Disagreements[$j-1]+1) {
+    #print $disfile "$Disagreements[$j-1],$Disagreements[$j]-";
+    #}
+    #}
+    #print $disfile "$Disagreements[$numdisagreements-1]\n";
+    #close($disfile);
+    #
+    #}
 
 
     # Status reporting stuff:
