@@ -838,7 +838,7 @@ sub GetNextExonRange
 		# that doesn't blow my socks off).
 		#
 		# NOTE:  We need to be careful for transitions into triple ARFs by
-		#        tracking the patter of 1->2->1...
+		#        tracking the pattern of 1->2->1...
 		#
 		my $expected_jump = 2;
 		if (abs($last_nucl-$current_nucl)==1) { $expected_jump = 1; }
@@ -851,6 +851,12 @@ sub GetNextExonRange
 		    else                     { $expected_jump = 2; }
 		    $index++;
 		}
+
+		# In case the ARF doesn't cleanly line up with the end of the
+		# exon, we won't count the first character we saw indicating that
+		# the reading frame pattern changed.
+		$index-- if (abs($last_nucl-$current_nucl) != $expected_jump); 
+
 		push(@SegmentList,$segment_start.','.$index.',2');
 
 	    }
