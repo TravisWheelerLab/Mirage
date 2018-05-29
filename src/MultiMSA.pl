@@ -816,6 +816,11 @@ sub GetNextExonRange
 		$current_nucl = $PositionIndex[$index];
 		$index++;
 	    }
+
+	    # In case we appear to have entered into ARF territory, we want to be sure that
+	    # we don't include the first character of the ARF with the non-ARF stuff
+	    $index-- if (abs($last_nucl-$current_nucl) != 3);
+
 	    push(@SegmentList,$segment_start.','.$index.',1');
 
 	} else {
@@ -830,6 +835,12 @@ sub GetNextExonRange
 		    $current_nucl = $PositionIndex[$index];
 		    $index++;
 		}
+
+		# In case the ARF doesn't cleanly line up with the end of the
+		# exon, we won't count the first character we saw indicating that
+		# the reading frame pattern changed.
+		$index-- if (abs($last_nucl-$current_nucl) != 1); 
+
 		push(@SegmentList,$segment_start.','.$index.',3');
 
 	    } else {
