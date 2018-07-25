@@ -27,6 +27,11 @@ sub CheckColumnProfile; # Build a profile of an MSA column
 
 if (@ARGV < 2) { die "\n  USAGE:  perl  MultiMSA.pl  <Quilter output>  <Protein database>  [Opt.s]\n\n"; }
 
+my $location = $0;
+$location =~ s/MultiMSA\.pl$//;
+
+my $eslsfetch = $location.'../inc/easel/miniapps/esl-sfetch';
+
 my ($i,$j,$k);
 
 # Marks the ends of exons
@@ -300,7 +305,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	}
 	
 	# Get a hold of the proteins and record them as strings
-	my $eslsfetchCmd = "esl-sfetch $ARGV[1] \"$DBEntries[$chr_hits]\" \|";
+	my $eslsfetchCmd = $eslsfetch." $ARGV[1] \"$DBEntries[$chr_hits]\" \|";
 	open(my $eslinput,$eslsfetchCmd) || die "\n  esl-sfetch failed to grab $DBEntries[$chr_hits] from $ARGV[1]\n\n";
 	
 	# Eat header line <- could be used for sanity check
@@ -660,8 +665,9 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	    } else {
 		
 		# Generate call to ProgressTimer
-		my $progressCmd = './src/ProgressTimer.pl '.$progressbase.' '.$CPUs;
-		$progressCmd = $progressCmd.' '.$num_complete.' |';
+		my $progressCmd = $location.'ProgressTimer.pl '.$progressbase.' '.$CPUs;
+		$progressCmd    = $progressCmd.' '.$num_complete.' |';
+		if ($location !~ /^\//) { $progressCmd = './'.$progressCmd; }
 		
 		# Make the call and read the results
 		open(my $progfile,$progressCmd);

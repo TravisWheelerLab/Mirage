@@ -60,7 +60,8 @@ push(@srcFiles,'src/DiagonalSets.pm');
 push(@srcFiles,'src/Quilter.pl');
 push(@srcFiles,'src/MultiMSA.pl');
 push(@srcFiles,'src/FinalMSA.pl');
-push(@srcFiles,'mirage.pl');
+push(@srcFiles,'src/Mirage.pl');
+push(@srcFiles,'src/run_mirage.sh');
 foreach my $file (@srcFiles) {
     if (!(-e $file)) { die "\n  Failed to locate critical file '$file'\n\n"; }
 }
@@ -76,45 +77,29 @@ if (system("make")) { die "\n  Failed to compile C source files\n\n"; }
 # already available before we go through the trouble of setting them up
 
 
-# Check out spaln
-open(my $spalncheck,"which spaln |");
-my $spaln = <$spalncheck>;
-close($spalncheck);
-if (!$spaln || $force==1) {
+# We may need to unpack spaln
+chdir($startDir);
 
-    # We need to unpack spaln
-    chdir($startDir);
+# If forcing this might not be necessary
+#
+if (-e $spalnTar) {
 
-    # If forcing this might not be necessary
-    #
-    if (-e $spalnTar) {
-	if (system("tar -xzf $spalnTar -C inc/")) { die "\n  Failed to expand file '$spalnTar'\n\n"; }
-    }
+    if (system("tar -xzf $spalnTar -C inc/")) { die "\n  Failed to expand file '$spalnTar'\n\n"; }
 
-    # Configure, make, and install spaln
+    # Configure and make SPALN
     chdir("$startDir/$spalnDir/src") || die "\n  Failed to enter directory '$spalnDir/src'\n\n";
     print "\n  Configuring and compiling spaln\n\n";
     if (system("./configure")) { die "\n  Failed to configure 'spaln'\n\n"; }
     if (system("make")) { die "\n  Failed to make 'spaln'\n\n"; } 
-    #if (system("make install")) { die "\n  Failed to install 'spaln'\n\n"; }
 
 }    
 
-
 # Now we need to get easel unpacked and setup, too
-open(my $eslsfetchcheck,"which esl-sfetch |");
-my $eslsfetch = <$eslsfetchcheck>;
-close($eslsfetchcheck);
-open(my $eslseqstatcheck,"which esl-seqstat |");
-my $eslseqstat = <$eslseqstatcheck>;
-close($eslseqstatcheck);
-if (!$eslsfetch || !$eslseqstat || $force==1) {
+chdir($startDir);
+print "\n  Configuring and compiling easel\n\n";
+if (-e $easelTar) {
 
-    chdir($startDir);
-    print "\n  Configuring and compiling easel\n\n";
-    if (-e $easelTar) {
-	if (system("tar -xzf $easelTar -C inc/")) { die "\n  Failed to expand '$easelTar'\n\n"; }
-    }
+    if (system("tar -xzf $easelTar -C inc/")) { die "\n  Failed to expand '$easelTar'\n\n"; }
 
     # Configure
     chdir($easelDir);
@@ -129,46 +114,21 @@ if (!$eslsfetch || !$eslseqstat || $force==1) {
 }    
 
 
-# Finally, BLAT -- we actually won't force this if there's a link already
+# Unpack BLAT
 chdir($startDir);
-if (!(-e './inc/blat/blat')) {
-    
-    if (-e $blatTar) {
-	if (system("tar -xzf $blatTar -C inc/")) { die "\n  Failed to expand '$blatTar'\n\n"; }    
-    }
-
-    chdir($blatDir);
-    
-    # What sort of OS are we on? (opt.s: Linux, Darwin, other)
-    print "\n  Guessing correct BLAT... ";
-    open(my $uname, 'uname -a |');
-    my $sysline = <$uname>;
-    my $BLATlink;
-    if (uc($sysline) =~ /^LINUX /) {
-	print "Linux\n\n";
-	$BLATlink = "ln -s blat.linux.x86_64 blat";
-    } elsif (uc($sysline) =~ /^DARWIN /) {
-	print "OSX\n\n";
-	$BLATlink = "ln -s blat.macOSX.x86_64 blat";
-    } else {
-	print "OSX i386 (guessing)\n\n";
-	$BLATlink = "ln -s blat.macOSX.i386 blat";
-    }
-    close($uname);
-
-    # Make a symbolic link
-    if (system($BLATlink)) { die "\n  Failed to create symbolic link to BLAT binary\n\n"; }
-    
+if (-e $blatTar) {
+    if (system("tar -xzf $blatTar -C inc/")) { die "\n  Failed to expand '$blatTar'\n\n"; }    
 }
-
     
 # If everything went well, we can go ahead an clear out the
 # spaln and easel tarballs
-chdir($startDir);
 system("rm $spalnTar") if (-e $spalnTar);
 system("rm $easelTar") if (-e $easelTar);
 system("rm $blatTar")  if (-e $blatTar);
 
+# Create a symbolic link to the mirage-running shell script
+my $MirageLink = "ln -s src/run_mirage.sh mirage";
+if (system($MirageLink)) { die "\n  Failed to create symbolic link to src/run_mirage.sh\n\n"; }
 
 # Now the only thing the user REALLY needs to do is make
 # sure that spaln is on their PATH.

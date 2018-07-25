@@ -67,6 +67,17 @@ if (@ARGV < $expectedArgs) {
 }
 
 
+# Figure out what our location is (this will also let us know where to find our friends)
+my $location = $0;
+$location =~ s/Quilter\.pl//;
+
+
+# Find your friends!
+my $eslsfetch  = $location.'../inc/easel/miniapps/esl-sfetch';
+my $eslseqstat = $location.'../inc/easel/miniapps/esl-seqstat';
+my $spaln      = $location.'../inc/spaln2.2.2/src/spaln';
+
+
 # Option variables.
 my $debug   = 0; # Print out a TON of stuff -- best for small cases.
 my $timing  = 0; # Collect timing data
@@ -93,9 +104,6 @@ while ($i < @ARGV) {
 	$i++;
 	$resdir = $i; # We just want the argument index
 	$overw  = 1;
-    } elsif ($opt =~ /\-setcwd$/) {
-	$i++;
-	chdir($ARGV[$i]);
     } elsif ($opt =~ /\-v$/) {
 	$verbose = 1;
     } elsif ($opt =~ /\-n$/) {
@@ -165,73 +173,54 @@ if ($timing) {
 }
 
 
-# Check if 'SPALN' is installed (and, if so, check if BLAST is happy)
-open(my $spalncheck,'which spaln |');
-my $spaln = <$spalncheck>;
-close($spalncheck);
-
-
 # Well... is it? (Also, make a file to catch SPALN deaths)
 my %ChrLengths;
-if (!$spaln) {
-    die "\n  ERROR:  Quilter can't run '--fast' option without SPALN installation\n\n" if ($noFD);
-    $spaln = 0;
-    print "\n  Warning:  Without installation of 'spaln' accuracy may suffer.\n\n";
-} else {
 
-    # Do we know how long each of these chromosomes are?
-    my $chrlenindex = $ARGV[1].'.chr_length_index';
-    my $chrlenfile;
-    if (-e $chrlenindex) {
-	
-	# Rip chromosome lengths
-	open($chrlenfile,'<',$chrlenindex);
-	while (my $chrline = <$chrlenfile>) {
-	    $chrline =~ s/\n|\r//g;
-	    next if (!$chrline); # Catch garbage
-	    $chrline =~ /(\S+) (\d+)/;
-	    $ChrLengths{$1} = $2;
-	}
-	close($chrlenfile);
-
-    } else {
-
-	# Identify the lengths of the chromosomes in the genome file
-	print "  Indexing chromosome lengths... ";
-	my $chrlenref = GetChromosomeLengths($ARGV[1]);
-	%ChrLengths   = %{$chrlenref};
-
-	# Write these out to a file, so we don't have to do this again
-	open($chrlenfile,'>',$chrlenindex);
-	foreach $i (sort keys %ChrLengths) {
-	    print $chrlenfile "$i $ChrLengths{$i}\n";
-	}
-	close($chrlenfile);
-
-	print "done\n";
+# Do we know how long each of these chromosomes are?
+my $chrlenindex = $ARGV[1].'.chr_length_index';
+my $chrlenfile;
+if (-e $chrlenindex) {
+    
+    # Rip chromosome lengths
+    open($chrlenfile,'<',$chrlenindex);
+    while (my $chrline = <$chrlenfile>) {
+	$chrline =~ s/\n|\r//g;
+	next if (!$chrline); # Catch garbage
+	$chrline =~ /(\S+) (\d+)/;
+	$ChrLengths{$1} = $2;
     }
-
-    # Make sure that those damn environment variables get set!
-    $spaln =~ s/\n|\r//g;
-    $spaln =~ s/spaln$//;
-    $ENV{'ALN_TAB'} = $spaln.'../table';
-    $ENV{'ALN_DBS'} = $spaln.'../seqdb';
-
-    # Now become a boolean!
-    $spaln = 1;
+    close($chrlenfile);
+    
+} else {
+    
+    # Identify the lengths of the chromosomes in the genome file
+    print "  Indexing chromosome lengths... ";
+    my $chrlenref = GetChromosomeLengths($ARGV[1]);
+    %ChrLengths   = %{$chrlenref};
+    
+    # Write these out to a file, so we don't have to do this again
+    open($chrlenfile,'>',$chrlenindex);
+    foreach $i (sort keys %ChrLengths) {
+	print $chrlenfile "$i $ChrLengths{$i}\n";
+    }
+    close($chrlenfile);
+    
+    print "done\n";
 
 }
 
-# Next, check if we can blat things up in here
-open(my $blatcheck,'which blat |');
-my $blat = $blatcheck;
-close($blatcheck);
+
+# Make sure that those damn environment variables get set!
+$spaln =~ s/\n|\r//g;
+$spaln =~ /^(.*)spaln$/;
+$ENV{'ALN_TAB'} = $1.'../table';
+$ENV{'ALN_DBS'} = $1.'../seqdb';
 
 
 # If we need an easel index on the genome, then we need an easel index on the genome
 if (!(-e $ARGV[1].'.ssi')) {
     print "  Building easel index... ";
-    if (system("esl\-sfetch \-\-index $ARGV[1]")) { die "\n\tFailed to build easel index on $ARGV[1]\n\n"; }
+    if (system($eslsfetch." \-\-index $ARGV[1]")) { die "\n\tFailed to build easel index on $ARGV[1]\n\n"; }
     print "done\n";
 }
 
@@ -259,10 +248,8 @@ if ($ARGV[2] ne '-') {
     %GeneIndex = %{$indexRef};
     %FamChrs   = %{$famchrsRef};
     %Blacklist = %{$blacklistRef};
-} elsif ($blat) {
-    $AutoBLAT = 1;
 } else {
-    die "\n  ERROR: Without blat species '$reqSpecies' requires valid GTF index.\n\n";
+    $AutoBLAT = 1;
 }
 
 
@@ -277,20 +264,8 @@ $TimingData[12] = Time::HiRes::tv_interval($timeA) if ($timing);
 
 
 # We want a temporary folder to stuff everything in
-my $foldername = 'tmp_Quilter/';
-if (!$overw) {
-    $i = 1;
-    while (-e $foldername) {
-	$foldername = 'tmp_Quilter_'.$i.'/';
-	$i++;
-    }
-    if (system("mkdir $foldername")) { die "\n\tFailed to generate temporary folder '$foldername'\n\n"; }
-} else {
-    if (-e $foldername && system("rm $foldername/\*; rmdir $foldername")) { 
-	die "\n\tFailed to clear existing temporary folder '$foldername'\n\n"; 
-    }
-    if (system("mkdir $foldername")) { die "\n\tFailed to generate temporary folder '$foldername'\n\n"; }
-}
+my $foldername = $location.'temp/Quilter/';
+if (system("mkdir $foldername")) { die "\n\tFailed to generate temporary folder '$foldername'\n\n"; }
 
 
 # To guarantee that our threads don't overlap, we try to find a
@@ -514,7 +489,7 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
     
     # If this is a blacklisted gene or we're "AutoBLAT"-ing, cut to the
     # chase with using BLAST
-    if (($AutoBLAT || $Blacklist{$gene}) && $spaln && $blat) {
+    if ($AutoBLAT || $Blacklist{$gene}) {
 	for (my $i=0; $i<$num_gene_seqs; $i++) {
 	    if (system("cat $ProtFileNames[$i] >> $blatfilename")) { die "\n  Concatenation of seq. failed\n\n"; }
 	}
@@ -619,7 +594,7 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 
 		# The system call to generate a FASTA file using the given index info.
 		my $eslsfetchCmd;
-		$eslsfetchCmd = 'esl-sfetch -c '.$start.'..'.$end;               # Range (revcomp-ready)
+		$eslsfetchCmd = $eslsfetch.' -c '.$start.'..'.$end;              # Range (revcomp-ready)
 		$eslsfetchCmd = $eslsfetchCmd.' -o '.$nuclfilename;              # Output file
 		$eslsfetchCmd = $eslsfetchCmd.' '.$ARGV[1].' '.$chromosomeName;  # Input file and sequence name
 		$eslsfetchCmd = $eslsfetchCmd." > /dev/null 2>&1";               # '-o' still prints some info, but we don't care.
@@ -698,7 +673,7 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 		    $TimingData[1] += Time::HiRes::tv_interval($timeA) if ($timing && !$noFD);
 		    
 		    # If we don't have a better hit on this chromosome punt over to SPALN
-		    if ($Chromosome->{NumHits} && $CurrentStats[$i] != 3 && $spaln) {
+		    if ($Chromosome->{NumHits} && $CurrentStats[$i] != 3) {
 			
 			$timeA = [Time::HiRes::gettimeofday()] if ($timing);
 			
@@ -734,18 +709,7 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 	    if ($CurrentStats[$i] == 0) {
 	    
 		# Do we have the technology?
-		if ($spaln && $blat) {		
-		    if (system("cat $ProtFileNames[$i] >> $blatfilename")) { die "\n  Concatenation of seq. failed\n\n"; }
-		
-		} else {
-		
-		    # What a terrible loss :'(
-		    print $MissFile ">$ProtSeqNames[$i]\n"; # NOTE: "GN:" ARTIFACT EXCISION
-		    #print $GeneMissFile "$gene\n";
-		    $HitStats[5]++;
-		    $CurrentStats[$i] = 5;
-
-		}
+		if (system("cat $ProtFileNames[$i] >> $blatfilename")) { die "\n  Concatenation of seq. failed\n\n"; }
 		
 	    } else {
 
@@ -807,7 +771,7 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 		
 	    } else {
 		
-		my $progressCmd = './ProgressTimer.pl '.$progressbase.' '.$CPUs;
+		my $progressCmd = 'perl '.$location.'ProgressTimer.pl '.$progressbase.' '.$CPUs;
 		$progressCmd = $progressCmd.' '.$num_complete.' |';
 		
 		open(my $progfile,$progressCmd);
@@ -951,153 +915,157 @@ if (!$overw) {
 }
 
 
-# Try running BLAT on anything that we missed
-if ($spaln && $blat) {
+# Check which version of blat we're using
+my $blat;
+open(my $uname, 'uname -a |');
+my $sysline = <$uname>;
+if    (uc($sysline) =~ /^LINUX /)  { $blat = $location.'../inc/blat/blat.linux.x86_64';  }
+elsif (uc($sysline) =~ /^DARWIN /) { $blat = $location.'../inc/blat/blat.macOSX.x86_64'; }
+else                               { $blat = $location.'../inc/blat/blat.macOSX.i386';   }
+close($uname);
 
-    # Start the big BLAT+SPALN timer
-    $timeB = [Time::HiRes::gettimeofday()] if ($timing);
+# Start the big BLAT+SPALN timer
+$timeB = [Time::HiRes::gettimeofday()] if ($timing);
 
-    # A mapping from numbers to sequence names
-    my %BlatNameIndex;
-    my %SeqLengths;
-    my $BlatID = 1;
+# A mapping from numbers to sequence names
+my %BlatNameIndex;
+my %SeqLengths;
+my $BlatID = 1;
 
-    # Grab each thread's misses (if there were any)
-    my $bigBlat  = 'Quilter.BLATseqs.fa';
-    my $tempProt = 'Quilter.prot.tmp.fa';
-    system("rm $bigBlat") if (-e $bigBlat);
+# Grab each thread's misses (if there were any)
+my $bigBlat  = $foldername.'Quilter.BLATseqs.fa';
+my $tempProt = $foldername.'Quilter.prot.tmp.fa';
 
-    # For each of the processes, gather the list of sequences
-    # that we failed to get hits for
-    my $j = 0;
-    while ($j < $CPUs) {
-
-	# Construct the name of the file where we've stashed
-	# all our sequences
-	$blatfilename = $foldername.'blat_tempfile_'.$j.'.Quilter.fa';
-
-	# If there is something in this file? (if not, skip)
-	if (-s $blatfilename) {
-
-	    # Open up the file
-	    open(my $blatIn,'<',$blatfilename);
-
-	    # Prime the system by reading in the first line
-	    my $line = <$blatIn>;
-	    while (!eof($blatIn)) {
-		
-		# Strip out any whitespace and keep running
-		# until we've found a line that starts a new
-		# sequence (this is mainly an empty-line catch)
-		$line =~ s/\n|\r//g;
-		while (!eof($blatIn) && $line !~ /^\>(\S+)$/) {
-		    $line = <$blatIn>;
-		    $line =~ s/\n|\r|\s//g;
-		}
-
-		# If we hit the file, jump ship
-		last if (eof($blatIn));
-
-		# Open up a file to store this sequence individually.
-		# We do this so that we can run esl-seqstat to (a)
-		# independently verify the length, and (b) make sure
-		# the result makes easel happy
-		open(my $ptfile,'>',$tempProt);
-		$line =~ /^\>(\S+)$/;
-		my $seqname = $1;
-		$BlatNameIndex{$BlatID} = $seqname;
-		print $ptfile ">$BlatID\n";
-		die "  $line\n" if ($BlatID eq 'GN:');
-		$BlatID++;
-
-		# Read in the actual sequence content
+# For each of the processes, gather the list of sequences
+# that we failed to get hits for
+my $j = 0;
+while ($j < $CPUs) {
+    
+    # Construct the name of the file where we've stashed
+    # all our sequences
+    $blatfilename = $foldername.'blat_tempfile_'.$j.'.Quilter.fa';
+    
+    # If there is something in this file? (if not, skip)
+    if (-s $blatfilename) {
+	
+	# Open up the file
+	open(my $blatIn,'<',$blatfilename);
+	
+	# Prime the system by reading in the first line
+	my $line = <$blatIn>;
+	while (!eof($blatIn)) {
+	    
+	    # Strip out any whitespace and keep running
+	    # until we've found a line that starts a new
+	    # sequence (this is mainly an empty-line catch)
+	    $line =~ s/\n|\r//g;
+	    while (!eof($blatIn) && $line !~ /^\>(\S+)$/) {
 		$line = <$blatIn>;
-		$line =~ s/\n|\r//g;
-		while ($line && $line !~ /^\>/) {
-		    print $ptfile "$line\n";
-		    $line = <$blatIn>;
-		    $line =~ s/\n|\r//g if ($line);
-		}
-		close($ptfile);
-
-		# Run esl-seqstat and stash the sequence length data
-		open(my $eslseqstat,"esl-seqstat --amino $tempProt |") || die "\n  ERROR: esl-seqstat failed on sequence '$seqname'\n\n";
-
-		# For debugging: If we didn't get anything out of our seqstat, print
-		# sequence name.
-		while (my $statline = <$eslseqstat>) {
-		    if ($statline =~ /Total \# residues\:\s+(\d+)/) {
-			$SeqLengths{$seqname} = $1;
-			last;
-		    }
-		}
-		close($eslseqstat);
-
-		# Concatenate the sequence to our big BLAT-worthy database
-		system("cat $tempProt >> $bigBlat")
-		
+		$line =~ s/\n|\r|\s//g;
 	    }
-
-	    close($blatIn);
-
+	    
+	    # If we hit the file, jump ship
+	    last if (eof($blatIn));
+	    
+	    # Open up a file to store this sequence individually.
+	    # We do this so that we can run esl-seqstat to (a)
+	    # independently verify the length, and (b) make sure
+	    # the result makes easel happy
+	    open(my $ptfile,'>',$tempProt);
+	    $line =~ /^\>(\S+)$/;
+	    my $seqname = $1;
+	    $BlatNameIndex{$BlatID} = $seqname;
+	    print $ptfile ">$BlatID\n";
+	    die "  $line\n" if ($BlatID eq 'GN:');
+	    $BlatID++;
+	    
+	    # Read in the actual sequence content
+	    $line = <$blatIn>;
+	    $line =~ s/\n|\r//g;
+	    while ($line && $line !~ /^\>/) {
+		print $ptfile "$line\n";
+		$line = <$blatIn>;
+		$line =~ s/\n|\r//g if ($line);
+	    }
+	    close($ptfile);
+	    
+	    # Run esl-seqstat and stash the sequence length data
+	    open(my $eslseqstat_output,$eslseqstat." --amino $tempProt |") || die "\n  ERROR: esl-seqstat failed on sequence '$seqname'\n\n";
+	    
+	    # For debugging: If we didn't get anything out of our seqstat, print
+	    # sequence name.
+	    while (my $statline = <$eslseqstat_output>) {
+		if ($statline =~ /Total \# residues\:\s+(\d+)/) {
+		    $SeqLengths{$seqname} = $1;
+		    last;
+		}
+	    }
+	    close($eslseqstat_output);
+	    
+	    # Concatenate the sequence to our big BLAT-worthy database
+	    system("cat $tempProt >> $bigBlat")
+		
 	}
-
-	system("rm $blatfilename") if (-e $blatfilename);
-
-	$j++;
+	
+	close($blatIn);
 	
     }
-    system("rm $tempProt") if (-e $tempProt);
-
-    # Run blat on the whole shebang (if there's a shebang to
-    # speak of)
-    if (-s $bigBlat) {
-
-	# Inform user that we're trying BLAT
-	$progmsg = '  Quilter.pl:  Running BLAT on missed '.lc($reqSpecies).' isoforms';
-	while (length($progmsg) < 63) { $progmsg = $progmsg.' '; }
-	print "$progmsg\r";
-	    
-	# Construct and run a happy BLAT command
-	my $BlatStdOut  = 'Quilter.BLAT.std.out';
-	my $BlatStdErr  = 'Quilter.BLAT.std.err';
-	my $BlatResults = lc($ARGV[3]).'.Quilter.BLAT.out';
-	my $blatCmd = 'blat -tileSize=7 -minIdentity=90 -maxIntron=1';
-	$blatCmd    = $blatCmd.' -t=dnax -q=prot -out=blast8 -minScore=80';
-	$blatCmd    = $blatCmd.' 1>'.$BlatStdOut.' 2>'.$BlatStdErr;
-	$blatCmd    = $blatCmd.' '.$ARGV[1].' '.$bigBlat.' '.$BlatResults;
-	$timeA = [Time::HiRes::gettimeofday()] if ($timing);
-	if (system($blatCmd)) { die "\n  ERROR: BLAT command '$blatCmd' failed\n\n"; }
-	$TimingData[7] = Time::HiRes::tv_interval($timeA) if ($timing);
-
-	# As long as BLAT ran successfully we aren't actually
-	# interested in what it has to say.
-	if (-e $BlatStdOut) { system("rm $BlatStdOut"); }
-	if (-e $BlatStdErr) { system("rm $BlatStdErr"); }
-
-	# Inform user that we're aligning with BLAT results
-	$progmsg = '  Quilter.pl:  Using SPALN on BLAT output ('.lc($reqSpecies).')';
-	while (length($progmsg) < 63) { $progmsg = $progmsg.' '; }
-	print "$progmsg\r";
-	    
-	# Run SPALN on the results of the BLAT search
-	open(my $Results,'>',$finalHits);
-	open(my $Misses,'>',$finalMisses);
-	BLATAssistedSPALN(\%ChrLengths,\%SeqLengths,\%BlatNameIndex,$ARGV[1],$ARGV[0],
-			  $BlatResults,$Results,$Misses,$SpalnLog,$ARGV[3],$CPUs,
-			  $spalner,$timing,\@TimingData);
-	close($Results);
-	close($Misses);
-
-	# Clean up
-	system("rm $BlatResults") if (-e $BlatResults);
-	system("rm $bigBlat");
-
-    }
-
-    $TimingData[8] = Time::HiRes::tv_interval($timeB) if ($timing);
-
+    
+    system("rm $blatfilename") if (-e $blatfilename);
+    
+    $j++;
+    
 }
+system("rm $tempProt") if (-e $tempProt);
+
+# Run blat on the whole shebang (if there's a shebang to
+# speak of)
+if (-s $bigBlat) {
+    
+    # Inform user that we're trying BLAT
+    $progmsg = '  Quilter.pl:  Running BLAT on missed '.lc($reqSpecies).' isoforms';
+    while (length($progmsg) < 63) { $progmsg = $progmsg.' '; }
+    print "$progmsg\r";
+    
+    # Construct and run a happy BLAT command
+    my $BlatStdOut  = $location.'temp/Quilter.BLAT.std.out';
+    my $BlatStdErr  = $location.'temp/Quilter.BLAT.std.err';
+    my $BlatResults = $location.'temp/'.lc($ARGV[3]).'.Quilter.BLAT.out';
+    my $blatCmd = $blat.' -tileSize=7 -minIdentity=90 -maxIntron=1';
+    $blatCmd    = $blatCmd.' -t=dnax -q=prot -out=blast8 -minScore=80';
+    $blatCmd    = $blatCmd.' 1>'.$BlatStdOut.' 2>'.$BlatStdErr;
+    $blatCmd    = $blatCmd.' '.$ARGV[1].' '.$bigBlat.' '.$BlatResults;
+    $timeA = [Time::HiRes::gettimeofday()] if ($timing);
+    if (system($blatCmd)) { die "\n  ERROR: BLAT command '$blatCmd' failed\n\n"; }
+    $TimingData[7] = Time::HiRes::tv_interval($timeA) if ($timing);
+    
+    # As long as BLAT ran successfully we aren't actually
+    # interested in what it has to say.
+    if (-e $BlatStdOut) { system("rm $BlatStdOut"); }
+    if (-e $BlatStdErr) { system("rm $BlatStdErr"); }
+    
+    # Inform user that we're aligning with BLAT results
+    $progmsg = '  Quilter.pl:  Using SPALN on BLAT output ('.lc($reqSpecies).')';
+    while (length($progmsg) < 63) { $progmsg = $progmsg.' '; }
+    print "$progmsg\r";
+    
+    # Run SPALN on the results of the BLAT search
+    open(my $Results,'>',$finalHits);
+    open(my $Misses,'>',$finalMisses);
+    BLATAssistedSPALN(\%ChrLengths,\%SeqLengths,\%BlatNameIndex,$ARGV[1],$ARGV[0],
+		      $BlatResults,$Results,$Misses,$SpalnLog,$ARGV[3],$CPUs,
+		      $spalner,$timing,\@TimingData);
+    close($Results);
+    close($Misses);
+    
+    # Clean up
+    system("rm $BlatResults") if (-e $BlatResults);
+    system("rm $bigBlat");
+    
+}
+
+
+$TimingData[8] = Time::HiRes::tv_interval($timeB) if ($timing);
 
 
 # Print out that we're all done
@@ -1139,7 +1107,6 @@ foreach $i (0..$CPUs-1) {
     $hitfilename  = $foldername.'hit_tempfile_'.$i.'.Quilter.out';
     $missfilename = $foldername.'miss_tempfile_'.$i.'.Quilter.out';
     system("cat $hitfilename >> $finalHits");
-    system("cat $missfilename >> $finalMisses") unless ($spaln && $blat);
     system("rm $hitfilename");
     system("rm $missfilename");
 }
@@ -1712,7 +1679,7 @@ sub BuildGeneIndex
 sub GetChromosomeLengths
 {
     my $nuclfilename = shift;
-    my $seqstatCmd = 'esl-seqstat --dna -a '.$nuclfilename.' |';
+    my $seqstatCmd = $eslseqstat.' --dna -a '.$nuclfilename.' |';
 
     my %ChrLengths;    
     open(my $seqstats,$seqstatCmd);
@@ -1808,10 +1775,11 @@ sub RunFastDiagonals
     my $nucl_seq_len = abs($RegionStart-$RegionEnd)+1;
 
     # Construct our FastDiagonals command
-    my $FDcmd = './FastDiagonals "'.$protfile.'" "'.$nuclfile.'" ';
-    $FDcmd = $FDcmd.' '.$nucl_seq_len.' '.$gene_index_len;
+    my $FDcmd = $location.'FastDiagonals "'.$protfile.'" "'.$nuclfile.'" ';
+    $FDcmd    = $FDcmd.' '.$nucl_seq_len.' '.$gene_index_len;
     foreach my $relative_pos (@RelativeList) { $FDcmd = $FDcmd.' '.$relative_pos; }
-    $FDcmd = $FDcmd.' |';
+    $FDcmd    = $FDcmd.' |';
+    if ($location !~ /^\//) { $FDcmd = './'.$FDcmd; }
 
     # Run FastDiagonals
     $timeA = [Time::HiRes::gettimeofday()] if ($timing);
@@ -2394,14 +2362,14 @@ sub ExonAssistedSPALN
 
     # Toss the selected sequence into our file
     my $eslsfetchCmd;
-    $eslsfetchCmd = 'esl-sfetch -c '.$minNucl.'..'.$maxNucl;
+    $eslsfetchCmd = $eslsfetch.' -c '.$minNucl.'..'.$maxNucl;
     $eslsfetchCmd = $eslsfetchCmd.' -o '.$nuclfilename;
     $eslsfetchCmd = $eslsfetchCmd.' '.$genomefilename.' '.$chrname;
     $eslsfetchCmd = $eslsfetchCmd." > /dev/null 2>&1";
     if (system($eslsfetchCmd)) { die "\n\tERROR: Command '$eslsfetchCmd' failed (EAS)\n\n"; }    
     
     # Assemble the sytem call to run SPALN
-    my $spalnCmd = 'spaln -Q3 -O1 -S3 -ya3 '.$nuclfilename.' '.$protfilename;
+    my $spalnCmd = $spaln.' -Q3 -O1 -S3 -ya3 '.$nuclfilename.' '.$protfilename;
     $spalnCmd = $spalnCmd.' 2>/dev/null';# if (!$verbose);
     $spalnCmd = $spalnCmd.' |';
 
@@ -2430,14 +2398,14 @@ sub ExonAssistedSPALN
     $maxNucl = MIN($maxNucl+1000000,$ChrLengths{$chrname});
 
     # Toss the selected sequence into our file
-    $eslsfetchCmd = 'esl-sfetch -c '.$minNucl.'..'.$maxNucl;
+    $eslsfetchCmd = $eslsfetch.' -c '.$minNucl.'..'.$maxNucl;
     $eslsfetchCmd = $eslsfetchCmd.' -o '.$nuclfilename;
     $eslsfetchCmd = $eslsfetchCmd.' '.$genomefilename.' '.$chrname;
     $eslsfetchCmd = $eslsfetchCmd." > /dev/null 2>&1";
     if (system($eslsfetchCmd)) { die "\n\tERROR: Command '$eslsfetchCmd' failed (EAS)\n\n"; }    
     
     # Assemble the sytem call to run SPALN
-    $spalnCmd = 'spaln -Q3 -O1 -S3 -ya3 '.$nuclfilename.' '.$protfilename;
+    $spalnCmd = $spaln.' -Q3 -O1 -S3 -ya3 '.$nuclfilename.' '.$protfilename;
     $spalnCmd = $spalnCmd.' 2>/dev/null';# if (!$verbose);
     $spalnCmd = $spalnCmd.' |';
 
@@ -2521,7 +2489,7 @@ sub BLATAssistedSPALN
     my %TargetRev;
 
     # Tracks how many hits scored better than 1e-20 (many indicates possible TE)
-    open(my $TEfile,'>',$InputSpecies.'.TEs.Quilter.out');
+    open(my $TEfile,'>',$location.'temp/'.$InputSpecies.'.TEs.Quilter.out');
     my %TEtracker;
     
     # Parse the blast output
@@ -2662,11 +2630,11 @@ sub BLATAssistedSPALN
     $timing = 0 unless ($threadID == 0);
 
     # Name all the files each thread will have access to
-    my $protfilename  = 'Quilter.BAS.'.$threadID.'.prot.fa';
-    my $nuclfilename  = 'Quilter.BAS.'.$threadID.'.nucl.fa';
-    my $thread_hits   = 'Quilter.BAS.hits.'.$threadID.'.out';
-    my $thread_misses = 'Quilter.BAS.misses.'.$threadID.'.out';
-    my $thread_tes    = 'Quilter.BAS.TEs.'.$threadID.'.out';
+    my $protfilename  = $foldername.'Quilter.BAS.'.$threadID.'.prot.fa';
+    my $nuclfilename  = $foldername.'Quilter.BAS.'.$threadID.'.nucl.fa';
+    my $thread_hits   = $foldername.'Quilter.BAS.hits.'.$threadID.'.out';
+    my $thread_misses = $foldername.'Quilter.BAS.misses.'.$threadID.'.out';
+    my $thread_tes    = $foldername.'Quilter.BAS.TEs.'.$threadID.'.out';
     open(my $ThreadHitFile,'>',$thread_hits)    || die "\n  ERROR:  Failed to open BLAT hit file '$thread_hits'\n\n";
     open(my $ThreadMissFile,'>',$thread_misses) || die "\n  ERROR:  Failed to open BLAT miss file '$thread_misses'\n\n";
     open(my $ThreadTEFile,'>',$thread_tes)      || die "\n  ERROR:  Failed to open BLAT TE file '$thread_misses'\n\n";
@@ -2689,7 +2657,7 @@ sub BLATAssistedSPALN
 	if ($ConfirmedHits{$seqname}) {
 
 	    # We're going to need that sequence
-	    my $eslsfetchCmd = 'esl-sfetch  '.$proteinfilename." '".$seqname."' > ".$protfilename;
+	    my $eslsfetchCmd = $eslsfetch.'  '.$proteinfilename." '".$seqname."' > ".$protfilename;
 	    if (system($eslsfetchCmd)) { die "\n  ERROR:  esl-sfetch command '$eslsfetchCmd' failed\n\n"; }
 	    
 	    $seqname =~ /([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|(\S*\|)?([^\|\s]+)\s*$/;
@@ -2837,14 +2805,14 @@ sub BLATAssistedSPALN
 		    
 		    # Toss the selected sequence into our file (need to be a
 		    # little careful about reverse complement)
-		    $eslsfetchCmd = 'esl-sfetch -c '.$minNucl.'..'.$maxNucl;
+		    $eslsfetchCmd = $eslsfetch.' -c '.$minNucl.'..'.$maxNucl;
 		    $eslsfetchCmd = $eslsfetchCmd.' -o '.$nuclfilename;
 		    $eslsfetchCmd = $eslsfetchCmd.' '.$genomefilename.' '.$original_chr;
 		    $eslsfetchCmd = $eslsfetchCmd." > /dev/null 2>&1";
 		    if (system($eslsfetchCmd)) { die "\n\tERROR: Command '$eslsfetchCmd' failed (BAS)\n\n"; } 
 
 		    # Assemble the sytem call to run SPALN
-		    my $spalnCmd = 'spaln -Q3 -O1 -S3 -ya3 '.$nuclfilename.' '.$protfilename;
+		    my $spalnCmd = $spaln.' -Q3 -O1 -S3 -ya3 '.$nuclfilename.' '.$protfilename;
 		    $spalnCmd = $spalnCmd.' 2>/dev/null';# if (!$verbose);
 		    $spalnCmd = $spalnCmd.' |';	
 		    
@@ -2911,7 +2879,7 @@ sub BLATAssistedSPALN
     #
     for ($threadID=0; $threadID<$CPUs; $threadID++) {
 
-	$thread_hits = 'Quilter.BAS.hits.'.$threadID.'.out';
+	$thread_hits = $foldername.'Quilter.BAS.hits.'.$threadID.'.out';
 	if (-e $thread_hits) {
 	    open($ThreadHitFile,'<',$thread_hits) || die "\n  ERROR:  Failed to open BLAT hit file '$thread_hits' (input)\n\n";
 	    while (my $line = <$ThreadHitFile>) {
@@ -2921,7 +2889,7 @@ sub BLATAssistedSPALN
 	    system("rm \"$thread_hits\"");
 	}
 
-	$thread_misses = 'Quilter.BAS.misses.'.$threadID.'.out';
+	$thread_misses = $foldername.'Quilter.BAS.misses.'.$threadID.'.out';
 	if (-e $thread_misses) {
 	    open($ThreadMissFile,'<',$thread_misses) || die "\n  ERROR:  Failed to open BLAT miss file '$thread_misses' (input)\n\n";
 	    while (my $line = <$ThreadMissFile>) {
@@ -2931,7 +2899,7 @@ sub BLATAssistedSPALN
 	    system("rm \"$thread_misses\"");
 	}
 	
-	$thread_tes = 'Quilter.BAS.TEs.'.$threadID.'.out';
+	$thread_tes = $foldername.'Quilter.BAS.TEs.'.$threadID.'.out';
 	if (-e $thread_tes) {
 	    open($ThreadTEFile,'<',$thread_tes) || die "\n  ERROR:  Failed to open BLAT TE file '$thread_misses' (input)\n\n";
 	    while (my $line = <$ThreadTEFile>) {
@@ -2942,6 +2910,8 @@ sub BLATAssistedSPALN
 	}
 
     }
+
+    close($TEfile);
 
 }
 
@@ -3721,7 +3691,9 @@ sub LooksRepetitive
     my $threshold = 30;
     my $protfilename = shift;
     
-    open(my $stdoutput,"./TransSW $protfilename \- \-self \|");
+    my $tswCmd = $location.'TransSW '.$protfilename.' - -self |';
+    if ($location !~ /^\//) { $tswCmd = './'.$tswCmd; }
+    open(my $stdoutput,$tswCmd);
     
     my $longest_run = <$stdoutput>;
     $longest_run =~ s/\r|\n//g;
