@@ -1017,6 +1017,7 @@ sub ParseArgs
     my %Options = ( 
 	cpus => $defaultcpus, 
 	outdirname => 'MirageResults',
+	cleanmsa => 1,
 	);
 
     &GetOptions( 
