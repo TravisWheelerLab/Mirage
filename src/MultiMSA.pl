@@ -405,7 +405,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 
 	# Figuring out the range of indices in our PositionIndex
 	# corresponding to the exon we're currently building.
-	my ($next_index,$segment_ref) = GetNextExonRange($pos_index,\@PositionIndex);
+	my ($next_index,$segment_ref) = GetNextExonRange($pos_index,\@PositionIndex,\%MSA);
 	my @SegmentList = @{$segment_ref};
 
 	foreach my $segment (@SegmentList) {
@@ -781,7 +781,15 @@ sub GetNextExonRange
 {
     my $start_index   = shift;
     my $position_ref  = shift;
+    my $msa_hash_ref  = shift;
     my @PositionIndex = @{$position_ref};
+    my %MSA           = %{$msa_hash_ref};
+
+    #  NOTE:  We need access to the MSA hash because we need to track
+    #         which sequences are involved in which reading frames of
+    #         specific segments.  This way, if an indel pushes a sequence
+    #         from one reading frame into another we can record the two
+    #         segments as separate (and thus avoid weirdness).
 
     # First, we just want to know how far we go from the start of this
     # exon before we hit an intron
@@ -794,7 +802,7 @@ sub GetNextExonRange
     }
 
     # Next, we'll segment the exon based on any ARF-looking stuff.
-    # Each segment will have (1.) a start position, (2.) a length,
+    # Each segment will have (1.) a start position, (2.) an end position,
     # and (3.) a number of reading frames.
     my @SegmentList;
     my $index = $start_index;
@@ -831,15 +839,46 @@ sub GetNextExonRange
 
 	} else {
 
+	    # Uh-oh!  Better start keeping track of which reading frame each sequence
+	    # belongs to...
+	    my %SeqToFrame;
+	    foreach my $seq_char_pair (split(/\,/,$MSA{$PositionIndex[$index]})) {
+		$seq_char_pair =~ /^(\d+)\:/;
+		my $seq_id = $1;
+		$SeqToFrame{$seq_id} = 1;		
+	    }
+
+	    my $frame_num     = 2;
+	    my $indel_trouble = 0;
+
+	    # Moving up in the MSA world
+	    $index++;
+
 	    # Could this be... a... TRIPLE ARF?!
 	    if ($index+1 < $next_index && abs($PositionIndex[$index+1]-$last_nucl)==2) {
 
 		# IMPOSSIBLE!!!
-		$index++;
 		while ($index < $next_index && abs($last_nucl-$current_nucl)==1) {
+
+		    # Looking out for trouble
+		    foreach my $seq_char_pair (split(/\,/,$MSA{$PositionIndex[$index]})) {
+			$seq_char_pair =~ /^(\d+)\:/;
+			my $seq_id = $1;
+			if (!$SeqToFrame{$seq_id}) {
+			    $SeqToFrame{$seq_id} = $frame_num;
+			} elsif ($SeqToFrame{$seq_id} != $frame_num) {
+			    $indel_trouble = 1;
+			}
+		    }
+		    last if ($indel_trouble);
+
+		    if ($frame_num < 3) { $frame_num++; }
+		    else                { $frame_num=1; }
+
 		    $last_nucl = $current_nucl;
 		    $current_nucl = $PositionIndex[$index];
 		    $index++;
+
 		}
 
 		# In case the ARF doesn't cleanly line up with the end of the
@@ -860,8 +899,23 @@ sub GetNextExonRange
 		my $expected_jump = 2;
 		if (abs($last_nucl-$current_nucl)==1) { $expected_jump = 1; }
 
-		$index++;
 		while ($index < $next_index && abs($last_nucl-$current_nucl) == $expected_jump) {
+
+		    # Looking out for trouble
+		    foreach my $seq_char_pair (split(/\,/,$MSA{$PositionIndex[$index]})) {
+			$seq_char_pair =~ /^(\d+)\:/;
+			my $seq_id = $1;
+			if (!$SeqToFrame{$seq_id}) {
+			    $SeqToFrame{$seq_id} = $frame_num;
+			} elsif ($SeqToFrame{$seq_id} != $frame_num) {
+			    $indel_trouble = 1;
+			}
+		    }
+		    last if ($indel_trouble);
+
+		    if ($frame_num == 1) { $frame_num=2; }
+		    else                 { $frame_num=1; }
+
 		    $last_nucl = $current_nucl;
 		    $current_nucl = $PositionIndex[$index];
 		    if ($expected_jump == 2) { $expected_jump = 1; }
@@ -872,7 +926,7 @@ sub GetNextExonRange
 		# In case the ARF doesn't cleanly line up with the end of the
 		# exon, we won't count the first character we saw indicating that
 		# the reading frame pattern changed.
-		$index-- if (abs($last_nucl-$current_nucl) != $expected_jump); 
+		$index-- if (abs($last_nucl-$current_nucl) != $expected_jump || $indel_trouble);
 
 		push(@SegmentList,$segment_start.','.$index.',2');
 
