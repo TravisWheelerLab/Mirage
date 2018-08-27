@@ -19,11 +19,8 @@
   SETUP (Short)
   -------------
   1.  Run the SETUP.pl script ('./SETUP.pl')
-  2.  Add the following to PATH: 
-         A. '(pwd)/inc/easel/miniapps'
-         B. '(pwd)/inc/spaln2.2.2/src'
-         C. '(pwd)/inc/blat'         
-  3.  Check setup by running './mirage.pl -check'
+  2.  Add the Mirage directory to the PATH
+  3.  Check setup by running './mirage --check'
 
 
 
@@ -41,27 +38,14 @@
       $ pwd
       /Users/yourname/a/file/path/mirage
 
-  Once you have the current directory, you can add the path to the spaln into
-  your PATH variable. In BASH, you can add this line to the file ~/.bashrc:
+  Once you have the current directory, you can add it to your PATH variable.
+  In BASH, you can add this line to the file ~/.bashrc:
 
-      export PATH=(pwd_results)/inc/spaln2.2.2/src:$PATH
+      export PATH=(pwd_results):$PATH
 
-  Note that the parentheses only indicate that the results of running 'pwd' will
-  be specific to your present working directory, and are not literal parts of the
-  PATH.  After adding the spaln source directory to the PATH, the easel 'miniapps'
-  library will also need to be added to the PATH as follows:
-
-      export PATH=(pwd_results)/inc/easel/miniapps:$PATH
-
-  In addition to installing spaln and the easel libraries, SETUP.pl will also
-  create a symbolic link to the appropriate blat executable in the directory 
-  (pwd_results)/inc/blat/, so the last item to add to the PATH is blat:
-
-      export PATH=(pwd_results)/inc/blat:$PATH
-
-  Finally, refresh your path variable by setting the file that you edited as your 
-  source.  Depending on whether PATH is set in .bash_profile or .bashrc, this will 
-  be done with one of the following two commands:
+  Refresh your path variable by setting the file that you edited as your source.
+  Depending on whether PATH is set in .bash_profile or .bashrc, this will be done 
+  with one of the following two commands:
 
       $ source ~/.bash_profile
             - OR -
@@ -70,7 +54,7 @@
   To test whether everything is setup, you can run the following command from the
   directory containing mirage:
 
-      $ perl mirage.pl -check
+      $ mirage --check
 
   If setup was successful, this command will report success.  Otherwise, it will
   inform you of what is missing.
@@ -92,9 +76,10 @@
        1. Gene family  
        2. Isoform name 
        3. Species
-       4. Identifier
+       4. Isoform identifier / extra '|'-separated fields
+       5. Group name
 
-       For example: '>GN:OBSCN|obscn_iso2|human|4L3XR0X'
+       For example: '>GN:OBSCN|obscn_iso2|human|4L3XR0X|obscn'
 
   The guide file is a simple text file where each line corresponds to a species
   and has the following fields (separated by whitespace):
@@ -103,9 +88,9 @@
        2. Path to genome, from the directory containing mirage.pl
        3. Path to gtf index file, from the directory containing mirage.pl
 
-       For example: 'human ../genomes/Human.DNA.fa ../indices/human.gtf'
+       For example: 'human  ../genomes/Human.DNA.fa  ../indices/human.gtf'
 
-  For more information, use './mirage.pl help'.
+  For more information, use 'mirage --help'.
 
 
 
@@ -125,9 +110,9 @@
   pull out the corresponding sequences one at a time.  For example, if the above
   grep command matches '>GN:OBSCN|obscn_iso2|human|4L3XR0X,' then the command
 
-       esl-sfetch big_database.fa "GN:OBSCN|obscn_iso2|human|4L3XR0X" >> new_database.fa
+       esl-sfetch big_database.fa "GN:OBSCN|obscn_iso2|human|4L3XR0X|obscn" >> new_database.fa
 
-  will pull out the sequence named "GN:OBSCN|obscn_iso2|human|4L3XR0X" and
+  will pull out the sequence named "GN:OBSCN|obscn_iso2|human|4L3XR0X|obscn" and
   append it to a file named "new_database.fa" (if there isn't a file with this
   name a new file will be created automatically).
 
@@ -150,7 +135,7 @@
   section of the protein is identical to one of its purported exons).  The program
   analyzes each protein's hit set and identifies an optimal way of "stitching" the
   hits together to achieve full coverage of the protein.  This is the work done
-  by the 'Quilter.pl' script, which relies on 'FindDiagonals' and SPALN (if installed)
+  by the 'Quilter.pl' script, which relies on 'FastDiagonals' and SPALN (if installed)
   to determine the individual hits.  A side program ('TransSW') is used to measure
   the repetitiveness of the proteins, and may be used to help identify sequencing
   errors.
@@ -178,6 +163,10 @@
     requirements expected by mirage.  If a database does not meet the requirements,
     mirage will direct the user towards this program.
 
+  + run_mirage.sh
+
+    A shell script used to run Mirage.
+
   + mirage.pl
 
     The top-level script used to generate MSAs.  This and CleanMirageDB.pl are 
@@ -193,15 +182,15 @@
     A perl module containing the objects and methods that Quilter.pl uses to
     stitch together protein-to-genome alignments.
 
-  + src/FindDiagonals.c
+  + src/FastMap.c
    
     A program used to identify nearly-identical alignments of protein sequence
     to DNA (based on the Needleman-Wunsch dynamic programming algorithm, but only
-    allowing match states (diagonals)).
+    allowing match states).
 
   + src/Diagonals.c
 
-    A collection of helper functions used by FindDiagonals.c and TransSW.c.
+    A collection of helper functions used by FastDiagonals.c and TransSW.c.
 
   + src/TransSW.c
 
@@ -235,7 +224,7 @@
   + inc/spaln2.2.2
 
     A program used to generate intron-aware alignments of proteins to genomes.
-    Slower than FindDiagonals but allows for search without guidance from a
+    Slower than FastDiagonals but allows for search without guidance from a
     GTF index.
 
   + inc/blat
@@ -244,10 +233,6 @@
 
 
 
-  LEGAL-ISH NOTICE
-  ----------------
-  mirage.pl was developed as proprietary software for Cell Signaling Technology,
-  and as such unauthorized distribution may result in a variety of legal headaches.
 
 
 

@@ -1,7 +1,7 @@
-final_build: build_FindDiagonals build_MultiSeqNW build_TransSW clean
+final_build: build_FastMap build_MultiSeqNW build_TransSW clean
 
-build_FindDiagonals: FindDiagonals.c Diagonals.c
-	gcc -O2 -o FindDiagonals FindDiagonals.c Diagonals.c -lm
+build_FastMap: FastMap.c Diagonals.c
+	gcc -O2 -o FastMap FastMap.c Diagonals.c -lm
 
 build_MultiSeqNW: MultiSeqNW.c
 	gcc -O2 -o MultiSeqNW MultiSeqNW.c -lm

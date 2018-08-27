@@ -13,6 +13,7 @@ use POSIX;
 sub MAX;
 sub MIN;
 sub RemoveIntronGaps;
+sub PostHocCleanup;
 
 
 
@@ -45,11 +46,8 @@ while (!eof($inf)) {
 
     last if (eof($inf));
 
-    # In case we have an extra "chromosome" field, strip it out
+    # Make sure we like how the header looks
     my $header = $line;
-    if ($header =~ /([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|\S+$/) {
-	$header = $1.'|'.$2.'|'.$3.'|'.$4;
-    }
     if ($header !~ /^>GN\:/) {
 	$header =~ s/\>//g;
 	$header = '>GN:'.$header;
@@ -59,15 +57,16 @@ while (!eof($inf)) {
 
     $i = 0;
     $line = <$inf>;
-    while (!eof($inf) && $line !~ /^\>/) {
+    while ($line !~ /^\>/) {
 	$line =~ s/\n|\r//g;
 	if ($line) {
 	    my @seqline = split('',$line);
-	    foreach $j (0..@seqline-1) {
-		$BigMSA[$numSeqs][$i] = $seqline[$j];
+	    foreach $j (@seqline) {
+		$BigMSA[$numSeqs][$i] = $j;
 		$i++;
 	    }
 	}
+	last if (eof($inf));
 	$line  = <$inf>;
     }
     $MSALength = $i;
@@ -78,10 +77,20 @@ while (!eof($inf)) {
 close($inf);
 
 
-# Remove intron gaps from the MSA, correcting any ugly shifts
-my $MSAref;
-($MSAref,$MSALength) = RemoveIntronGaps(\@BigMSA,$MSALength,$numSeqs);
-@BigMSA = @{$MSAref};
+# Remove intron gaps from the MSA
+#
+my ($MSAref,$FinalLength) = RemoveIntronGaps(\@BigMSA,$MSALength,$numSeqs);
+my @FinalMSA = @{$MSAref};
+
+
+# Our post-hoc cleanup -- correcting 'jigsaw' ugliness and other
+# obvious imperfections.
+#
+if ($numSeqs > 1) {
+    my ($cleanedMSA,$cleanLength) = PostHocCleanup(\@FinalMSA,$FinalLength,$numSeqs);
+    @FinalMSA = @{$cleanedMSA};
+    $FinalLength = $cleanLength;
+}
 
 
 # Print out our final MSA
@@ -89,12 +98,10 @@ open(my $outf,'>',$ARGV[1]);
 foreach $i (0..$numSeqs-1) {
     $j = 0;
     print $outf "$Headers[$i]\n";
-    while ($j < $MSALength) {
-	print $outf "$BigMSA[$i][$j]";
+    while ($j < $FinalLength) {
+	print $outf "$FinalMSA[$i][$j]";
 	$j++;
-	if ($j % 50 == 0) {
-	    print $outf "\n";	   
-	}
+	print $outf "\n" if ($j % 50 == 0);
     }
     print $outf "\n" if ($j % 50);
 }
@@ -104,6 +111,16 @@ close($outf);
 # Yeah! Yeah! Yeah! Yeah!
 # What a rush!  Let's go again!
 1;
+
+
+
+
+#######################
+#                     #
+#    END OF SCRIPT    #
+#                     #
+#######################
+
 
 
 
@@ -146,168 +163,334 @@ sub MIN
 #
 sub RemoveIntronGaps
 {
-    my ($i,$j,$k);
+
+    my ($i, $j, $k);
 
     my $MSAref = shift;
     my @BigMSA = @{$MSAref};
 
     my $MSALength = shift;
-    my $numSeqs   = shift;
-
-    # Don't mess with the starter intron or ender intron
-    $j = 1;
-    while ($j < $MSALength-1) {
-	
-	# Does this position indicate an intron?
-	my $intron = 0;
-	foreach $i (0..$numSeqs-1) {
-	    if ($BigMSA[$i][$j] eq '*') {
-		foreach $k (0..$numSeqs-1) {
-		    $BigMSA[$k][$j] = '-';
-		}
-		$intron = 1;
-		last;
-	    }
-	}
-
-	# Indeed it did!  How grand!
-	if ($intron) {
-	    
-	    # Now we check what the tightest gap around the intron boundary
-	    # is.
-	    my $lowest  = $MSALength;
-	    my $highest = 0;
-	    foreach $i (0..$numSeqs-1) {
-
-		my $low = $j-1;
-		while ($low >= MAX(0,$j-5) && $BigMSA[$i][$low] eq '-') {
-		    $low--;
-		}
-		$low++;
-
-		my $high = $j+1;
-		while ($high < MIN($MSALength,$j+5) && $BigMSA[$i][$high] eq '-') {
-		    $high++;
-		}
-		$high--;
-
-		$lowest  = $low  if ($low < $lowest);
-		$highest = $high if ($high > $highest);
-
-	    }
-
-
-	    # In case we don't have a gap on one side or the other (but there is some
-	    # gapping) we extend our search just a little
-	    if ($lowest != $highest) {
-		if ($lowest == $j) {
-		    $lowest -= ($highest-$j)+1;
-		    $lowest  = 0 if ($lowest < 0);
-		} elsif ($highest == $j) {
-		    $highest += ($j-$lowest)+1;
-		    $highest  = $MSALength-1 if ($highest >= $MSALength);
-		}
-	    }
-
-
-	    # So long as everybody has at least some gappage going on,
-	    # we should be curious about what's happening here
-	    my $gapsize = ($highest-$lowest)+1;
-	    if ($gapsize > 1) {
-
-		# Grab all non-gap characters within gapsize of the intron
-		# marker, on either side.
-		my $pos;
-		my @MicroSegs;
-		my $microLen = 0;
-		foreach $i (0..$numSeqs-1) {
-		    $k = 0;
-		    foreach $pos ($lowest..$highest) {
-			if ($BigMSA[$i][$pos] ne '*' && $BigMSA[$i][$pos] ne '-') {
-			    $MicroSegs[$i][$k] = $BigMSA[$i][$pos];
-			    $k++;
-			}
-		    }
-		    $microLen = $k if ($k > $microLen);
-		}
-
-		# Add in any gap characters to round out
-		foreach $i (0..$numSeqs-1) {
-		    foreach $k (0..$microLen-1) {
-			if (!$MicroSegs[$i][$k]) {
-			    $MicroSegs[$i][$k] = '-';
-			}
-		    }
-		}
-
-		# Do these sequences share at least 50% identity?
-		my $acceptable = int($gapsize/2);
-		my $k = $highest-$lowest;
-		foreach $pos (0..$microLen-1) {
-		    foreach $i (1..$numSeqs-1) {
-			if ($MicroSegs[$i][$pos] ne $MicroSegs[0][$pos]) {
-			    $acceptable--;
-			    last;
-			}
-		    }
-		    last if ($acceptable <= 0);
-		}
-
-		# Do we accept the possibility that these should be aligned?
-		if ($acceptable) {
-
-		    foreach $i (0..$numSeqs-1) {
-			$pos = 0;
-			while ($pos < $microLen) {
-			    $BigMSA[$i][$lowest+$pos] = $MicroSegs[$i][$pos];
-			    $pos++;
-			}
-			$pos = $pos+$lowest;
-			while ($pos <= $highest) {
-			    $BigMSA[$i][$pos] = '-';
-			    $pos++;
-			}
-		    }
-		    $j = $highest+1;
-		    
-		} else { # We didn't move anything
-		    $j++;
-		}
-
-	    } else { # No gap around the intron	
-		$j++;
-	    }
-
-	} else { # Not an intron
-	    $j++;
-	}
-
-    }
-
-    # Finally, we remove all all-gap columns (the only surviving introns should be
-    # the first and last, which we just gloss over).
-    $k = 0;
-    foreach $j (1..$MSALength-2) {
-
-	# Is this an all-gap column?
-	my $allGaps = 1;
-	foreach $i (0..$numSeqs-1) {
-	    if ($BigMSA[$i][$j] ne '-') {
-		$allGaps = 0;
-		last;
-	    }
-	}
-
-	# If this was an all-gap column, we don't record it.  Otherwise, we do.
-	if (!$allGaps) {
-	    foreach $i (0..$numSeqs-1) {
-		$BigMSA[$i][$k] = $BigMSA[$i][$j];
-	    }
-	    $k++;
-	}
-	
-    }
+    my $num_seqs  = shift;
     
-    return (\@BigMSA,$k);
+    my @CleanMSA;
+    my $CleanLength = 0;
+    for ($j=0; $j<$MSALength; $j++) {
+
+	my $splice_site = 0;
+	my $gap_count   = 0;
+
+	for ($i=0; $i<$num_seqs; $i++) {
+
+	    # It's a splice boundary marker
+	    if ($BigMSA[$i][$j] eq '*') {
+		$splice_site = 1;
+		last;
+	    }
+
+	    # There's a gap
+	    if ($BigMSA[$i][$j] eq '-') { $gap_count++; }
+
+	    # Record this character
+	    $CleanMSA[$i][$CleanLength] = $BigMSA[$i][$j];
+	    
+	}
+
+	# If this is a splice site column or all gaps
+	# we can overwrite it.
+	if ($splice_site == 0 && $gap_count < $num_seqs) { $CleanLength++; }
+	
+    }
+
+    return (\@CleanMSA,$CleanLength);
 
 }
+
+
+
+
+########################################################################
+#
+# Function: PostHocCleanup
+#
+sub PostHocCleanup
+{
+
+    my $msa_ref  = shift;
+    my $msa_len  = shift;
+    my $num_seqs = shift;
+
+    my @MSA = @{$msa_ref};
+
+    my %PositionCharProfile;
+    
+    #
+    # What we're doing is scanning through the MSA looking for
+    # gap starts and checking
+    #
+    #   [1.] if fewer than half of the sequences are being represented
+    #
+    #   [2.] a strongly matching (<2 mismatches) subsequence exists in one
+    #        of the other sequences at that sequence's last gap start or
+    #        current gap end.
+    #
+    #   [3.] confirming that we have a gap to that strongly matching
+    #        subsequence.
+    #
+
+    #
+    #  FORWARD Pass
+    #
+    my @LastNonGap;
+    for (my $i=0; $i<$num_seqs; $i++) { $LastNonGap[$i] = -1; }
+    for (my $pos=0; $pos<$msa_len-1; $pos++) {
+
+	my @EndingGap;
+	for (my $seq_id = 0; $seq_id < $num_seqs; $seq_id++) {
+
+	    if ($MSA[$seq_id][$pos] eq '-') {
+
+		if ($pos < $msa_len-1 && $MSA[$seq_id][$pos+1] =~ /[A-Za-z]/) {
+
+		    push(@EndingGap,$seq_id);
+		    
+		    my $hash_key = ($pos+1).uc($MSA[$seq_id][$pos+1]);
+		    if ($PositionCharProfile{$hash_key}) { $PositionCharProfile{$hash_key}++; }
+		    else                                 { $PositionCharProfile{$hash_key}=1; }
+
+		}
+
+	    } else {
+
+		my $hash_key = $pos.uc($MSA[$seq_id][$pos]);
+		if ($PositionCharProfile{$hash_key}) { $PositionCharProfile{$hash_key}++; }
+		else                                 { $PositionCharProfile{$hash_key}=1; }
+
+		$LastNonGap[$seq_id] = $pos;
+
+	    }
+	}
+
+	# Did fewer than half of the sequences see the end of a gapped region?
+	#
+        if (@EndingGap && scalar(@EndingGap) <= int($num_seqs/2)) {
+
+	    # Before we consider individual amino acid movements, we'll check whether
+	    # this is a "jigsaw" region by checking if [1.] everyone is the same
+	    # amino acid and [2.] the same character is what we see at the first gap
+	    # index.
+	    #
+	    my $ref_char   = uc($MSA[$EndingGap[0]][$pos+1]);
+	    my $ref_pos    = $LastNonGap[$EndingGap[0]]+1;
+	    my $jigsawable = 1;
+	    my $all_gap    = 1;
+	    for (my $gap_seq_index = 1; $gap_seq_index < scalar(@EndingGap); $gap_seq_index++) {
+		my $seq_id = $EndingGap[$gap_seq_index];
+		if (uc($MSA[$seq_id][$pos+1]) ne $ref_char) {
+		    $jigsawable = 0;
+		    last;
+		} elsif ($ref_pos != $LastNonGap[$seq_id]+1) {
+		    $all_gap = 0;
+		    last;
+		}
+	    }
+
+	    
+	    # One last check before the full jigsaw transfer -- are we in agreement that the
+	    # reference position suggests this character?
+	    #
+	    if ($jigsawable && $all_gap && $PositionCharProfile{$ref_pos.$ref_char}
+		&& $PositionCharProfile{$ref_pos.$ref_char} >= scalar(@EndingGap)) {
+		
+		foreach my $seq_id (@EndingGap) {
+
+		    $MSA[$seq_id][$ref_pos] = $MSA[$seq_id][$pos+1];
+		    $MSA[$seq_id][$pos+1]   = '-';
+
+		    $LastNonGap[$seq_id] = $ref_pos;
+
+		    $PositionCharProfile{$ref_pos.$ref_char}++;
+		    $PositionCharProfile{($pos+1).$ref_char}--;
+
+		}
+
+	    } else {
+
+
+		# For each sequence that saw the end of a gap, check if the upcoming
+		# character matches the "character profile" of anything at the first
+		# position of the gap.
+		my @DelayedRemovalKeys;
+		foreach my $seq_id (@EndingGap) {
+		    
+		    my $upcoming_char = $MSA[$seq_id][$pos+1];
+		    my $first_gap_pos = $LastNonGap[$seq_id]+1;
+		    my $new_hash_key  = $first_gap_pos.uc($upcoming_char);
+		    my $old_hash_key  = ($pos+1).uc($upcoming_char);
+		    if ($first_gap_pos && $PositionCharProfile{$new_hash_key}
+			&& $PositionCharProfile{$new_hash_key} > $PositionCharProfile{$old_hash_key}) {
+			
+			$MSA[$seq_id][$pos+1] = '-';
+			$MSA[$seq_id][$first_gap_pos] = $upcoming_char;
+			
+			$LastNonGap[$seq_id]++;
+			
+			$PositionCharProfile{$new_hash_key}++;
+			$PositionCharProfile{$old_hash_key}--;
+			
+		    } else {
+			
+			push(@DelayedRemovalKeys,$old_hash_key);
+			
+		    }
+		    
+		}
+		
+		foreach my $key (@DelayedRemovalKeys) { $PositionCharProfile{$key}--; }
+		
+	    }
+
+	}
+    }
+
+
+    #
+    #  BACKWARD Pass
+    #
+    for (my $i=0; $i<$num_seqs; $i++) { $LastNonGap[$i] = -1; }
+    for (my $pos=$msa_len-1; $pos>0; $pos--) {
+
+	my @StartingGap;
+	for (my $seq_id = 0; $seq_id < $num_seqs; $seq_id++) {
+
+	    if ($MSA[$seq_id][$pos] eq '-') {
+
+		if ($MSA[$seq_id][$pos-1] =~ /[A-Za-z]/) {
+		    push(@StartingGap,$seq_id);
+		}
+
+	    } else {
+
+		$LastNonGap[$seq_id] = $pos;
+
+	    }
+	}
+
+	# Did fewer than half of the sequences see the end of a gapped region?
+	#
+        if (@StartingGap && scalar(@StartingGap) <= int($num_seqs/2)) {
+
+	    # Before we consider individual amino acid movements, we'll check whether
+	    # this is a "jigsaw" region by checking if [1.] everyone is the same
+	    # amino acid and [2.] the same character is what we see at the first gap
+	    # index.
+	    #
+	    my $ref_char   = uc($MSA[$StartingGap[0]][$pos-1]);
+	    my $ref_pos    = $LastNonGap[$StartingGap[0]]-1;
+	    my $jigsawable = 1;
+	    my $all_gap    = 1;
+	    for (my $gap_seq_index = 1; $gap_seq_index < scalar(@StartingGap); $gap_seq_index++) {
+		my $seq_id = $StartingGap[$gap_seq_index];
+		if (uc($MSA[$seq_id][$pos-1]) ne $ref_char) {
+		    $jigsawable = 0;
+		    last;
+		} elsif ($ref_pos ne $LastNonGap[$seq_id]-1) {
+		    $all_gap = 0;
+		    last;
+		}
+	    }
+
+	    
+	    # One last check before the full jigsaw transfer -- are we in agreement that the
+	    # reference position suggests this character?
+	    #
+	    if ($jigsawable && $all_gap && $PositionCharProfile{$ref_pos.$ref_char}
+		&& $PositionCharProfile{$ref_pos.$ref_char} >= scalar(@StartingGap)) {
+		
+		foreach my $seq_id (@StartingGap) {
+
+		    $MSA[$seq_id][$ref_pos] = $MSA[$seq_id][$pos-1];
+		    $MSA[$seq_id][$pos-1]   = '-';
+
+		    $LastNonGap[$seq_id] = $ref_pos;
+
+		    $PositionCharProfile{$ref_pos.$ref_char}++;
+		    $PositionCharProfile{($pos-1).$ref_char}--;
+
+		}
+
+	    } else {
+
+		
+		# For each sequence that saw the end of a gap, check if the upcoming
+		# character matches the "character profile" of anything at the first
+		# position of the gap.
+		foreach my $seq_id (@StartingGap) {
+		    
+		    my $upcoming_char = $MSA[$seq_id][$pos-1];
+		    my $first_gap_pos = $LastNonGap[$seq_id]-1;
+		    my $new_hash_key  = $first_gap_pos.uc($upcoming_char);
+		    my $old_hash_key  = ($pos-1).uc($upcoming_char);
+		    if ($first_gap_pos && $PositionCharProfile{$new_hash_key}
+			&& $PositionCharProfile{$new_hash_key} > $PositionCharProfile{$old_hash_key}) {
+			
+			$MSA[$seq_id][$pos-1] = '-';
+			$MSA[$seq_id][$first_gap_pos] = $upcoming_char;
+			
+			$LastNonGap[$seq_id]--;
+			
+			$PositionCharProfile{$new_hash_key}++;
+			$PositionCharProfile{$old_hash_key}--;
+			
+		    }
+		    
+		}
+
+	    }
+
+	}
+
+    }
+
+    
+    # We may have created some all-gap columns, so let's go ahead and blow 'em
+    # to smithereens (sp?).
+    #
+    my @CleanMSA;
+    my $clean_len = 0;
+    for (my $pos=0; $pos<$msa_len; $pos++) {
+
+	my $all_gaps = 1;
+	for (my $seq_id=0; $seq_id<$num_seqs; $seq_id++) {
+	    $CleanMSA[$seq_id][$clean_len] = $MSA[$seq_id][$pos];
+	    $all_gaps = 0 if ($MSA[$seq_id][$pos] =~ /[A-Za-z]/);
+	}
+	
+	$clean_len++ if ($all_gaps == 0);
+
+    }
+
+    return (\@CleanMSA,$clean_len);
+    
+}
+
+
+
+#####################################################
+##################                 ##################
+##################   END OF FILE   ##################
+##################                 ##################
+#####################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -13,6 +13,7 @@
 #
 use warnings;
 use strict;
+use Getopt::Long;
 use Time::HiRes;
 use POSIX;
 use Cwd;
@@ -25,6 +26,7 @@ sub CheckSourceFiles;
 sub ParseArgs;
 sub VerifiedClean;
 sub ParseSpeciesGuide;
+sub GenerateSpeciesDBs;
 sub CoverMinorSpecies;
 sub AttachSeqToMSA;
 
@@ -43,17 +45,23 @@ sub AttachSeqToMSA;
 # In case the minimum number of arguments hasn't been provided,
 # assist the user
 if (@ARGV == 0) { PrintUsage(); }
-if (@ARGV == 1) {
-    DetailedUsage() if (lc($ARGV[0]) eq '-h' || lc($ARGV[0]) =~ /help/);
-    CheckInstall()  if (lc($ARGV[0]) eq '-check');
-}
+
+
+# Figure out what the location of the Mirage src directory is
+my $location = $0;
+$location =~ s/Mirage\.pl$//;
+
 
 # Generics
 my ($i,$j,$k);
 
 
+# We're going to need these friends
+my $eslsfetch  = $location.'../inc/easel/miniapps/esl-sfetch';
+
+
 # Where we'll be storing timing information
-my $StartTime = Time::HiRes::time();
+my $StartTime = [Time::HiRes::gettimeofday()];
 my $IntervalStart;
 my $IntervalEnd;
 my $FinalTime;
@@ -62,25 +70,29 @@ my @MultiMSATimeStats;
 my $MultiSeqNWTime;
 my $AvgNWTime;
 my $TotalRuntime;
+my $defaultcpus = 2;
 
 
 # Read in user arguments
-my $optsRef = ParseArgs(\@ARGV);
-my @Options = @{$optsRef};
+my $optsRef = ParseArgs();
+my %Options = %{$optsRef};
 
 
 # Change options to more intelligible variables
-my $ProteinDB    = $Options[0];
-my $SpeciesGuide = $Options[1];
-my $ResultsDir   = $Options[2];
-my $verbose      = $Options[3];
-my $numProcesses = $Options[4];
-my $forcecompile = $Options[5]; # Hidden
-my $cleanMSA     = $Options[6]; # Hidden
+my $ProteinDB    = $ARGV[0];
+my $SpeciesGuide = $ARGV[1];
+my $ResultsDir   = $Options{outdirname};
+my $verbose      = $Options{verbose};
+my $numProcesses = $Options{cpus};
+my $timed        = $Options{time};
+my $stack_arfs   = $Options{stackarfs};
+my $forcecompile = $Options{forcecompile}; # Hidden
+my $cleanMSA     = $Options{cleanmsa};     # Hidden
+my $just_spaln   = $Options{justspaln};    # Hidden
 
 
 # Verify that we have all the files we need on-hand
-CheckSourceFiles($forcecompile);
+#CheckSourceFiles($forcecompile);
 
 
 # Make sure that the two key files are for real
@@ -98,8 +110,10 @@ if (!VerifiedClean($ProteinDB)) {
 }
 
 
-# Convert species guide into three arrays
-my ($speciesref,$gtfsref,$genomesref) = ParseSpeciesGuide($SpeciesGuide);
+# Convert species guide into three arrays.
+# We'll ignore any species that don't show up
+# in our protein database.
+my ($speciesref,$gtfsref,$genomesref) = ParseSpeciesGuide($SpeciesGuide,$ProteinDB);
 my @Species    = @{$speciesref};
 my $numSpecies = @Species;
 my @GTFs       = @{$gtfsref};
@@ -117,6 +131,7 @@ if (-e $ResultsDir) {
     $ResultsDir = $testDir;
 }
 if (system("mkdir $ResultsDir")) { die "\n  Failed to create directory '$ResultsDir'\n\n"; }
+print "\n  Results Directory:  $ResultsDir\n\n";
 
 
 # Make species-specific results folders
@@ -132,67 +147,157 @@ foreach $specname (@Species) {
 }
 
 
+# Create a temp directory in src where we'll hide all of our secrets.
+my $tempdirname = $location.'temp/';
+if (-d($tempdirname)) { system("rm -rf $tempdirname"); }
+if (system("mkdir $tempdirname")) { die "\n  ERROR:  Failed to generate temporary directory '$tempdirname'\n\n"; }
+
+
+# Make species-specific databases, organized by gene family
+my ($speciesdbnames_ref,$MinorSpeciesDBName,$specprocesses_ref,$fambreaks_ref) 
+    = GenerateSpeciesDBs(\@Species,$ProteinDB,$numProcesses);
+my @SpeciesDBNames   = @{$speciesdbnames_ref};
+my @SpeciesProcesses = @{$specprocesses_ref};
+my @SpeciesFamBreaks = @{$fambreaks_ref};
+
+
 # Run Quilter
 my %MultiMSADir;
-my %GenesBySpecies;
-foreach $i (0..$numSpecies-1) {
+my %GroupsBySpecies;
+for ($i=0; $i<$numSpecies; $i++) {
 
     # Start a timer for Quilter
-    $IntervalStart = Time::HiRes::time();
+    $IntervalStart = [Time::HiRes::gettimeofday()];
 
     # Assembling the Quilter command.  Because we're a directory back
     # from src, we need to append a '../' to each of the file names.
     my $QuilterCmd;
-    $QuilterCmd = 'perl src/Quilter.pl '; # base call
+    $QuilterCmd = 'perl '.$location.'Quilter.pl '; # base call
 
     # Depending on whether we're using a relative path (w.r.t. the current
     # directory) or absolute path, what we pass to Quilter will vary for
     # each of the files
 
     # Protein database
-    if ($ProteinDB =~ /^\//) { $QuilterCmd = $QuilterCmd.$ProteinDB.' ';       }
-    else                     { $QuilterCmd = $QuilterCmd.'../'.$ProteinDB.' '; }
+    $QuilterCmd = $QuilterCmd.$SpeciesDBNames[$i].' ';
 
     # Genome
-    if ($Genomes[$i] =~ /^\//) { $QuilterCmd = $QuilterCmd.$Genomes[$i].' ';       }
-    else                       { $QuilterCmd = $QuilterCmd.'../'.$Genomes[$i].' '; }
+    $QuilterCmd = $QuilterCmd.$Genomes[$i].' ';
 
-    # GTF index (special case: - for "Just use BLAST")
-    if ($GTFs[$i] =~ /^\// || $GTFs[$i] eq '-') { $QuilterCmd = $QuilterCmd.$GTFs[$i].' ';       }
-    else                                        { $QuilterCmd = $QuilterCmd.'../'.$GTFs[$i].' '; }
+    # GTF index (special case: - for "Just use BLAT")
+    $QuilterCmd = $QuilterCmd.$GTFs[$i].' ';
 	
     # Species name
     $QuilterCmd = $QuilterCmd.$Species[$i];
     
     # Guide output towards results directory
-    $QuilterCmd = $QuilterCmd.' -o ../'.$SpeciesDir{$Species[$i]};
+    $QuilterCmd = $QuilterCmd.' -o '.$SpeciesDir{$Species[$i]};
 
-    # Set Quilter to work in the src directory, since it needs to interact with
-    # other tools there.
-    $QuilterCmd = $QuilterCmd.' -setcwd '.cwd().'/src';
-    
-    # Tell Quilter how many CPUs we want it to work with
-    $QuilterCmd = $QuilterCmd.' -n '.$numProcesses;
+    # How many CPUs do we want to work with?
+    my $speciesProcesses = $SpeciesProcesses[$i];
+
+    # Tell Quilter how many CPUs we want it to work with (-nplus is -n plus stop points)
+    $QuilterCmd = $QuilterCmd.' -nplus '.$speciesProcesses;
+
+    # Tell Quilter which lines each process stops at
+    for ($j=0; $j<$speciesProcesses; $j++) { $QuilterCmd = $QuilterCmd.' '.$SpeciesFamBreaks[$i][$j]; }
 
     # Do we want a whole bunch of stuff spat at us?
     $QuilterCmd = $QuilterCmd.' -v' if ($verbose);
 
-    # Display the call and/or make it
+    # Are we timing?
+    $QuilterCmd = $QuilterCmd.' -time' if ($timed);
+
+    # Display the call if we're being loud
     if ($verbose) {
 	print "\n  Aligning to the $Species[$i] genome using Quilter.pl\n";
 	print "  $QuilterCmd\n";
     }
+
+    # Make that daaaaaang call.
     if (system($QuilterCmd)) {
-	# Rats!
+	system("rm -rf $tempdirname");
 	die "\n  *  ERROR:  Quilter.pl failed during execution  *\n\n";
     }
 
     # Figure out how much time that took and record it
-    $IntervalEnd = Time::HiRes::time();
-    $QuilterTimeStats[$i] =  $IntervalEnd-$IntervalStart;
+    $QuilterTimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
 
+
+    #################################################################### COUNTING DENSITY OF MICRO-EXONS
+    #
+    # We're interested in knowing how many of the alignments to
+    # the genome that quilter came up with have dense pockets
+    # of really small exons
+    #
+    my $max_splice_sites   = 3;
+    my $observed_max       = 0;
+    my $splice_window_size = 7;
+    my $num_reported_seqs  = 0;
+    my $total_num_seqs     = 0;
+    my $current_seq_name;
+    
+    my $WarningFileName = $SpeciesDir{$Species[$i]}.'/MicroExonWarnings.out';
+    
+    open(my $WarningFile,'>',$WarningFileName) || die "\n  ERROR:  Failed to open '$WarningFileName'\n\n";
+    open(my $CodonFile,'<',$SpeciesDir{$Species[$i]}.'/Hits.Quilter.out') || die "\n  NASTEEEEY\n\n";
+    
+    while (my $line = <$CodonFile>) {
+
+	$line =~ s/\n|\r//g;
+	if ($line =~ /^Match Pos\.s\:\s+(\S+)\s?$/) {
+
+	    my @Codons = split(',',$1);
+	    my @SpliceDensity = ();
+
+	    for (my $check = 0; $check < @Codons; $check++) {
+
+		if ($Codons[$check] eq '*') {
+
+		    for (my $fwd = 0; $check+$fwd < @Codons && $fwd <= $splice_window_size; $fwd++) {
+
+			if ($SpliceDensity[$check+$fwd]) { $SpliceDensity[$check+$fwd]++; }
+			else                             { $SpliceDensity[$check+$fwd]=1; }
+			
+			if ($SpliceDensity[$check+$fwd]==$max_splice_sites) {
+			    print $WarningFile "$current_seq_name\n";
+			    $observed_max = 1;
+			    last;
+			}
+		    }
+		}
+
+		if ($observed_max) {
+		    $num_reported_seqs++;
+		    $observed_max = 0;
+		    last;
+		}
+		
+	    }
+
+	    $total_num_seqs++;
+	    
+	} elsif ($line =~ /^Isoform\s+ID\s+\:\s+(\S+)\s?$/) {
+	    
+	    $current_seq_name = $1;
+
+	}
+	
+    }
+
+    if ($num_reported_seqs) { print $WarningFile "\n  $num_reported_seqs of $total_num_seqs\n\n"; }
+    
+    close($CodonFile);
+    close($WarningFile);
+
+    if (!$num_reported_seqs && -e $WarningFileName) { system("rm $WarningFileName"); }
+    #
+    #
+    #################################################################### END COUNTING STUFF
+
+        
     # Now we want to check how long it takes to run MultiMSA
-    $IntervalStart = Time::HiRes::time();
+    $IntervalStart = [Time::HiRes::gettimeofday()];
 
     # Grab a hold of your toys (confirming that they're where they should be)
     my $HitFileName  = $SpeciesDir{$Species[$i]}.'/Hits.Quilter.out';
@@ -204,13 +309,13 @@ foreach $i (0..$numSpecies-1) {
 
     # Prepare to generate a file containing tallies for each gene with
     # disagreeing positions.
-    my $DisFilename = $SpeciesDir{$Species[$i]}.'/Disagreements.txt';
+    my $DisFilename = $SpeciesDir{$Species[$i]}.'/CandidateARFs.txt';
     
     # Assembling the MultiMSA command.
     my $MultiMSACmd;
-    $MultiMSACmd = 'perl src/MultiMSA.pl ';       # base call
-    $MultiMSACmd = $MultiMSACmd.$HitFileName.' '; # Quilter output
-    $MultiMSACmd = $MultiMSACmd.$ProteinDB;       # isoform file
+    $MultiMSACmd = 'perl '.$location.'MultiMSA.pl '; # base call
+    $MultiMSACmd = $MultiMSACmd.$HitFileName.' ';    # Quilter output
+    $MultiMSACmd = $MultiMSACmd.$SpeciesDBNames[$i]; # isoform file
     
     # Guiding output towards our desired directory
     $MultiMSACmd = $MultiMSACmd.' -folder '.$MultiMSADir{$Species[$i]};
@@ -222,6 +327,10 @@ foreach $i (0..$numSpecies-1) {
     # up any of those tasty multi-chromosomal gene families.
     $MultiMSACmd = $MultiMSACmd.' -misses '.$MissFileName;
 
+    # If we want to stack ARFs in the output alignment files, now is
+    # the time to communicate our desires
+    $MultiMSACmd = $MultiMSACmd.' -stack-arfs' if ($stack_arfs);
+    
     # Display the call and/or make it
     if ($verbose) {
 	print "  Generating MSAs for all identified $Species[$i] genes\n";
@@ -229,19 +338,21 @@ foreach $i (0..$numSpecies-1) {
     }
     if (system($MultiMSACmd)) {
 	# Hamsters!
+	system("rm -rf $tempdirname");
 	die "\n  *  ERROR:  MultiMSA.pl failed during execution  *\n\n";
     }
 
 
-    # Grab all gene filenames.  Note that these should be identical across
-    # species.  We also count how many isoforms each gene had within the species.
+    # Grab all group filenames.  Note that these should be identical across
+    # species.  We also count how many isoforms each group had within the species.
     # Because we might be editing the contents of the directory, we begin by
     # storing the filenames in an array, rather than doing it on-the-fly.
     opendir(my $dir,$MultiMSADir{$Species[$i]}) || die "\n  Failed to open directory '$MultiMSADir{$Species[$i]}'\n\n";
     open(my $DisFile,'>',$DisFilename);
     my @DirContents;
-    while (readdir $dir) {
-	my $filename = $_;
+    while (my $filename = readdir($dir)) {
+
+	# Don't need to mess around with non-MSA files
 	if ($filename =~ /\.afa$/) {
 
 	    # Add to our list of directory contents
@@ -256,7 +367,8 @@ foreach $i (0..$numSpecies-1) {
 		open(my $geneDis,'<',$filename);
 		my $discountline = <$geneDis>;
 		close($geneDis);
-		print $DisFile "$discountline";
+		$filename =~ /([^\/]+)\_ARFs$/;
+		print $DisFile "$1: $discountline";
 	    }
 
 	}
@@ -271,15 +383,15 @@ foreach $i (0..$numSpecies-1) {
 
     # Make a hash of all the names of sequences that we missed.
     # This will include any sequences that hit to a different 
-    # chromosome from the family's "leader" (arbitrary -- first seen)
+    # chromosome from the group's "leader" (arbitrary -- first seen)
     my %QuilterMisses;
     if (-e $MissFileName) {
 	open(my $MissFile,'<',$MissFileName);
 	while (my $line = <$MissFile>) {
 	    $line =~ s/\n|\r//g;
 	    next if (!$line);
-	    $line =~ /\:([^\|]+)\|/;
-	    my $fam_name = uc($1);
+	    $line =~ /\|([^\|\s]+)\s*$/;
+	    my $fam_name = lc($1);
 	    if ($QuilterMisses{$fam_name}) {
 		# Some sequences have commas in the name,
 		# so we use ampersands (sp?) to break things up, instead
@@ -292,8 +404,9 @@ foreach $i (0..$numSpecies-1) {
     }
     
 
-    # Figure out which genes have MSAs in this species
+    # Figure out which groups have MSAs in this species
     foreach my $filename (@DirContents) {
+
 	if (-s $MultiMSADir{$Species[$i]}.'/'.$filename) {
 
 	    # Count '>'s (number of sequences)
@@ -305,41 +418,42 @@ foreach $i (0..$numSpecies-1) {
 	    close($MultiMSAFile);
 
 	    # Do we know this sequence?
-	    if ($GenesBySpecies{$filename}) {
-		push(@{$GenesBySpecies{$filename}},$i+1);
-		push(@{$GenesBySpecies{$filename}},$countedIsos);
+	    if ($GroupsBySpecies{$filename}) {
+		push(@{$GroupsBySpecies{$filename}},$i+1);
+		push(@{$GroupsBySpecies{$filename}},$countedIsos);
 	    } else {
-		${$GenesBySpecies{$filename}}[0] = $i+1;
-		${$GenesBySpecies{$filename}}[1] = $countedIsos;
+		${$GroupsBySpecies{$filename}}[0] = $i+1;
+		${$GroupsBySpecies{$filename}}[1] = $countedIsos;
 	    }
+
 	} elsif (-e $MultiMSADir{$Species[$i]}.'/'.$filename) {
 	    # Wipe out any files that are only nominally present
 	    my $clearMSACmd = 'rm '.$MultiMSADir{$Species[$i]}.'/'.$filename;
 	    system($clearMSACmd);
 	}
+
     }
 
-    # Now that we have MSAs for all the genes that we had hits for,
+    # Now that we have MSAs for all the groups that we had hits for,
     # align any that we missed using Needleman-Wunsch.
     print "  Aligning missed isoforms to gene MSAs\n" if ($verbose && keys %QuilterMisses);
-    my $singleseqfilename = 'Mirage.Single.Temp.fa';
-    my $singleseqresults  = 'Mirage.Multi.Temp.afa';
+    my $singleseqfilename = $tempdirname.'Mirage.Single.Temp.fa';
+    my $singleseqresults  = $tempdirname.'Mirage.Multi.Temp.afa';
 
-    foreach my $missedgene (keys %QuilterMisses) {
-	my @seqnames = split('&',$QuilterMisses{$missedgene});
+    foreach my $missedgroup (keys %QuilterMisses) {
+	my @seqnames = split('&',$QuilterMisses{$missedgroup});
 	foreach my $seq (@seqnames) {
-	    my $GBSref = AttachSeqToMSA($seq,$MultiMSADir{$Species[$i]},$missedgene,
-					$ProteinDB,\%GenesBySpecies,$i+1,
+	    my $GBSref = AttachSeqToMSA($seq,$MultiMSADir{$Species[$i]},$missedgroup,
+					$SpeciesDBNames[$i],\%GroupsBySpecies,$i+1,
 					$singleseqfilename,$singleseqresults);
-	    %GenesBySpecies = %{$GBSref};
+	    %GroupsBySpecies = %{$GBSref};
 	}
     }
     system("rm $singleseqfilename") if (-e $singleseqfilename);
     system("rm $singleseqresults")  if (-e $singleseqresults);
 
     # Knock it off with that darn timing!
-    $IntervalEnd = Time::HiRes::time();
-    $MultiMSATimeStats[$i] = $IntervalEnd-$IntervalStart;
+    $MultiMSATimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
 
 }
 
@@ -349,12 +463,12 @@ foreach $i (0..$numSpecies-1) {
 # of attention (and gather in their names).
 my $GBSref;
 my $MMSAref;
-($speciesref,$numSpecies,$GBSref,$MMSAref) 
+($speciesref,$numSpecies,$GBSref,$MMSAref)
     = CoverMinorSpecies(\@Species,$ProteinDB,$numSpecies,
-			\%GenesBySpecies,$AllSpeciesDir,\%MultiMSADir);
-@Species        = @{$speciesref};
-%GenesBySpecies = %{$GBSref};
-%MultiMSADir    = %{$MMSAref};
+			\%GroupsBySpecies,$AllSpeciesDir,\%MultiMSADir);
+@Species         = @{$speciesref};
+%GroupsBySpecies = %{$GBSref};
+%MultiMSADir     = %{$MMSAref};
 
 
 # Generate first progress message
@@ -364,20 +478,23 @@ print "$progmsg\r" if (!$verbose);
 
 # We're now going to track how long the whole final-MSA-generating
 # part of the program takes
-$IntervalStart = Time::HiRes::time();
+$IntervalStart = [Time::HiRes::gettimeofday()];
 
 
 # Make a directory to place our final MSAs in
 my $FinalDir = $ResultsDir.'/FinalMSAs';
-if (system("mkdir $FinalDir")) { die "\n  Failed to create directory '$FinalDir'\n\n"; }
+if (system("mkdir $FinalDir")) { 
+    system("rm -rf $tempdirname");
+    die "\n  Failed to create directory '$FinalDir'\n\n"; 
+}
 
 
 # Convert the hash entries to an array, so we can divvy it up
 # among the threads.  Did I mention there were going to be threads?
 # Oh, yeah, you'd better believe there are going to be threads.
-my @GeneFileNames   = sort keys %GenesBySpecies;
-my $TotNumGeneFiles = @GeneFileNames;
-if ($TotNumGeneFiles < $numProcesses) { $numProcesses = $TotNumGeneFiles; }
+my @GroupFileNames   = sort keys %GroupsBySpecies;
+my $TotNumGroupFiles = @GroupFileNames;
+if ($TotNumGroupFiles < $numProcesses) { $numProcesses = $TotNumGroupFiles; }
 
 
 # Carve out a portion of the files for each process to work on,
@@ -385,8 +502,9 @@ if ($TotNumGeneFiles < $numProcesses) { $numProcesses = $TotNumGeneFiles; }
 # it's good to cover your bases.
 my $portion;
 if ($numProcesses) {
-    $portion = $TotNumGeneFiles/$numProcesses;
+    $portion = $TotNumGroupFiles/$numProcesses;
 } else {
+    system("rm -rf $tempdirname");
     print "\n";
     print "  No genes were identified for alignment.\n";
     print "  Program Terminating Peacefully\n";
@@ -401,7 +519,7 @@ print "\n  Computing final cross-species MSAs (large genes can take up to 30 sec
 
 
 # Split up the work across the desired number of processes
-my $progressbase = 'mirage.thread_progress.';
+my $progressbase = $tempdirname.'mirage.thread_progress.';
 my $processes = 1;
 my $ThreadID  = 0; # In case of only one process
 my $pid;
@@ -433,13 +551,13 @@ my $num_complete = 0;
 # Figure out where you'll be starting and stopping
 my $startpoint = $ThreadID * $portion;
 my $endpoint   = ($ThreadID+1) * $portion;
-if ($ThreadID == $numProcesses-1) { $endpoint = $TotNumGeneFiles; }
+if ($ThreadID == $numProcesses-1) { $endpoint = $TotNumGroupFiles; }
 
 
-# Now we go through each gene and align it across species
-my $tempfileA = 'tempfileA.'.$ThreadID.'.MIRAGE.afa';
-my $tempfileB = 'tempfileB.'.$ThreadID.'.MIRAGE.afa';
-foreach my $geneindex ($startpoint..$endpoint-1) {
+# Now we go through each sequence group and align it across species
+my $tempfileA = $tempdirname.'tempfileA.'.$ThreadID.'.MIRAGE.afa';
+my $tempfileB = $tempdirname.'tempfileB.'.$ThreadID.'.MIRAGE.afa';
+for (my $groupindex = $startpoint; $groupindex < $endpoint; $groupindex++) {
 
     # First, at your leisure (once every couple seconds) write
     # out how far you've gotten to a file, unless you're thread 0
@@ -455,8 +573,9 @@ foreach my $geneindex ($startpoint..$endpoint-1) {
 	    } else {
 		
 		# Generate call to ProgressTimer
-		my $progressCmd = './src/ProgressTimer.pl '.$progressbase.' '.$numProcesses;
-		$progressCmd = $progressCmd.' '.$num_complete.' |';
+		my $progressCmd = $location.'ProgressTimer.pl '.$progressbase.' '.$numProcesses;
+		$progressCmd    = $progressCmd.' '.$num_complete.' |';
+		if ($location !~ /^\//) { $progressCmd = './'.$progressCmd; }
 		
 		# Make the call and read the results
 		open(my $progfile,$progressCmd);
@@ -465,7 +584,7 @@ foreach my $geneindex ($startpoint..$endpoint-1) {
 		$overall_progress =~ s/\n|\r//g;
 		
 		# Pull together the message
-		$progmsg = '  Mirage.pl:   '.$overall_progress.' gene families aligned';
+		$progmsg = '  Mirage.pl:   '.$overall_progress.' groups aligned';
 		while (length($progmsg) < 63) { $progmsg = $progmsg.' '; }
 		$progmsg = $progmsg."\r";
 		
@@ -485,43 +604,46 @@ foreach my $geneindex ($startpoint..$endpoint-1) {
     # Now let's get to work! Time is money, people!
     #
     
-    my $genefile = $GeneFileNames[$geneindex];
-    my $gene = $genefile;
-    $gene =~ s/\.afa$//;
+    my $groupfile = $GroupFileNames[$groupindex];
+    my $groupID = $groupfile;
+    $groupID =~ s/\.afa$//;
 
-    my @GeneSpecies;
-    my @GeneSeqs;
-    my $speciesPerGene = 0;
+    my @GroupSpecies;
+    my @GroupSeqs;
+    my $speciesPerGroup = 0;
 
     $i = 0;
-    while ($i < @{$GenesBySpecies{$genefile}}) {
-	$GeneSpecies[$i/2] = $Species[${$GenesBySpecies{$genefile}}[$i]-1];
-	$GeneSeqs[$i/2]    = ${$GenesBySpecies{$genefile}}[$i+1];
-	$speciesPerGene++;
+    while ($i < @{$GroupsBySpecies{$groupfile}}) {
+	$GroupSpecies[$i/2] = $Species[${$GroupsBySpecies{$groupfile}}[$i]-1];
+	$GroupSeqs[$i/2]    = ${$GroupsBySpecies{$groupfile}}[$i+1];
+	$speciesPerGroup++;
 	$i += 2;
     }
 
     #print "  -- $gene: $speciesPerGene (@GeneSpecies)\n" if ($verbose);
 
-    my $ResultFile = $FinalDir.'/'.$genefile;
+    my $ResultFile = $FinalDir.'/'.$groupfile;
 
-    if ($speciesPerGene == 1) {
+    if ($speciesPerGroup == 1) {
 
 	if ($cleanMSA) {
 
 	    # still want to remove any splice site characters
-	    my $FinalMSACmd = "perl src/FinalMSA.pl '".$MultiMSADir{$GeneSpecies[0]}."/".$genefile."'";
+	    my $FinalMSACmd = 'perl '.$location.'FinalMSA.pl "'.$MultiMSADir{$GroupSpecies[0]}.'/'.$groupfile.'"';
 	    $FinalMSACmd    = $FinalMSACmd." '".$ResultFile."'";
 	    
 	    # Print the command and execute
 	    #print "  $FinalMSACmd\n" if ($verbose);
-	    if (system($FinalMSACmd)) { die "\n  *  ERROR: FinalMSA failed during execution  *\n\n"; }
+	    if (system($FinalMSACmd)) { 
+		system("rm -rf $tempdirname");
+		die "\n  *  ERROR: FinalMSA failed during execution  *\n\n"; 
+	    }
 	    
 	} else {
 	
 	    # Just copy it over
-	    if (system("cp '$MultiMSADir{$GeneSpecies[0]}/$genefile' '$ResultFile'")) {
-		die "\n  Failed to move '$MultiMSADir{$GeneSpecies[0]}/$genefile' to '$ResultFile'\n\n";
+	    if (system("cp '$MultiMSADir{$GroupSpecies[0]}/$groupfile' '$ResultFile'")) {		
+		die "\n  Failed to move '$MultiMSADir{$GroupSpecies[0]}/$groupfile' to '$ResultFile'\n\n";
 	    }
 
 	}
@@ -531,30 +653,31 @@ foreach my $geneindex ($startpoint..$endpoint-1) {
 
     }
 
-    my $fileA     = $MultiMSADir{$GeneSpecies[0]}.'/'.$genefile;
-    my $fileAsize = $GeneSeqs[0];
-    my $fileB     = $MultiMSADir{$GeneSpecies[1]}.'/'.$genefile;
-    my $fileBsize = $GeneSeqs[1];
+    my $fileA     = $MultiMSADir{$GroupSpecies[0]}.'/'.$groupfile;
+    my $fileAsize = $GroupSeqs[0];
+    my $fileB     = $MultiMSADir{$GroupSpecies[1]}.'/'.$groupfile;
+    my $fileBsize = $GroupSeqs[1];
 
-    my $MultiSeqNWCmd;
-    $MultiSeqNWCmd = "./src/MultiSeqNW '$fileA' $fileAsize"; # First species
-    $MultiSeqNWCmd = $MultiSeqNWCmd." '$fileB' $fileBsize";  # Second species
-    $MultiSeqNWCmd = $MultiSeqNWCmd.' > '.$tempfileA;        # Send to temp file    
+    my $MultiSeqNWCmd = $location."MultiSeqNW '$fileA' $fileAsize"; # First species
+    $MultiSeqNWCmd    = $MultiSeqNWCmd." '$fileB' $fileBsize";      # Second species
+    $MultiSeqNWCmd    = $MultiSeqNWCmd.' > '.$tempfileA;            # Send to temp file    
+    if ($location !~ /^\//) { $MultiSeqNWCmd = './'.$MultiSeqNWCmd; }
 
     print "  $MultiSeqNWCmd\n" if ($verbose);
     if (system($MultiSeqNWCmd)) { die "\n  *  ERROR: MultiSeqNW failed during execution of command '$MultiSeqNWCmd'  *\n\n"; }
     
     $i = 2;
-    while ($i < $speciesPerGene) {
+    while ($i < $speciesPerGroup) {
 
 	if ($i % 2) { $fileA = $tempfileB; }
 	else        { $fileA = $tempfileA; }
 
 	$fileAsize += $fileBsize;
-	$fileB      = $MultiMSADir{$GeneSpecies[$i]}.'/'.$genefile;
-	$fileBsize  = $GeneSeqs[$i];
-	$MultiSeqNWCmd = "./src/MultiSeqNW '$fileA' $fileAsize"; # First species
-	$MultiSeqNWCmd = $MultiSeqNWCmd." '$fileB' $fileBsize";  # Second species
+	$fileB      = $MultiMSADir{$GroupSpecies[$i]}.'/'.$groupfile;
+	$fileBsize  = $GroupSeqs[$i];
+	$MultiSeqNWCmd = $location."MultiSeqNW '$fileA' $fileAsize"; # First species
+	$MultiSeqNWCmd = $MultiSeqNWCmd." '$fileB' $fileBsize";      # Second species
+	if ($location !~ /^\//) { $MultiSeqNWCmd = './'.$MultiSeqNWCmd; }
 
 	# The tempfile we're writing to depends on how many iterations 
 	# we've been through.
@@ -568,11 +691,10 @@ foreach my $geneindex ($startpoint..$endpoint-1) {
 
     }
 
-
     # Perform the final cleanup! (unless we're CRAZY!)
     if ($cleanMSA) {
 
-	my $FinalMSACmd = 'perl src/FinalMSA.pl ';
+	my $FinalMSACmd = 'perl '.$location.'FinalMSA.pl ';
 	if ($i % 2) { $FinalMSACmd = $FinalMSACmd."'$tempfileB'"; }
 	else        { $FinalMSACmd = $FinalMSACmd."'$tempfileA'"; }
 	$FinalMSACmd = $FinalMSACmd." '$ResultFile'";
@@ -594,7 +716,7 @@ foreach my $geneindex ($startpoint..$endpoint-1) {
 
     }
 
-    print "  - $gene complete\n" if ($verbose);
+    print "  - $groupID complete\n" if ($verbose);
     $num_complete++;
 
 }
@@ -610,6 +732,11 @@ if ($ThreadID) { exit(0); }
 while (wait() != -1) {}
 
 
+# Well, why NOT put this here?!
+system("rm \"$MinorSpeciesDBName\"")      if (-e $MinorSpeciesDBName);
+system("rm \"$MinorSpeciesDBName\.ssi\"") if (-e $MinorSpeciesDBName.'.ssi');
+
+
 # Get rid of progress files (won't apply to thread 0)
 for ($i = 1; $i < $numProcesses; $i++) {
     $progfilename = $progressbase.$i;
@@ -621,25 +748,27 @@ print "$progmsg\r" if (!$verbose);
 
 
 # When did we finish generating our final MSAs?
-$IntervalEnd = Time::HiRes::time();
-$MultiSeqNWTime = $IntervalEnd-$IntervalStart;
-$AvgNWTime = $MultiSeqNWTime / $TotNumGeneFiles;
+$MultiSeqNWTime = Time::HiRes::tv_interval($IntervalStart);
+$AvgNWTime = $MultiSeqNWTime / $TotNumGroupFiles;
 
 
 # One final thing: Move any suspected transposable elements to
 # a special final folder
-if (grep -f, glob 'src/*.TEs.Quilter.out') {
+if (grep -f, glob $tempdirname.'*.TEs.Quilter.out') {
     system("mkdir $ResultsDir/SuspectedTEs");
-    system("mv src/*.TEs.Quilter.out $ResultsDir/SuspectedTEs");
+    system("mv ".$tempdirname."*.TEs.Quilter.out $ResultsDir/SuspectedTEs");
 }
 
 
+# Remove the temp directory
+if (system("rm -rf $tempdirname")) { die "\n  ERROR:  Failed to delete temp directory '$tempdirname'\n\n"; }
+
+
 # Slap that stop-watch!
-$FinalTime = Time::HiRes::time();
-$TotalRuntime = $FinalTime - $StartTime;
+$TotalRuntime = Time::HiRes::tv_interval($StartTime);
 
 # Print out runtime statistitcs
-if ($verbose) {
+if ($verbose || $timed) {
     my $formattedTime;
     print "\n\n\n";
     print "  +---------------------------------------------------+\n";
@@ -718,20 +847,22 @@ sub PrintUsage
 {
     print "\n\n";
     print " MIRAGE : Multiple-sequence Isoform Alignment Tool Guided by Exon Boundaries            \n\n";
-    print " USAGE  : perl mirage.pl  <Isoform DB>  <Species Guide>  [OPT.s]                        \n\n";
+    print " USAGE  : mirage [OPT.s] <Isoform DB>  <Species Guide>                                  \n\n";
     print " ARG.s  : <IsoformDB>     : A FASTA-formatted protein database, with the following      \n";
-    print "                            naming convention: > gene_name|prot_name|species|ID         \n\n";
+    print "                            naming convention:                                          \n\n";
+    print "                            >gene_name|protein_name|species|seqID|groupID               \n\n";
     print "          <Species Guide> : A file indicating, for each species being searched on,      \n";
     print "                            the location of a FASTA-formatted genome for that species   \n";
     print "                            and a .gtf index file corresponding to that species and     \n";
-    print "                            genome.  These fields should be comma-separated and         \n";
+    print "                            genome.  These fields should be whitespace-separated and    \n";
     print "                            ordered as follows:  species, genome, .gtf index            \n";
     print "                            It is recommended that similar species are grouped together \n";
     print "                            and positioned near the top of the list.                    \n\n";
-    print " OPT.s  : -h   : More detailed help.                                                    \n";
-    print "          -o   : Specify output directory name.                                         \n";
-    print "          -v   : Verbose output.                                                        \n";
-    print "          -n   : Specify number of CPU cores (default: 2)                               \n";
+    print " OPT.s  : --help      : More detailed help.                                             \n";
+    print "          --verbose   : Verbose output.                                                 \n";
+    print "          --time      : Print timing data to stdout at end of program                   \n";
+    print "          -outdirname : Specify output directory name.                                  \n";
+    print "          -cpus       : Specify number of CPU cores (default: 2)                        \n";
     die "\n\n";
 }
 
@@ -752,15 +883,14 @@ sub DetailedUsage
     print " .-======-+--=-----------------=----=--=--------------=---------=---------------. \n";
     print " | MIRAGE :  Multiple-sequence Isoform Alignment Tool Guided by Exon Boundaries | \n";
     print " '-======-+--=-----------------=----=--=--------------=---------=---------------' \n";
-    print "                                                                  Version 0.2.0   \n";
     print "                                                                                  \n";
-    print "    USAGE :  perl  mirage.pl  <Isoform DB>  <Species Guide>  [OPT.s]              \n";
+    print "    USAGE :  mirage  [OPT.s]  <Isoform DB>  <Species Guide>                       \n";
     print "                                                                                  \n";
     print "                                                                                  \n";
     print "    ARG.s :  Isoform DB    : A FASTA-formatted protein database using the         \n";
     print "                             following sequence naming convention:                \n";
     print "                                                                                  \n";
-    print "                             >GN:gene_name|protein_name|species|ID                \n";
+    print "                             >gene_name|protein_name|species|seqID|groupID        \n";
     print "                                                                                  \n";
     print "             Species Guide : A simple file indicating, for each species being     \n";
     print "                             searched on, the location of a FASTA-formatted       \n";
@@ -769,14 +899,14 @@ sub DetailedUsage
     print "                                                                                  \n";
     print "                             The filenames should be paths to the files from      \n";
     print "                             the directory containing MIRAGE.pl and must be       \n";
-    print "                             separated by commas.                                 \n";
+    print "                             separated by whitespace.                             \n";
     print "                                                                                  \n";
     print "                             Required order:   species, genome, index file        \n";
     print "                                                                                  \n";
     print "                               EXAMPLE:                                           \n";
     print "                             .------------------------------------------------.   \n";
-    print "                             | human, ~/data/HumanGenome.fa, ~/data/human.gtf |   \n";
-    print "                             | mouse, ~/data/MouseGenome.fa, ~/data/mouse.gtf |   \n";
+    print "                             | human  ~/data/HumanGenome.fa  ~/data/human.gtf |   \n";
+    print "                             | mouse  ~/data/MouseGenome.fa  ~/data/mouse.gtf |   \n";
     print "                             | ...                                            |   \n";
     print "                             '------------------------------------------------'   \n";
     print "                                                                                  \n";
@@ -786,10 +916,10 @@ sub DetailedUsage
     print "                             grouped together for optimal alignments.             \n";
     print "                                                                                  \n";
     print "                                                                                  \n";
-    print "    OPT.s :  -o <string> : Specify ouptut directory name                          \n";
-    print "             -v          : Verbose output                                         \n";
-    print "             -n <int>    : Specify number of CPU cores (default: 2)               \n";
-    print "             -h          : Print this help page                                   \n";
+    print "    OPT.s :  --verbose            : Verbose output                                \n";
+    print "             --time               : Print timing data to stdout at end of program \n";
+    print "             -outdirname <string> : Specify ouptut directory name                 \n";
+    print "             -cpus <int>          : Specify number of CPU cores (default: 2)      \n";
     die "\n\n\n";
 }
 
@@ -806,46 +936,36 @@ sub DetailedUsage
 #
 sub CheckInstall
 {
-    open(my $cmdcheck,'which spaln |');
-    my $line = <$cmdcheck>;
-    close($cmdcheck);
-    if (!$line) { die "\n  Failure: spaln does not appear to be on the PATH\n\n"; }    
 
-    open($cmdcheck,'which esl-sfetch |');
-    $line = <$cmdcheck>;
-    close($cmdcheck);
-    if (!$line) { die "\n  Failure: esl-sfetch does not appear to be on the PATH\n\n"; }
-
-    open($cmdcheck,'which esl-seqstat |');
-    $line = <$cmdcheck>;
-    close($cmdcheck);
-    if (!$line) { die "\n  Failure: esl-seqstat does not appear to be on the PATH\n\n"; }
+    # Figure out what the location of the Mirage src directory is
+    my $location = $0;
+    $location =~ s/Mirage\.pl$//;
 
     my @RequiredFiles;
-    push(@RequiredFiles,'src/Quilter.pl');
-    push(@RequiredFiles,'src/DiagonalSets.pm');
-    push(@RequiredFiles,'src/FindDiagonals.c');
-    push(@RequiredFiles,'src/Diagonals.c');
-    push(@RequiredFiles,'src/Diagonals.h');
-    push(@RequiredFiles,'src/TransSW.c');
-    push(@RequiredFiles,'src/MultiMSA.pl');
-    push(@RequiredFiles,'src/MultiSeqNW.c');
-    push(@RequiredFiles,'src/MultiSeqNW.h');
-    push(@RequiredFiles,'src/FinalMSA.pl');
-    push(@RequiredFiles,'src/makefile');
+    push(@RequiredFiles,$location.'Quilter.pl');
+    push(@RequiredFiles,$location.'DiagonalSets.pm');
+    push(@RequiredFiles,$location.'FastMap.c');
+    push(@RequiredFiles,$location.'Diagonals.c');
+    push(@RequiredFiles,$location.'Diagonals.h');
+    push(@RequiredFiles,$location.'TransSW.c');
+    push(@RequiredFiles,$location.'MultiMSA.pl');
+    push(@RequiredFiles,$location.'MultiSeqNW.c');
+    push(@RequiredFiles,$location.'MultiSeqNW.h');
+    push(@RequiredFiles,$location.'FinalMSA.pl');
+    push(@RequiredFiles,$location.'makefile');
+    push(@RequiredFiles,$location.'../inc/easel/miniapps/esl-sfetch');
+    push(@RequiredFiles,$location.'../inc/easel/miniapps/esl-seqstat');
+    push(@RequiredFiles,$location.'../inc/spaln2.2.2/src/spaln');
+    push(@RequiredFiles,$location.'../inc/blat/blat.linux.x86_64');
+    push(@RequiredFiles,$location.'../inc/blat/blat.macOSX.x86_64');
+    push(@RequiredFiles,$location.'../inc/blat/blat.macOSX.i386');
 
     foreach my $file (@RequiredFiles) {
 	if (!(-e $file)) { die "\n  Failure: Could not locate required file '$file'\n\n"; }
     }
 
-    open($cmdcheck,'which blat |');
-    $line = <$cmdcheck>;
-    close($cmdcheck);
-    if (!$line) {
-	die "\n  Success! (Although installing blat is strongly recommended)\n\n";
-    } else {
-	die "\n  Success!\n\n";
-    }
+    die "\n  Lookin' good!\n\n";
+
 }
 
 
@@ -862,48 +982,20 @@ sub CheckInstall
 #
 sub CheckSourceFiles
 {
-    my $forcecompile = shift;
-
     my @RequiredFiles;
-    push(@RequiredFiles,'src/Quilter.pl');
-    push(@RequiredFiles,'src/DiagonalSets.pm');
-    push(@RequiredFiles,'src/FindDiagonals.c');
-    push(@RequiredFiles,'src/Diagonals.c');
-    push(@RequiredFiles,'src/Diagonals.h');
-    push(@RequiredFiles,'src/TransSW.c');
-    push(@RequiredFiles,'src/MultiMSA.pl');
-    push(@RequiredFiles,'src/MultiSeqNW.c');
-    push(@RequiredFiles,'src/MultiSeqNW.h');
-    push(@RequiredFiles,'src/FinalMSA.pl');
-    push(@RequiredFiles,'src/makefile');
+    push(@RequiredFiles,$location.'Quilter.pl');
+    push(@RequiredFiles,$location.'DiagonalSets.pm');
+    push(@RequiredFiles,$location.'MultiMSA.pl');
+    push(@RequiredFiles,$location.'FinalMSA.pl');
+    push(@RequiredFiles,$location.'FastMap');
+    push(@RequiredFiles,$location.'TransSW');
+    push(@RequiredFiles,$location.'MultiSeqNW');
 
     foreach my $srcfile (@RequiredFiles) {
 	if (!(-e $srcfile)) {
 	    die "\n  Failed to locate required file '$srcfile'\n\n";
 	}
     }
-
-    my @RequiredPrograms;
-    push(@RequiredPrograms,'src/FindDiagonals');
-    push(@RequiredPrograms,'src/TransSW');
-    push(@RequiredPrograms,'src/MultiSeqNW');
-
-    my $missingProgram = 0;
-    foreach my $srcprogram (@RequiredPrograms) {
-	if (!(-e $srcprogram) || $forcecompile) {
-	    $missingProgram = 1;
-	}
-    }
-
-    if ($missingProgram) {
-	chdir('./src');
-	print "\n  Compiling from src/makefile\n";
-	if (system("make --silent")) {
-	    die "  ERROR: Compilation failed.\n\n";
-	}
-	chdir('..');
-    }
-
 }
 
 
@@ -921,55 +1013,61 @@ sub CheckSourceFiles
 #
 sub ParseArgs
 {
-    my $argsRef = shift;
-    my @ARGS    = @{$argsRef};
 
-    my @Options;
-    $Options[0] = $ARGS[0];        # Isoform file
-    $Options[1] = $ARGS[1];        # Species guide
-    $Options[2] = 'MirageResults'; # Output folder name
-    $Options[3] = 0;               # Verbose output
-    $Options[4] = 2;               # Number of CPUs
-    $Options[5] = 0;               # (hidden) Force Compile
-    $Options[6] = 1;               # (hidden) perform final cleanup
+    my %Options = ( 
+	cpus => $defaultcpus, 
+	outdirname => 'MirageResults',
+	cleanmsa => 1,
+	);
 
-    my $i = 2;
-    while ($i < @ARGS) {
-	if ($ARGS[$i] eq '-h') {
-	    DetailedUsage(); # Kills program
-	} elsif ($ARGS[$i] eq '-o') {
-	    $i++;
-	    $Options[2] = $ARGS[$i];
-	    $Options[2] =~ s/\/$//; # Clip terminal '/'
-	} elsif ($ARGS[$i] eq '-v') {
-	    $Options[3] = 1;
-	} elsif ($ARGS[$i] eq '-n') {
-	    $i++;
-	    $Options[4] = int($ARGS[$i]);
-	    if ($Options[4] <= 0) {
-		print "  Unsupported number of CPUs requested ($Options[4])\n";
-		print "  Reverting to default (2)\n.";
-		$Options[4] = 2;
-	    }
-	} elsif ($ARGS[$i] eq '-forcecompile') {
-	    $Options[5] = 1;
-	} elsif ($ARGS[$i] eq '-showSpliceSites') {
-	    $Options[6] = 0;
-	} else {
-	    print "  Unrecognized option '$ARGS[$i]' ignored\n";
-	}
-	$i++;
+    &GetOptions( 
+	\%Options,
+	"help",
+	"check",
+	"outdirname=s",
+	"verbose",
+	"cpus=i",
+	"time",
+	"stackarfs",
+	"forcecompile", # Hidden
+	"cleanmsa",     # Hidden
+	"justspaln",    # Hidden
+	)
+	|| die "\n  ERROR:  Failed to parse command line arguments\n\n";
+
+    # If the user just wants a little help, I don't think it's too
+    # difficult to give them a hand
+    if ($Options{help})  { DetailedUsage(); }
+    if ($Options{check}) { CheckInstall();  }
+
+    # If we don't have the required files, give usage
+    my $proteindb = $ARGV[0];
+    my $reference = $ARGV[1];
+    if (!$proteindb) {
+	if (!$reference) {
+	    print "\n  ERROR : Protein database and reference file not provided\n";
+	    print "  --------------------------------------------------------";
+	    PrintUsage();
+	} 
+	print "\n  ERROR : Protein database not provided\n";
+	print "  -------------------------------------";
+	PrintUsage();
+    }
+    if (!$reference) {
+	print "\n  ERROR : Reference file not provided\n";
+	print "  -----------------------------------";
+	PrintUsage();
     }
 
     # While we're here, we make sure there's a .ssi index for the
     # protein database
-    if (!(-e $ARGS[0].'.ssi')) {
-	if (system("esl\-sfetch \-\-index $ARGS[0]")) { 
-	    die "\n  Failed to create easel index for $ARGS[0]\n\n"; 
+    if (!(-e $proteindb.'.ssi')) {
+	if (system($eslsfetch." \-\-index $proteindb")) { 
+	    die "\n  Failed to create easel index for $proteindb\n\n"; 
 	}
     }
 
-    return \@Options;
+    return \%Options;
 }
 
 
@@ -1059,6 +1157,7 @@ sub VerifiedClean
 sub ParseSpeciesGuide
 {
     my $GuideFilename = shift;
+    my $ProtFilename  = shift;
 
     open(my $GuideFile,'<',$GuideFilename) || die "\n  Failed to open species guide file '$GuideFilename'\n\n";
 
@@ -1079,50 +1178,338 @@ sub ParseSpeciesGuide
 	
 	if ($line =~ /^(\S+)\s+(\S+)/) {
 
-	    $Species[$i] =  lc($1);
-	    $Genomes[$i] =  $2;
-	    $Genomes[$i] =~ s/^\~/$home/;
+	    # Guarantee that this species is actually represented in
+	    # the protein database.
+	    my $spec = lc($1);
+	    my $SpecGrepCmd = "grep -m 1 -i '|$spec|' $ProtFilename |";
+	    open(my $SG,$SpecGrepCmd) || die "\n  ERROR:  Species grep command '$SpecGrepCmd' failed\n\n";
+	    my $specgrepline = <$SG>;
+	    close($SG);
 
-	    if ($line =~ /\S+\s+\S+\s+(\S+)/) {
-		$GTFs[$i] = $1;
-		$GTFs[$i] =~ s/^\~/$home/;
-	    } else {
-		$GTFs[$i] = '-'
-	    }
+	    # Is there anything to be stoked on?
+	    if ($specgrepline) { 
 
-	    # Verify that the genome exists
-	    if (!(-e $Genomes[$i])) {
-		print "\n  Failed to locate genome '$Genomes[$i]'\n\n"; 
-		die   "  Recommendation: Verify path from directory containing MIRAGE.pl.\n\n";
-	    }
-	    
-	    # Make sure the genome has a .ssi index
-	    if (!(-e $Genomes[$i].'.ssi')) {
-		if (system("esl-sfetch --index $Genomes[$i]")) { 
-		    die "\n  Failed to create easel index for $Genomes[$i]\n\n"; 
+		# Recover the old line regex
+		$line =~ /^(\S+)\s+(\S+)/;
+		
+		$Species[$i] =  lc($1);
+		$Genomes[$i] =  $2;
+		$Genomes[$i] =~ s/^\~/$home/;
+		
+		if ($line =~ /\S+\s+\S+\s+(\S+)/) {
+		    $GTFs[$i] = $1;
+		    $GTFs[$i] =~ s/^\~/$home/;
+		} else {
+		    $GTFs[$i] = '-';
 		}
-	    }
+		
+		# Verify that the genome exists
+		if (!(-e $Genomes[$i])) {
+		    print "\n  Failed to locate genome '$Genomes[$i]'\n\n"; 
+		    die   "  Recommendation: Verify path from directory containing MIRAGE.pl.\n\n";
+		}
+		
+		# Make sure the genome has a .ssi index
+		if (!(-e $Genomes[$i].'.ssi')) {
+		    if (system($eslsfetch." --index $Genomes[$i] 1>/dev/null")) { 
+			die "\n  Failed to create easel index for $Genomes[$i]\n\n"; 
+		    }
+		}
+		
+		# Verify that the gtf exists (unless it's '-')
+		if ($GTFs[$i] ne '-' && !(-e $GTFs[$i])) {
+		    print "\n  Failed to locate GTF index '$GTFs[$i]'\n"; 
+		    die   "  Recommendation: Verify path from directory containing MIRAGE.pl.\n\n";
+		}
 
-	    # Verify that the gtf exists (unless it's '-')
-	    if ($GTFs[$i] ne '-' && !(-e $GTFs[$i])) {
-		print "\n  Failed to locate GTF index '$GTFs[$i]'\n"; 
-		die   "  Recommendation: Verify path from directory containing MIRAGE.pl.\n\n";
-	    }
+		$i++;
 
+	    }
+		
 	} else {
-
+	    
 	    # Something isn't right
 	    die "\n  Species guide line '$line' does not match expected format\n\n";
 	    	    
 	}
-
-	$i++;
 
     }
     
     close($GuideFile);
 
     return (\@Species,\@GTFs,\@Genomes);
+}
+
+
+
+
+
+########################################################################
+#
+# Function Name: GenerateSpeciesDBs
+#
+# About:  This function breaks up the isoform database into individual
+#         species-specific databases, organized by gene families.
+#
+#         It also identifies the specific line ranges for each of the
+#         requested processes, so that each process can easily operate
+#         on the level of gene families, rather than individual sequences.
+#
+#         Because the naming conventions might be a bit of hot rubbish,
+#         here's a super fun little guide to what this function returns:
+#
+#             + SpeciesDBNames : The filenames for the species-specific
+#                 databases, organized in the same order as the Species
+#                 array.
+#
+#             + MinorSpeciesDBName : The filename for the database of all
+#                 isoforms belonging to species that don't have an
+#                 associated genome.
+#
+#             + SpecThreadCounts : The number of threads to use for each
+#                 species.  This will typically be numProcesses, but in
+#                 the event that we have some species with fewer gene
+#                 families than requested processes we'll reduce this.
+#
+#             + SpecFamBreaks : The line number that each thread should
+#                 count up to (but not hit).
+#
+sub GenerateSpeciesDBs
+{
+    my $species_ref    = shift;
+    my $ProteinDB_name = shift;
+    my $numProcesses   = shift;
+
+    my $DB_base_name = $ProteinDB_name;
+    $DB_base_name =~ s/\.[^\/\.]+$//; # remove the file extension.
+
+    my @Species = @{$species_ref};
+    my %SpeciesToDBNames;
+    foreach my $species (@Species) { $SpeciesToDBNames{$species} = $tempdirname.$species.'.prot.fa'; }
+    my $MinorSpeciesDBName = $tempdirname.'.minor-species.prot.fa';
+    
+    # The very first thing we'll do is scan through our database
+    # making a set of species-AND-gene-family mini-databases, and
+    # then we can concatenate within species.
+
+    open(my $ProteinDB,'<',$ProteinDB_name) || die "\n  ERROR:  Failed to open input protein database '$ProteinDB_name'\n\n";
+    my $spec_gene_filename = 0;
+    my %SpeciesGeneFileNames;
+    my $SpecGeneFile;
+    my $next_entry = 0;
+    while (my $line = <$ProteinDB>) {
+	
+	$line =~ s/\n|\r//g;
+	next if (!$line);
+
+	if ($line =~ /\>(\S+)/) {
+
+	    if ($spec_gene_filename) { close($SpecGeneFile); }
+
+	    my $seqname = $1;
+	    $seqname =~ /^[^\|]+\|[^\|]+\|([^\|]+)\|\S+\|([^\|]+)$/;
+	    my $species = lc($1);
+	    my $genefam = lc($2);
+
+	    $spec_gene_filename = $tempdirname.$species.'-'.$genefam.'.fa';
+	    $SpeciesGeneFileNames{$species.';'.$genefam} = $spec_gene_filename;
+	    
+	    open($SpecGeneFile,'>>',$spec_gene_filename) || die "\n  ERROR:  Failed to open output species-gene database '$spec_gene_filename'\n\n";
+	    
+	    print $SpecGeneFile "$line\n";
+
+	} elsif ($spec_gene_filename) {
+	    print $SpecGeneFile "$line\n";
+	}
+
+    }
+    if ($spec_gene_filename) { close($SpecGeneFile); }
+    close($ProteinDB);
+
+    #
+    #  Now that we've segrated species and gene families into TONS of little databases,
+    #  we can run through our little databases and concatenate them into species databases.
+    #
+    #  Observe that the primary sorting on species name and secondary sorting on gene family
+    #  guarantees that we'll have a really clean re-organization into gene families.
+    #
+
+    my %GeneFamsPerSpecies;
+    foreach my $spec_gene (sort keys %SpeciesGeneFileNames) {
+
+	$spec_gene =~ /^(\S+)\;/;
+	my $species = $1;
+
+	if ($GeneFamsPerSpecies{$species}) { $GeneFamsPerSpecies{$species}++; }
+	else                               { $GeneFamsPerSpecies{$species}=1; }
+
+	my $spec_gene_filename = $SpeciesGeneFileNames{$spec_gene};
+
+	my $species_db_name;
+	if ($SpeciesToDBNames{$species}) { $species_db_name = $SpeciesToDBNames{$species}; }
+	else                             { $species_db_name = $MinorSpeciesDBName;         }
+
+	my $cat_cmd = "cat \"$spec_gene_filename\" >> \"$species_db_name\"";
+	if (system($cat_cmd)) { die "\n  ERROR:  Concatenation command '$cat_cmd' failed during execution\n\n"; }
+
+	my $rm_cmd = "rm \"$spec_gene_filename\"";
+	if (system($rm_cmd)) { die "\n  ERROR:  Failed to remove species-gene file '$spec_gene_filename'\n\n"; }
+
+
+    }
+
+
+    # Next, we can figure out the right order for our species DB names
+    my @SpeciesDBNames;
+    my @SpeciesFamCounts;
+    foreach my $species (@Species) {
+	push(@SpeciesDBNames,$SpeciesToDBNames{$species}); 
+	push(@SpeciesFamCounts,$GeneFamsPerSpecies{$species});
+    }
+
+
+    # Were there any unindexed species?
+    if (-e $MinorSpeciesDBName) { 
+	
+	# Let's just slip this nasty boy in right quick
+	
+    }
+
+
+
+    #
+    #  We can actually give Quilter some cheat codes by identifying the specific lines
+    #  at which we want each process to start up.
+    #
+    #  Note that these are one above the final line, so it's an [i-1,i) sort of thing
+    #
+
+
+
+    my @SpecFamBreaks;
+    my @SpecThreadCounts;
+    for (my $i=0; $i<scalar(@SpeciesDBNames); $i++) {
+
+	my $species_db_name = $SpeciesDBNames[$i];
+	my $wc_cmd = "wc -l \"$species_db_name\" \|";
+	open(my $WC,$wc_cmd) || die "\n  ERROR:  Failed to run linecount command '$wc_cmd'\n\n";
+	my $wc_line = <$WC>;
+	close($WC);
+
+	my $tot_line_count;
+	if ($wc_line =~ /^\s*(\d+)/) {
+	    $tot_line_count = $1;
+	} else {
+	    die "\n  ERROR:  Failed to get a line count for file '$species_db_name'\n\n";
+	}
+
+	# Just for good measure, we'll slip in some esl-indexing here
+	if (system($eslsfetch." --index \"$species_db_name\" 1>/dev/null")) { 
+	    die "\n  ERROR:  Failed to generate esl index for species database '$species_db_name'\n\n"; 
+	}
+	
+	open(my $SpeciesDB,'<',$species_db_name) || die "\n  ERROR:  Failed to open species database '$species_db_name'\n\n";
+
+	# We need some sort of mechanism for adjusting the number of requested
+	# cores in the event that there's a species with very few entries.
+	#
+	if ($SpeciesFamCounts[$i] <= $numProcesses) {
+
+	    #
+	    # We'll just assign each core a single gene family
+	    #
+	    
+	    $SpecThreadCounts[$i] = $SpeciesFamCounts[$i];
+
+	    my $linenum = 0;
+	    my $lastfam;
+	    my $j=0;
+
+	    my $line;
+		
+	    while ($linenum < $tot_line_count) {
+		$line = <$SpeciesDB>;
+		$linenum++;
+		if ($line =~ /^\>\S+\|([^\|]+)$/) {
+		    my $nextfam = lc($1);
+		    if ($lastfam && $lastfam ne $nextfam) {
+			$SpecFamBreaks[$i][$j] = $linenum;
+			$j++;
+		    }
+		    $lastfam = $nextfam;			
+		}
+	    }
+	    
+	    $SpecFamBreaks[$i][$j] = $linenum;
+
+	} else {
+
+	    my $avg_frac = $tot_line_count / $numProcesses;
+
+	    $SpecThreadCounts[$i] = $numProcesses;
+
+	    my $linenum = 0;
+	    my $lastfam;
+	    my $j=0;
+	    while ($j<$SpecThreadCounts[$i]) {
+		
+		my $line;
+		my $fams_in_block = 0;
+	    		
+		while ($linenum < $tot_line_count && $linenum < ($j+1)*$avg_frac) {
+		    $line = <$SpeciesDB>;
+		    $linenum++;
+		    if ($line =~ /^\>\S+\|([^\|]+)$/) {
+			$lastfam = lc($1);
+			$fams_in_block = 1;
+		    }
+		}
+		
+		# This is a catch for the special case where we might have
+		# (say) numProcesses+1 sequences where one of those is gigantic
+		# and goofs up our best laid plans.
+		#
+		if ($fams_in_block) {
+
+		    while ($linenum < $tot_line_count && $line !~ /^\>/) {
+			$line = <$SpeciesDB>;
+			$linenum++;
+			if ($line && $line =~ /^\>\S+\|([^\|]+)$/) {
+			    my $nextfam = lc($1);
+			    if ($nextfam eq $lastfam) {
+				$line = <$SpeciesDB>;
+				$linenum++;
+			    }
+			}
+		    }
+		    
+		    $SpecFamBreaks[$i][$j] = $linenum;
+		    $j++;
+
+		} else {
+
+		    $SpecThreadCounts[$i]--;
+
+		}
+		
+	    }
+
+	    if ($SpecThreadCounts[$i]) {
+		$SpecFamBreaks[$i][$SpecThreadCounts[$i]-1] = $tot_line_count;
+	    } else {
+		die "\n  Hey, dude, what's going on with '$species_db_name' and division into threadable blocks?\n\n";
+	    }
+
+	}
+
+	close($SpeciesDB);
+    
+    }
+
+
+    # This is it, baby!
+    return (\@SpeciesDBNames,$MinorSpeciesDBName,\@SpecThreadCounts,\@SpecFamBreaks);
+
 }
 
 
@@ -1149,18 +1536,18 @@ sub CoverMinorSpecies
 	$MajorSpecies{$Species[$i]} = 1;
     }
     
-    # Grab the name of the protein database
+    # Grab the name of the database we're interested in looking through
     my $DBname = shift;
 
     # How many species were there to start with?
     my $num_species = shift;
     my %SpeciesIDs;
 
-    # Grab a reference to the gene hash.  Keep in mind that the
+    # Grab a reference to the group hash.  Keep in mind that the
     # values stored in this hash are (species_index,number_of_isoforms)
     # pairs
-    my $genehashRef    = shift;
-    my %GenesBySpecies = %{$genehashRef};
+    my $grouphashRef    = shift;
+    my %GroupsBySpecies = %{$grouphashRef};
 
     # The name of the results directory
     my $speciesDir = shift;
@@ -1170,8 +1557,8 @@ sub CoverMinorSpecies
     my $MultiMSAref = shift;
     my %MultiMSADir = %{$MultiMSAref};
 
-    # A temporary "GenesBySpecies"-like hash
-    my %MinorGenesBySpecies;
+    # A temporary "GroupsBySpecies"-like hash
+    my %MinorGroupsBySpecies;
     
     # Scan along the protein database and record any sequences that don't
     # belong to one of the major species.  It would be nice if this could
@@ -1187,7 +1574,7 @@ sub CoverMinorSpecies
     while (!eof($DB)) {
 	
 	# Go to the start of the next sequence
-	while (!eof($DB) && $line !~ /\>GN\:([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)/) {
+	while (!eof($DB) && $line !~ /^\>/) { # "GN:" EXCISION
 	    $line = readline($DB);
 	    $line =~ s/\r|\n//g;
 	}
@@ -1197,9 +1584,14 @@ sub CoverMinorSpecies
 	
 	# Not yet we ain't! Grab the species name
 	my $header = $line;
-	$line =~ /\>GN\:([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)/;
+	$line =~ /^\>([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|(\S*\|)?([^\|\s]+)\s*$/; # "GN:" EXCISION
+
+	if (!$6) { print ">>> $line\n"; }
+	
 	my $gene    = uc($1);
 	my $species = lc($3);
+	my $groupID = lc($6);
+
 	if (!$MajorSpecies{$species}) {
 	    
 	    # Hot diggity! We got ourselves a minor species!
@@ -1220,33 +1612,35 @@ sub CoverMinorSpecies
 	    open(my $tempfile,'>',$tempfilename);
 	    print $tempfile "$line\n";
 	    $line = readline($DB);
-	    while (!eof($DB) && $line !~ /\>GN\:([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)/) {
+	    while ($line !~ /\>/) {
 		print $tempfile "$line";
+		last if (eof($DB));
 		$line = readline($DB);
 	    }
 	    print $tempfile "\n";
 	    close($tempfile);
 	    
-	    # Have we hit on any other genes for this species?
-	    if ($MinorGenesBySpecies{$gene.'#'.$species}) { 
+	    # Have we hit on any other groups for this species?
+	    if ($MinorGroupsBySpecies{$groupID.'#'.$species}) { 
 
 		# Need to get all Needleman-Wunschy about it
-		my $NWcmd = './src/MultiSeqNW '.$tempfilename.' 1 '."'$speciesDir/$species/$gene.afa' ";
-		$NWcmd    = $NWcmd.$MinorGenesBySpecies{$gene.'#'.$species};
+		my $NWcmd = $location.'MultiSeqNW '.$tempfilename.' 1 '."'$speciesDir/$species/$groupID.afa' ";
+		$NWcmd    = $NWcmd.$MinorGroupsBySpecies{$groupID.'#'.$species};
 		$NWcmd    = $NWcmd.' > '.$tempresults;
+		if ($location !~ /^\//) { $NWcmd = './'.$NWcmd; }
 		if (system($NWcmd)) { die "\n  Failed to align non-indexed sequence '$header'\n\n"; }
 
 		# Transfer the results
-		my $mvCmd = "mv $tempresults '$speciesDir/$species/$gene.afa'";
-		if (system($mvCmd)) { die "\n  Failed to move '$tempfilename' to '$speciesDir/$species/$gene.afa'\n\n"; }
-		$MinorGenesBySpecies{$gene.'#'.$species}++; 
+		my $mvCmd = "mv $tempresults '$speciesDir/$species/$groupID.afa'";
+		if (system($mvCmd)) { die "\n  Failed to move '$tempfilename' to '$speciesDir/$species/$groupID.afa'\n\n"; }
+		$MinorGroupsBySpecies{$groupID.'#'.$species}++; 
 
 	    } else { 
 
 		# Free pass!
-		my $mvCmd = "mv $tempfilename '$speciesDir/$species/$gene.afa'";
-		if (system($mvCmd)) { die "\n  Failed to move '$tempfilename' to '$speciesDir/$species/$gene.afa'\n\n"; }
-		$MinorGenesBySpecies{$gene.'#'.$species} = 1;
+		my $mvCmd = "mv $tempfilename '$speciesDir/$species/$groupID.afa'";
+		if (system($mvCmd)) { die "\n  Failed to move '$tempfilename' to '$speciesDir/$species/$groupID.afa'\n\n"; }
+		$MinorGroupsBySpecies{$groupID.'#'.$species} = 1;
 
 	    }
 
@@ -1267,21 +1661,21 @@ sub CoverMinorSpecies
     
     # NOW that we've logged all these fun new species, let's make sure they
     # make it onto our big datastructures
-    foreach my $pair (keys %MinorGenesBySpecies) {
+    foreach my $pair (keys %MinorGroupsBySpecies) {
 	my @asArray  = split('#',$pair);
 	my $filename = $asArray[0].'.afa';
-	if ($GenesBySpecies{$filename}) {
-	    push(@{$GenesBySpecies{$filename}},$SpeciesIDs{$asArray[1]}+1);
-	    push(@{$GenesBySpecies{$filename}},$MinorGenesBySpecies{$pair});
+	if ($GroupsBySpecies{$filename}) {
+	    push(@{$GroupsBySpecies{$filename}},$SpeciesIDs{$asArray[1]}+1);
+	    push(@{$GroupsBySpecies{$filename}},$MinorGroupsBySpecies{$pair});
 	} else {
-	    ${$GenesBySpecies{$filename}}[0] = $SpeciesIDs{$asArray[1]}+1;
-	    ${$GenesBySpecies{$filename}}[1] = $MinorGenesBySpecies{$pair};
+	    ${$GroupsBySpecies{$filename}}[0] = $SpeciesIDs{$asArray[1]}+1;
+	    ${$GroupsBySpecies{$filename}}[1] = $MinorGroupsBySpecies{$pair};
 	}
     }
 
 
     # Return the minor species
-    return (\@Species,$numSpecies,\%GenesBySpecies,\%MultiMSADir);
+    return (\@Species,$numSpecies,\%GroupsBySpecies,\%MultiMSADir);
     
     
 }
@@ -1295,7 +1689,7 @@ sub CoverMinorSpecies
 # Function Name: AttachSeqToMSA
 #
 # About: This function attaches a single sequence to an MSA, and is
-#        used to handle cases where neither FindDiagonals nor SPALN
+#        used to handle cases where neither FastMap nor SPALN
 #        are able to identify a correct alignment of the sequence to
 #        the genome.
 #
@@ -1306,23 +1700,23 @@ sub AttachSeqToMSA
 
     my $seqname   = shift;
     my $MSADir    = shift;
-    my $genename  = shift;
+    my $groupname = shift;
     my $ProteinDB = shift;
 
-    # As a reminder, GenesBySpecies is a hash of arrays of
+    # As a reminder, GroupsBySpecies is a hash of arrays of
     # pairs where the first item is a numeric value (indicating
     # index into Species array) and the second item is the number
-    # of isoforms for the given gene (the hash key).
-    my $GBSref         = shift;
-    my %GenesBySpecies = %{$GBSref};
-    my $species_index  = shift;
+    # of isoforms for the given group name (the hash key).
+    my $GBSref          = shift;
+    my %GroupsBySpecies = %{$GBSref};
+    my $species_index   = shift;
 
     # First, let's grab a hold of the missed sequence
     my $seqfilename  = shift;
     my $resultsname  = shift;
     my $origseq = $seqname;
     $origseq =~ s/^\>|\s//g;
-    my $eslsfetchCmd = "esl-sfetch -o '$seqfilename' $ProteinDB '$origseq' > /dev/null 2>\&1";
+    my $eslsfetchCmd = $eslsfetch." -o \"$seqfilename\" \"$ProteinDB\" \"$origseq\" > /dev/null 2>\&1";
     
     
     # run it!
@@ -1330,39 +1724,40 @@ sub AttachSeqToMSA
 
 
     # Now we're ready to join this sequence to the MSA (if there is one!!!)
-    my $baseMSAfile = $MSADir.'/'.$genename.'.afa';
+    my $baseMSAfile = $MSADir.'/'.$groupname.'.afa';
     if (-s $baseMSAfile) {
 
 	# How many seq.s are in the existing MSA?
 	$i = 0;
-	while (${$GenesBySpecies{$genename.'.afa'}}[$i] 
-	       && ${$GenesBySpecies{$genename.'.afa'}}[$i] != $species_index) {
+	while (${$GroupsBySpecies{$groupname.'.afa'}}[$i] 
+	       && ${$GroupsBySpecies{$groupname.'.afa'}}[$i] != $species_index) {
 	    $i += 2;
 	}
 
-	# If we haven't shot over the edge (i.e., exhausted known species with this gene), 
+	# If we haven't shot over the edge (i.e., exhausted known species with this group), 
 	# then we're appending
-	if (${$GenesBySpecies{$genename.'.afa'}}[$i]) {
+	if (${$GroupsBySpecies{$groupname.'.afa'}}[$i]) {
 	    
-	    my $num_isos = ${$GenesBySpecies{$genename.'.afa'}}[$i+1];
+	    my $num_isos = ${$GroupsBySpecies{$groupname.'.afa'}}[$i+1];
 	    
 	    if ($num_isos == 0) { # Final special check, I promise
 
 		# We just call this our MSA, and make a note of it in our hash
 		system("mv '$seqfilename' '$baseMSAfile'");
-		${$GenesBySpecies{$genename.'.afa'}}[$i+1] = 1;
+		${$GroupsBySpecies{$groupname.'.afa'}}[$i+1] = 1;
 
 	    } else {
 
 		# Compose and run that daaaaang command!
-		my $alignCmd = "./src/MultiSeqNW '".$seqfilename."' 1 '".$baseMSAfile."' ".$num_isos;
+		my $alignCmd = $location."MultiSeqNW '".$seqfilename."' 1 '".$baseMSAfile."' ".$num_isos;
 		$alignCmd    = $alignCmd.' -igBase 0';
 		$alignCmd    = $alignCmd." > '".$resultsname."'";
-		if (system($alignCmd)) { die "  *  ERROR: Alignment of missing sequence '$origseq' to MSA failed\n\n"; }
+		if ($location !~ /^\//) { $alignCmd = './'.$alignCmd; }
+		if (system($alignCmd)) { die "  *  ERROR: Alignment of missing sequence '$origseq' to MSA failed ($alignCmd)\n\n"; }
 		
 		# Move the results and count this sequence
 		system("mv $resultsname '$baseMSAfile'");
-		${$GenesBySpecies{$genename.'.afa'}}[$i+1] = $num_isos+1;
+		${$GroupsBySpecies{$groupname.'.afa'}}[$i+1] = $num_isos+1;
 
 	    }		
 
@@ -1370,8 +1765,8 @@ sub AttachSeqToMSA
 
 	    # We just call this our MSA, and make a note of it in our hash
 	    system("mv '$seqfilename' '$baseMSAfile'");
-	    push(@{$GenesBySpecies{$genename.'.afa'}},$species_index);
-	    push(@{$GenesBySpecies{$genename.'.afa'}},1);
+	    push(@{$GroupsBySpecies{$groupname.'.afa'}},$species_index);
+	    push(@{$GroupsBySpecies{$groupname.'.afa'}},1);
 
 	}
 
@@ -1379,12 +1774,12 @@ sub AttachSeqToMSA
 	
 	# We just call this our MSA, and make a note of it in our hash
 	system("mv '$seqfilename' '$baseMSAfile'");
-	push(@{$GenesBySpecies{$genename.'.afa'}},$species_index);
-	push(@{$GenesBySpecies{$genename.'.afa'}},1);
+	push(@{$GroupsBySpecies{$groupname.'.afa'}},$species_index);
+	push(@{$GroupsBySpecies{$groupname.'.afa'}},1);
 
     }
     
     # Consider your hash updated!
-    return \%GenesBySpecies;
+    return \%GroupsBySpecies;
     
 }

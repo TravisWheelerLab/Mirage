@@ -3,7 +3,7 @@
  * USAGE:  N/A
  *
  * ABOUT:  This file contains a handful of simple functions used
- *         by "FindDiagonals."
+ *         by "FastMap."
  *
  */
 #include <math.h>
@@ -43,15 +43,17 @@ InitDiagonals
   j = 0;
 
   capacity = 32; // This should be plenty of capacity, since we're starting 2 in
-  if ((diags->diagonal_starts = malloc(capacity * sizeof(int))) == NULL) return NULL;
-  if ((diags->diagonal_scores = malloc(capacity * sizeof(int))) == NULL) return NULL;
+  if ((diags->diagonal_starts  = malloc(capacity * sizeof(int))) == NULL) return NULL;
+  if ((diags->diagonal_scores  = malloc(capacity * sizeof(int))) == NULL) return NULL;
+  if ((diags->diagonal_strikes = malloc(capacity * sizeof(int))) == NULL) return NULL;
 
   for (i=diag_length-1; i<seq_length; i++) {
 
     if (diag_scores[i] > start_threshold) {    
       
-      diags->diagonal_starts[j] = i-1;
-      diags->diagonal_scores[j] = diag_scores[i];
+      diags->diagonal_starts[j]  = i-1;
+      diags->diagonal_scores[j]  = diag_scores[i];
+      diags->diagonal_strikes[j] = 0;
       j++;
       
       // Hopefully we won't need to resize, but just in case
@@ -63,6 +65,9 @@ InitDiagonals
 	  return NULL;
 	
 	if ((diags->diagonal_scores = realloc(diags->diagonal_scores,capacity*sizeof(int))) == NULL) 
+	  return NULL;
+
+	if ((diags->diagonal_strikes = realloc(diags->diagonal_strikes,capacity*sizeof(int))) == NULL) 
 	  return NULL;
 
       }
@@ -92,6 +97,7 @@ DestroyDiagonals
 {
   free(diags->diagonal_starts);
   free(diags->diagonal_scores);
+  free(diags->diagonal_strikes);
 }
 
 

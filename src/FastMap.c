@@ -1,6 +1,6 @@
-/* FindDiagonals.c - Alex Nord - 2016
+/* FastMap.c - Alex Nord - 2016
  *
- * USAGE:  ./FindDiagonals <protein.fa> <dna.fa> [-debug]
+ * USAGE:  ./FastMap <protein.fa> <dna.fa> [-debug]
  *
  * ABOUT:  This program takes a file containing a protein sequence
  *         and a file containing a DNA sequence (both FASTA-format)
@@ -41,18 +41,26 @@ FindDiagonals
  char * Protein,
  int    ProtLength,
  char * NuclString,
- int    NuclLength,
+ int    start_index,
+ int    end_index,
  int    start_offset,
  int    debug
 )
 {
   int i,j,k;
 
-  // Calculate whether our current offset cuts a little something off the end
-  int end_offset  = (NuclLength - start_offset) % 3;
+  // How long is our start-end run?
+  int nucl_length = (end_index - start_index) + 1;
+
+  // Calculate whether our current offset cuts a little something off the end  
+  int end_offset = (nucl_length - start_offset) % 3;
+
+  // Figure out where our "true" start and end positions are
+  int true_start_index = start_index + start_offset;
+  int true_end_index   = end_index - end_offset;
 
   // What will be the length of the translated string (barring stop codons)?
-  int TransLength = ((NuclLength - start_offset) - end_offset);
+  int TransLength = ((nucl_length - start_offset) - end_offset);
   if (TransLength % 3) printf("\n\tWARNING: NON-DIVISIBLE TRANSLATION!\n\n"); // Sanity check
   TransLength /= 3;
 
@@ -64,7 +72,7 @@ FindDiagonals
       return 1;
     }
     for (i=0; i<start_offset; i++)
-      start_nucls[i] = NuclString[i];
+      start_nucls[i] = NuclString[start_index+i];
   }
   
   // Record any ending offset characters
@@ -75,7 +83,7 @@ FindDiagonals
       return 1;
     }
     for (i=0; i<end_offset; i++)
-      end_nucls[i] = NuclString[start_offset+(3*TransLength)+i];
+      end_nucls[i] = NuclString[true_start_index+(3*TransLength)+i];
   }
   
   // Allocate some space for the translated sequence
@@ -89,12 +97,14 @@ FindDiagonals
   // codons and weirdness.
   j = 0;
   int stop_coded = 0;
-  for (i=start_offset; i<NuclLength-end_offset; i += 3) {
+  for (i=true_start_index; i<true_end_index; i += 3) {
 
     // Convert the next triple
     Translation[j] = DNAtoAA(NuclString[i],NuclString[i+1],NuclString[i+2]);
 
     if (Translation[j] == 0) {  // ERROR! Unrecognized triple
+
+      /* -- OLD STUFF
       printf("  ERROR: String '");
       printf("%c",NuclString[i]);
       printf("%c",NuclString[i+1]);
@@ -104,6 +114,14 @@ FindDiagonals
       if (end_nucls)   free(end_nucls);      
       free(Translation);
       return 1;
+      */
+
+      // We'll piggy-back off the old machinery and say that there weren't
+      // any hits (this is now our catch for non-ACGT characters in a coding
+      // region.
+      TransLength = 0;
+      break;
+
     }
 
     if (Translation[j] == 'x') { // STOP CODON! (more like 'codoff', am I right?)      
@@ -223,36 +241,46 @@ FindDiagonals
       //  Note that we don't adjust memory, but just shift things we're still
       //  interested in down towards the start of the list, and ignore anything
       //  low-scoring.
-      int pos,score;
+      int pos,net_score,match_score;
       for (j=2; j<TransLength; j++) {
 	k = 0;
 	for (i=0; i<Diags->num_diagonals; i++) {
 	  pos = Diags->diagonal_starts[i]+j;
 	  if (pos < ProtLength) {
-	    score = Diags->diagonal_scores[i] + CalcScore(Protein[pos],Translation[j]);
-	    if (score > 0) {
-	      if (pos < ProtLength-1) {    // Regular old extension
-		
-		Diags->diagonal_starts[k] = pos-j;
-		Diags->diagonal_scores[k] = score;
-		k++;
-		
-	      } else {                     // Somebody capped out
-		
-		TerminalStarts[numTerms] = pos-j;
-		TerminalScores[numTerms] = score;
-		numTerms++;
-		
-		if (numTerms == termCap) { // Somebody capped out the capout cap! (out)
+
+	    match_score = CalcScore(Protein[pos],Translation[j]);
+	    if (match_score < 0) { Diags->diagonal_strikes[i]++; }
+
+	    // Any hits that have two mismatches or a zero net score get canned
+	    if (Diags->diagonal_strikes[i] < 2) {
+
+	      net_score = Diags->diagonal_scores[i] + match_score;
+
+	      if (net_score > 0) {
+		if (pos < ProtLength-1) {    // Regular old extension
 		  
-		  termCap *= 2;
+		  Diags->diagonal_starts[k]  = pos-j;
+		  Diags->diagonal_scores[k]  = net_score;
+		  Diags->diagonal_strikes[k] = Diags->diagonal_strikes[i];
+		  k++;
 		  
-		  if ((TerminalStarts = realloc(TerminalStarts,termCap*sizeof(int))) == NULL)
-		    return 1;
+		} else {                     // Somebody capped out
 		  
-		  if ((TerminalScores = realloc(TerminalScores,termCap*sizeof(int))) == NULL)
-		    return 1;
+		  TerminalStarts[numTerms] = pos-j;
+		  TerminalScores[numTerms] = net_score;
+		  numTerms++;
 		  
+		  if (numTerms == termCap) { // Somebody capped out the capout cap! (out)
+		    
+		    termCap *= 2;
+		    
+		    if ((TerminalStarts = realloc(TerminalStarts,termCap*sizeof(int))) == NULL)
+		      return 1;
+		    
+		    if ((TerminalScores = realloc(TerminalScores,termCap*sizeof(int))) == NULL)
+		      return 1;
+		    
+		  }
 		}
 	      }
 	    }
@@ -386,7 +414,7 @@ FindDiagonals
 int PrintUsageMsg ()
 {
   printf("\n\n");
-  printf("\tUSAGE:  ./FindDiagonals  <protein file>  <DNA file>  [-debug]\n\n");
+  printf("\tUSAGE:  ./FastMap  <protein file>  <DNA file>  <DNA length>  <Num Exons>  {  <start> <end>  }  [-debug]\n\n");
   printf("\tABOUT:  This program performs a rapid pseudo-Smith-Waterman on a\n");
   printf("\t        protein sequence and a translated DNA sequence where only\n");
   printf("\t        diagonals (match states) are considered.\n");
@@ -404,14 +432,21 @@ int PrintUsageMsg ()
 int main (int argc, char ** argv) 
 {
 
-  // In case the user seems confused
-  if (argc < 3 || (argc == 4 && strcmp(argv[3],"-debug")) || argc > 4) 
+  // In case the user seems confused (actual usage should be quite a bit longer)
+  if (argc < 5)
     return PrintUsageMsg();
 
+  // Grab the number of exon index PAIRS (so the number of indices we grab should
+  // be double this)
+  int num_exon_index_pairs = atoi(argv[4]);
+  if (5+(2*num_exon_index_pairs) != argc)
+    return PrintUsageMsg();
+  
+  
   // In case the user's a human
   int debug = 0;
-  if (argc == 4) debug = 1;
-  
+  //if (argc == ) debug = 1; <<-- NEEDS TO BE RE-WORKED FOR INDEX-PAIR INPUT
+
   int i,j,k;
 
   // Open the protein FASTA file
@@ -451,7 +486,7 @@ int main (int argc, char ** argv)
     fscanf(protfile,"%s\n",next_line);
     i = 0;    
 
-    while (next_line[i] > 32) {      
+    while (next_line[i] > 32) {
 
       Protein[ProtLength] = next_line[i];
       ProtLength++;
@@ -488,9 +523,11 @@ int main (int argc, char ** argv)
   // we eat the header line char by char.
   while (fgetc(nuclfile) >= 32);
   
-  // Prep the DNA string
+  // Prep the DNA string -- NOTE that we expect this to be pretty gall-darn
+  // huge, since it should encapsulate the entire range of a given gene's
+  // coding region.
   int NuclLength = 0;
-  capacity = 512;
+  capacity = atoi(argv[3])+1;
   char * NuclString;
   if ((NuclString = malloc(capacity*sizeof(char))) == NULL) {
     printf("  ERROR:  Could not allocate string 'NuclString'!\n");
@@ -501,18 +538,37 @@ int main (int argc, char ** argv)
   }
   
   // Rip that DNA file!
+  char nonacgt = 0;
+  char next_char;
   while (!feof(nuclfile)) {    
     fscanf(nuclfile,"%s\n",next_line);
     i = 0;
     while (next_line[i] > 32) {
 
-      NuclString[NuclLength] = next_line[i];
+      next_char = next_line[i];
+      
+      // Make sure that this is a valid DNA character (canonical)
+      if (next_char < 97) {
+	if (next_char != 'A' && next_char != 'C' && next_char != 'G' && next_char != 'T')
+	  nonacgt = 1;
+      } else {
+	if (next_char != 'a' && next_char != 'c' && next_char != 'g' && next_char != 't')
+	  nonacgt = 1;
+      }
+      if (nonacgt) break;
+      
+      NuclString[NuclLength] = next_char;
       NuclLength++;
       i++;
 
       if (NuclLength == capacity) {	
 
-	capacity *= 2;
+	// 2018/02/26 -- We shouldn't need to realloc now that FD is being passed the length
+	//               of the nucleotide sequence by Quilter
+	printf("  ERROR:  Why are you realloc-ing? (%d)\n",capacity);
+	return 1;
+
+	capacity += 100000; // Time for another dose of vitamin 100 KB!
 	
 	if ((NuclString = realloc(NuclString,capacity*sizeof(char))) == NULL) {
 	  printf("  ERROR:  Failed to reallocate string 'NuclString'!\n");
@@ -524,12 +580,33 @@ int main (int argc, char ** argv)
 
       }
     }
+
+    if (nonacgt) break;
+
   }
 
   fclose(nuclfile);
-  
+
   // No longer need next_line
   if (next_line) free(next_line);
+
+  // If we found a non-ACGT character then we'll need to trick Quilter
+  // into thinking it's already read through offsets 0, 1, and 2...
+  //
+  // NOTE :  We're changing this, since we might have some non-acgt
+  //         characters in the coding region, but not in the exonic
+  //         sequences.  Instead of giving up on the whole dang thing,
+  //         we'll just need to return an automatic "no-hitter" for
+  //         exons that have non-acgt characters.
+  //
+  /*
+  if (nonacgt) {
+    free(Protein);
+    free(NuclString);
+    printf("3\n");
+    return 0;
+  }
+  */
   
   // If we're debugging, we want to make sure that we read the files in correctly
   if (debug) {
@@ -539,21 +616,27 @@ int main (int argc, char ** argv)
     printf("\n");
   }
 
+  // Iterate over all of our fun little exon friends.
+  for (i=0; i<num_exon_index_pairs; i++) {
 
-  // For offsets 0, 1, and 2, find all high-scoring diagonals
-  if (FindDiagonals(Protein,ProtLength,NuclString,NuclLength,0,debug)) {
-    printf("\n\tFAILURE at search 1\n\n");
-    return 1;
-  }
-  if (FindDiagonals(Protein,ProtLength,NuclString,NuclLength,1,debug)) {
-    printf("\n\tFAILURE at search 2\n\n");
-    return 1;
-  }
-  if (FindDiagonals(Protein,ProtLength,NuclString,NuclLength,2,debug)) {
-    printf("\n\tFAILURE at search 3\n\n");
-    return 1;
-  }
+    int start_index = atoi(argv[5+(2*i)]);
+    int end_index   = atoi(argv[6+(2*i)]);
 
+    // For offsets 0, 1, and 2, find all high-scoring diagonals
+    if (FindDiagonals(Protein,ProtLength,NuclString,start_index,end_index,0,debug)) {
+      printf("\n\tFAILURE at search 1\n\n");
+      return 1;
+    }
+    if (FindDiagonals(Protein,ProtLength,NuclString,start_index,end_index,1,debug)) {
+      printf("\n\tFAILURE at search 2\n\n");
+      return 1;
+    }
+    if (FindDiagonals(Protein,ProtLength,NuclString,start_index,end_index,2,debug)) {
+      printf("\n\tFAILURE at search 3\n\n");
+      return 1;
+    }
+    
+  }
 
   // Get outta here, you rascals!
   free(Protein);
