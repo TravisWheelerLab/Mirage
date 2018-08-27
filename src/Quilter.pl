@@ -26,7 +26,7 @@ sub GetStopPoints;
 sub BuildGeneIndex;
 sub AddExon;
 sub GetChromosomeLengths;
-sub RunFastDiagonals;
+sub RunFastMap;
 sub FindFullAlignments;
 sub ListCodonCenters;
 sub ExonAssistedSPALN;
@@ -157,9 +157,9 @@ my ($timeA,$timeB);
 if ($timing) {
     # The most-importantest stuff
     $TimingData[0]  = [Time::HiRes::gettimeofday()]; ###### START
-    $TimingData[1]  = 0.0; # Sum of FastDiagonals-associated times
-    $TimingData[2]  = 0.0; # Sum of FastDiagonals system (only) times
-    $TimingData[3]  = 0;   # Number of FastDiagonals system calls
+    $TimingData[1]  = 0.0; # Sum of FastMap-associated times
+    $TimingData[2]  = 0.0; # Sum of FastMap system (only) times
+    $TimingData[3]  = 0;   # Number of FastMap system calls
     $TimingData[4]  = 0.0; # Sum of SPALN-associated times
     $TimingData[5]  = 0.0; # Sum of SPALN system (only) times
     $TimingData[6]  = 0;   # Number of SPALN system calls
@@ -340,8 +340,8 @@ open(my $MissFile,'>',$missfilename);
 my @HitStats;
 $HitStats[0] = 0; # Not indexed
 $HitStats[1] = 0; # Wrong species
-$HitStats[2] = 0; # Indexed, but no hits from FastDiagonals.c
-$HitStats[3] = 0; # FastDiagonals.c gave us enough to score
+$HitStats[2] = 0; # Indexed, but no hits from FastMap.c
+$HitStats[3] = 0; # FastMap.c gave us enough to score
 $HitStats[4] = 0; # SPALN saves the day
 $HitStats[5] = 0; # Failure -- not enough to score
 $HitStats[6] = 0; # How many were just 1 or 2 end AAs off?
@@ -416,7 +416,7 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
     }
 
     
-    # We write each isoform to a file, which is then passed to FastDiagonals.
+    # We write each isoform to a file, which is then passed to FastMap.
     # We'll also hold onto a copy of the protein sequence for later reference.
     #
     # Because gene families should be clustered within species,
@@ -540,7 +540,7 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 	    }
 	    
 
-	    # Time how long we're playing in the land of Fast Diagonals
+	    # Time how long we're playing in the land of FastMap
 	    $timeA = [Time::HiRes::gettimeofday()] if ($timing && !$noFD);
 
 
@@ -606,13 +606,13 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 		
 		# Generate a new exon object
 		for ($i=0; $i<$num_gene_seqs; $i++) {
-		    RunFastDiagonals(\$Chromosomes[$i],$ProtFileNames[$i],$nuclfilename,
-				     $ProtSeqLengths[$i],$start,$end,$revcomp,
-				     $gene_index_list,$timing,\@TimingData,
-				     $debug);
+		    RunFastMap(\$Chromosomes[$i],$ProtFileNames[$i],$nuclfilename,
+			       $ProtSeqLengths[$i],$start,$end,$revcomp,
+			       $gene_index_list,$timing,\@TimingData,
+			       $debug);
 		}
 		
-	    } else { # We're just going to go ahead and skip FastDiagonals and locate the plausible coding range
+	    } else { # We're just going to go ahead and skip FastMap and locate the plausible coding range
 
 		for ($i=0; $i<$num_gene_seqs; $i++) {
 		    
@@ -1091,7 +1091,7 @@ if ($verbose) {
     print "           : Not Indexed   : $HitStats[0]\n";
     print "           : Wrong Species : $HitStats[1]\n";
     print "           : No Diagonals  : $HitStats[2]\n";
-    print "           : Fast Score    : $HitStats[3]\n";
+    print "           : FastMap Score : $HitStats[3]\n";
     print "           : (close shave) : $HitStats[6]\n";
     print "           : SPALN Score   : $HitStats[4]\n";
     print "           : BLAT Helped   : $HitStats[7]\n";
@@ -1126,9 +1126,9 @@ if ($timing) {
     print "\n";
     print "      Time to build index...... : $TimingData[12] seconds\n";
     print "\n";
-    print "    * Time associated with FastDiagonals..... : $TimingData[1] seconds\n";
-    print "    * System time spent running FastDiagonals : $TimingData[2] seconds\n";
-    print "    * Number of FastDiagonals system calls... : $TimingData[3]\n";
+    print "    * Time associated with FastMap..... : $TimingData[1] seconds\n";
+    print "    * System time spent running FastMap : $TimingData[2] seconds\n";
+    print "    * Number of FastMap system calls... : $TimingData[3]\n";
     print "\n";
     print "    * Time associated with SPALN (non-BLAT)..... : $TimingData[4] seconds\n";
     print "    * System time spent running SPALN (non-BLAT) : $TimingData[5] seconds\n";
@@ -1701,15 +1701,15 @@ sub GetChromosomeLengths
 
 #########################################################################
 #
-#  Function Name: RunFastDiagonals
+#  Function Name: RunFastMap
 #
-#  About: RunFastDiagonals performs the system call to search the protein
+#  About: RunFastMap performs the system call to search the protein
 #         against some section of the genome (the particulars of this 'section'
 #         corresponds to some entry in the .gtf index).  It then uses the
 #         output of the program to add to our current archive of hits for
 #         this particular gene and chromosome.         
 #
-sub RunFastDiagonals
+sub RunFastMap
 {
 
     # Get reference to the 'DiagonalSet' object and lock it down
@@ -1744,10 +1744,10 @@ sub RunFastDiagonals
     # Record how many diagonals each protein sequence has
     my $diagNum = 0;
 
-    # PRINT THAT SUPER-FLY FastDiagonals.c DEBUGGING OUTPUT
-    # If we want to peek at how FastDiagonals is doing, we can run it in debug mode,
+    # PRINT THAT SUPER-FLY FastMap.c DEBUGGING OUTPUT
+    # If we want to peek at how FastMap is doing, we can run it in debug mode,
     # SEPARATELY from running it in parsable-format
-    #if ($debug && system("\.\/FastDiagonals $protfile $nuclfile \-debug")) { die "\n\tFastDiagonals failed\n\n"; }
+    #if ($debug && system("\.\/FastMap $protfile $nuclfile \-debug")) { die "\n\tFastMap failed\n\n"; }
 
     # Break our list of gene index entries into a proper list
     my @TrueIndexList  = split(/\,/,$gene_index_list);
@@ -1774,23 +1774,23 @@ sub RunFastDiagonals
     
     my $nucl_seq_len = abs($RegionStart-$RegionEnd)+1;
 
-    # Construct our FastDiagonals command
-    my $FDcmd = $location.'FastDiagonals "'.$protfile.'" "'.$nuclfile.'" ';
+    # Construct our FastMap command
+    my $FDcmd = $location.'FastMap "'.$protfile.'" "'.$nuclfile.'" ';
     $FDcmd    = $FDcmd.' '.$nucl_seq_len.' '.$gene_index_len;
     foreach my $relative_pos (@RelativeList) { $FDcmd = $FDcmd.' '.$relative_pos; }
     $FDcmd    = $FDcmd.' |';
     if ($location !~ /^\//) { $FDcmd = './'.$FDcmd; }
 
-    # Run FastDiagonals
+    # Run FastMap
     $timeA = [Time::HiRes::gettimeofday()] if ($timing);
-    open(my $stdoutput,$FDcmd) || die "\n\tFastDiagonals failed (command: FDcmd)\n\n";
+    open(my $stdoutput,$FDcmd) || die "\n\tFastMap failed (command: FDcmd)\n\n";
     if ($timing) {
 	@{$timingdata}[2] += Time::HiRes::tv_interval($timeA);
 	@{$timingdata}[3]++;
     }
 
     # We should be able to just iterate over our IndexList entries,
-    # thanks to the way that FastDiagonals provides output...
+    # thanks to the way that FastMap provides output...
     foreach my $index_entry (@TrueIndexList) {
 
 	$index_entry  =~ /(\d+)\-(\d+)/;
@@ -2189,7 +2189,7 @@ sub FindFullAlignments
 
     # Put everything together in a nice string and pass on up the chain of command!
     my $hitstring = "Isoform ID : $seqname\n";
-    $hitstring    = $hitstring."Method     : FastDiagonals\n";
+    $hitstring    = $hitstring."Method     : FastMap\n";
     $hitstring    = $hitstring."Chromosome : $Chromosome->{ChrName}\n";
     $hitstring    = $hitstring."Match Pos.s: $FinalList\n\n";
     

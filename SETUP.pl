@@ -52,7 +52,7 @@ my @srcFiles;
 push(@srcFiles,'src/makefile');
 push(@srcFiles,'src/Diagonals.c');
 push(@srcFiles,'src/Diagonals.h');
-push(@srcFiles,'src/FastDiagonals.c');
+push(@srcFiles,'src/FastMap.c');
 push(@srcFiles,'src/TransSW.c');
 push(@srcFiles,'src/MultiSeqNW.c');
 push(@srcFiles,'src/MultiSeqNW.h');

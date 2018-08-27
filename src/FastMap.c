@@ -1,6 +1,6 @@
-/* FastDiagonals.c - Alex Nord - 2016
+/* FastMap.c - Alex Nord - 2016
  *
- * USAGE:  ./FastDiagonals <protein.fa> <dna.fa> [-debug]
+ * USAGE:  ./FastMap <protein.fa> <dna.fa> [-debug]
  *
  * ABOUT:  This program takes a file containing a protein sequence
  *         and a file containing a DNA sequence (both FASTA-format)
@@ -414,7 +414,7 @@ FindDiagonals
 int PrintUsageMsg ()
 {
   printf("\n\n");
-  printf("\tUSAGE:  ./FastDiagonals  <protein file>  <DNA file>  <DNA length>  <Num Exons>  {  <start> <end>  }  [-debug]\n\n");
+  printf("\tUSAGE:  ./FastMap  <protein file>  <DNA file>  <DNA length>  <Num Exons>  {  <start> <end>  }  [-debug]\n\n");
   printf("\tABOUT:  This program performs a rapid pseudo-Smith-Waterman on a\n");
   printf("\t        protein sequence and a translated DNA sequence where only\n");
   printf("\t        diagonals (match states) are considered.\n");

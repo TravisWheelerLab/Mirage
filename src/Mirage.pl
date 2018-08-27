@@ -944,7 +944,7 @@ sub CheckInstall
     my @RequiredFiles;
     push(@RequiredFiles,$location.'Quilter.pl');
     push(@RequiredFiles,$location.'DiagonalSets.pm');
-    push(@RequiredFiles,$location.'FastDiagonals.c');
+    push(@RequiredFiles,$location.'FastMap.c');
     push(@RequiredFiles,$location.'Diagonals.c');
     push(@RequiredFiles,$location.'Diagonals.h');
     push(@RequiredFiles,$location.'TransSW.c');
@@ -987,7 +987,7 @@ sub CheckSourceFiles
     push(@RequiredFiles,$location.'DiagonalSets.pm');
     push(@RequiredFiles,$location.'MultiMSA.pl');
     push(@RequiredFiles,$location.'FinalMSA.pl');
-    push(@RequiredFiles,$location.'FastDiagonals');
+    push(@RequiredFiles,$location.'FastMap');
     push(@RequiredFiles,$location.'TransSW');
     push(@RequiredFiles,$location.'MultiSeqNW');
 
@@ -1689,7 +1689,7 @@ sub CoverMinorSpecies
 # Function Name: AttachSeqToMSA
 #
 # About: This function attaches a single sequence to an MSA, and is
-#        used to handle cases where neither FastDiagonals nor SPALN
+#        used to handle cases where neither FastMap nor SPALN
 #        are able to identify a correct alignment of the sequence to
 #        the genome.
 #

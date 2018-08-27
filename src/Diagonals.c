@@ -3,7 +3,7 @@
  * USAGE:  N/A
  *
  * ABOUT:  This file contains a handful of simple functions used
- *         by "FastDiagonals."
+ *         by "FastMap."
  *
  */
 #include <math.h>
