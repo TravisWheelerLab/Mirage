@@ -21,6 +21,7 @@ use Cwd;
 
 sub PrintUsage;
 sub DetailedUsage;
+sub PrintVersion;
 sub CheckInstall;
 sub CheckSourceFiles;
 sub ParseArgs;
@@ -30,6 +31,9 @@ sub GenerateSpeciesDBs;
 sub CoverMinorSpecies;
 sub AttachSeqToMSA;
 
+
+# VERSION INFO
+my $mirage_version = 'Version 1.0.1';
 
 
 ##################
@@ -846,7 +850,7 @@ print "\n\n  All tasks complete.\n  Results in $FinalDir\n\n\n";
 sub PrintUsage
 {
     print "\n\n";
-    print " MIRAGE : Multiple-sequence Isoform Alignment Tool Guided by Exon Boundaries            \n\n";
+    print " MIRAGE : Multiple-sequence Isoform Alignment Tool Guided by Exon Boundaries ($mirage_version)\n\n";
     print " USAGE  : mirage [OPT.s] <Isoform DB>  <Species Guide>                                  \n\n";
     print " ARG.s  : <IsoformDB>     : A FASTA-formatted protein database, with the following      \n";
     print "                            naming convention:                                          \n\n";
@@ -883,6 +887,7 @@ sub DetailedUsage
     print " .-======-+--=-----------------=----=--=--------------=---------=---------------. \n";
     print " | MIRAGE :  Multiple-sequence Isoform Alignment Tool Guided by Exon Boundaries | \n";
     print " '-======-+--=-----------------=----=--=--------------=---------=---------------' \n";
+    print "  $mirage_version\n";
     print "                                                                                  \n";
     print "    USAGE :  mirage  [OPT.s]  <Isoform DB>  <Species Guide>                       \n";
     print "                                                                                  \n";
@@ -922,6 +927,18 @@ sub DetailedUsage
     print "             -cpus <int>          : Specify number of CPU cores (default: 2)      \n";
     die "\n\n\n";
 }
+
+
+
+
+
+########################################################################
+#
+# Function Name: PrintVersion
+#
+# About:  Print out the version of Mirage being used
+#
+sub PrintVersion { die "\n  Mirage $mirage_version\n\n"; }
 
 
 
@@ -1024,6 +1041,7 @@ sub ParseArgs
 	\%Options,
 	"help",
 	"check",
+	"version",
 	"outdirname=s",
 	"verbose",
 	"cpus=i",
@@ -1037,8 +1055,9 @@ sub ParseArgs
 
     # If the user just wants a little help, I don't think it's too
     # difficult to give them a hand
-    if ($Options{help})  { DetailedUsage(); }
-    if ($Options{check}) { CheckInstall();  }
+    if ($Options{help})    { DetailedUsage(); }
+    if ($Options{check})   { CheckInstall();  }
+    if ($Options{version}) { PrintVersion();  }
 
     # If we don't have the required files, give usage
     my $proteindb = $ARGV[0];

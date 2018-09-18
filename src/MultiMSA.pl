@@ -981,7 +981,8 @@ sub MinorClean
 	    $exon_end = $j;
 
 	    # A somewhat arbitrary selection, but whatever...
-	    if ($exon_conflicts > 4) {
+	    # NOTE:  Used to be 'if ($exon_conflicts > 4) {' if that's important...
+	    if ($exon_conflicts) {
 
 		# We know this exon is having some issues -- let's see if we can
 		# help out!
@@ -1026,7 +1027,7 @@ sub MinorClean
 
 ################################################################
 #
-# FUNCTION: SortOutExon
+# FUNCTION: ResolveExon
 #
 sub ResolveExon
 {
@@ -1055,6 +1056,19 @@ sub ResolveExon
 	my $region_end   = 0;
 	my $num_probs  = 0;
 
+	#
+	#  NOTE:  We'll start things off with a smarter approach where we check
+	#    the ends of gaps and try to make long jumps to accomodate our mismatched
+	#    characters.  If that doesn't work, we'll check if there are any single-
+	#    position shifts (into gaps) that will cover our booties.
+	#
+
+	###############
+	#             #
+	#  BIG JUMPS  #
+	#             #
+	###############
+	
 	#
 	# We'll start with a forward pass...
 	#
@@ -1170,6 +1184,131 @@ sub ResolveExon
 
     }
 
+    ################
+    #              #
+    #  LIL SCOOTS  #
+    #              #
+    ################
+
+    #
+    #  Here, what we'll do is just go sequence-by-sequence, and if
+    #  a sequence has a run of mismatches with any other sequences,
+    #  then we'll see if that run of mismatches can be resolved by a
+    #  single shift of the mismatching block to the right or left
+    #  into a gap (so that it now matches to *some* sequence).
+    #
+    #  NOTE:  This is, theoretically, a bad approach, but in practice
+    #  will cover a species of bug where we actually need to shift the
+    #  majority sequence to line up with the minority sequence.
+    #
+    #  EXAMPLE:
+    #              ABCD        ABCD
+    #              BCD-        -BCD
+    #              BCD-   ==>  -BCD
+    #              BCD-        -BCD
+    #              BCD-        -BCD
+    #
+
+
+    # We only need to do one pass -- find a run of mismatches, check for
+    # single moves that would resolve the whole run, and make it do the
+    # thing.
+
+    for (my $i=0; $i<$num_seqs; $i++) {
+
+	my $j=$start;
+	my $mismatch_run_start = 0;
+
+	while ($j < $end) {
+
+	    my $mismatch = 0;
+	    if ($MSA[$i][$j] ne '-') {
+		for (my $k=0; $k<$num_seqs; $k++) {
+		    $mismatch = 1 if ($MSA[$k][$j] ne '-' && lc($MSA[$k][$j]) ne lc($MSA[$i][$j]));
+		    last if ($mismatch);
+		}
+	    }
+	    
+	    if ($mismatch_run_start == 0 && $mismatch) {
+		$mismatch_run_start = $j;	
+	    } 
+
+	    # Note:  Need an extra little catch, just in case the mismatch extends
+	    # to the very end of the exon.
+	    if (($mismatch_run_start && $mismatch == 0) || ($mismatch_run_start && $j == $end-1)) {
+		
+		# OOOWEE, we got ourselves a mismatch run over here!
+
+		# Look backwards
+		my $moved_em_back = 0;
+		if ($MSA[$i][$mismatch_run_start-1] eq '-') {
+		    
+		    for (my $x=0; $x<$num_seqs; $x++) {
+			
+			next if ($x == $i);
+			
+			my $match = 1;
+			for (my $y=$mismatch_run_start; $y<$j; $y++) {
+			    if (uc($MSA[$x][$y-1]) ne uc($MSA[$i][$y])) {
+				$match = 0;
+				last;
+			    }
+			}
+			
+			# OOOOOOOOWEEEEEEEE! We're on the move!
+			if ($match) {
+			    for (my $y=$mismatch_run_start; $y<$j; $y++) {
+				$MSA[$i][$y-1] = $MSA[$i][$y];
+			    }
+			    $MSA[$i][$j-1] = '-';
+			    $moved_em_back = 1;
+			    last;
+			}
+			
+		    }
+		    
+		}
+		# Stop looking backwards
+		
+		# And start looking forwards
+		if (!$moved_em_back && $MSA[$i][$j] eq '-') {
+
+		    for (my $x=0; $x<$num_seqs; $x++) {
+			
+			next if ($x == $i);
+			
+			my $match = 1;
+			for (my $y=$mismatch_run_start; $y<$j; $y++) {
+			    if (uc($MSA[$x][$y+1]) ne uc($MSA[$i][$y])) {
+				$match = 0;
+				last;
+			    }
+			}
+			
+			# OOOOOOOOWEEEEEEEE! We're on the move!
+			if ($match) {
+			    for (my $y=$j; $y>$mismatch_run_start; $y--) {
+				$MSA[$i][$y] = $MSA[$i][$y-1];
+			    }
+			    $MSA[$i][$mismatch_run_start] = '-';
+			    last;
+			}
+			
+		    }
+		    
+		}
+		# Jeez, stop looking already
+		
+	    }
+
+	    $mismatch_run_start = 0 if ($mismatch == 0);
+	    $j++;
+
+	}
+
+    }
+    
+    
     # Pass back the (hopefully) resolved MSA
     return \@MSA;
 

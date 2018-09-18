@@ -133,7 +133,7 @@ if (system($MirageLink)) { die "\n  Failed to create symbolic link to src/run_mi
 # Now the only thing the user REALLY needs to do is make
 # sure that spaln is on their PATH.
 print "\n\n  Setup completed successfully!";
-print "\n\n  To complete installation add spaln and easel to your PATH\n";
+print "\n\n  To complete installation add mirage to your PATH\n";
 print "  (see README for assistance)\n\n";
 
 
