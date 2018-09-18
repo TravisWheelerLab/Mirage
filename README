@@ -67,7 +67,7 @@
   guide file directing the program to genomes and gtf indicies for each species
   being searched on.
 
-      $ perl mirage.pl  <Protein DB>  <Species Guide>
+      $ mirage <Protein DB> <Species Guide>
 
   It is expected that the names of the sequences in the protein database will
   begin with 'GN:' and will be followed by the following fields, in order and
