@@ -1012,12 +1012,17 @@ sub MinorClean
 
     # FINALLY do a pass to see which columns are still disagreeing
     my @Disagreements;
+    my $final_len = 0;
     for (my $j=0; $j<$msa_len; $j++) {
 	my ($num_chars,$top_char,$top_char_count) = CheckColumnProfile(\@MSA,$num_seqs,$j,-1,0);
-	push(@Disagreements,$j) if ($num_chars > 1);
+	if ($num_chars) {
+	    for (my $i=0; $i<$num_seqs; $i++) { $MSA[$i][$final_len] = $MSA[$i][$j]; }
+	    $final_len++;
+	}
+	push(@Disagreements,$final_len) if ($num_chars > 1);
     }
 
-    return(\@MSA,\@Disagreements,$msa_len);
+    return(\@MSA,\@Disagreements,$final_len);
 
 }
 
