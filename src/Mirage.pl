@@ -33,7 +33,7 @@ sub AttachSeqToMSA;
 
 
 # VERSION INFO
-my $mirage_version = 'Version 1.0.1';
+my $mirage_version = 'Version 1.0.2';
 
 
 ##################
@@ -309,7 +309,7 @@ for ($i=0; $i<$numSpecies; $i++) {
     #if (!(-e $HitFile)) { die "\n  Failed to locate Quilter output '$HitFile'\n\n"; }
 
     # Name the directory where we'll be putting the output from MultiMSA.pl
-    $MultiMSADir{$Species[$i]} = $SpeciesDir{$Species[$i]}.'/MultiMSA_output';
+    $MultiMSADir{$Species[$i]} = $SpeciesDir{$Species[$i]}.'/Alignments';
 
     # Prepare to generate a file containing tallies for each gene with
     # disagreeing positions.
@@ -320,6 +320,7 @@ for ($i=0; $i<$numSpecies; $i++) {
     $MultiMSACmd = 'perl '.$location.'MultiMSA.pl '; # base call
     $MultiMSACmd = $MultiMSACmd.$HitFileName.' ';    # Quilter output
     $MultiMSACmd = $MultiMSACmd.$SpeciesDBNames[$i]; # isoform file
+    $MultiMSACmd = $MultiMSACmd.' '.$tempdirname;    # tempdir location
     
     # Guiding output towards our desired directory
     $MultiMSACmd = $MultiMSACmd.' -folder '.$MultiMSADir{$Species[$i]};
