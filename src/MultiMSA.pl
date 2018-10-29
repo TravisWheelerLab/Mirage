@@ -1286,24 +1286,28 @@ sub MatrixRecurse
     return ('0',$matrix_ref) if ($seq_id == 0);
 
     my @M = @{$matrix_ref};
-    my $return_string = "$seq_id";
 
+    my %RecurseOn;
+    
     for (my $j=$seq_id-1; $j>=0; $j--) {
 	if ($M[$seq_id][$j]) {
 	    $M[$seq_id][$j] = 0;
-	    my ($next_string,$new_matrix_ref) = MatrixRecurse(\@M,$j,$max_dim);
-	    $return_string = $return_string.','.$next_string;
-	    @M = @{$new_matrix_ref};
+	    $RecurseOn{$j}  = 1;
 	}
     }
-    
+
     for (my $i=1; $i<$max_dim; $i++) {
 	if ($M[$i][$seq_id]) {
 	    $M[$i][$seq_id] = 0;
-	    my ($next_string,$new_matrix_ref) = MatrixRecurse(\@M,$i,$max_dim);
-	    $return_string = $return_string.','.$next_string;
-	    @M = @{$new_matrix_ref};
+	    $RecurseOn{$i}  = 1;
 	}
+    }
+    
+    my $return_string = "$seq_id";
+    foreach my $next_seq_id (sort {$b <=> $a} keys %RecurseOn) {
+	my ($next_string,$new_matrix_ref) = MatrixRecurse(\@M,$next_seq_id,$max_dim);
+	$return_string = $return_string.','.$next_string;
+	@M = @{$new_matrix_ref};
     }
     
     return ($return_string,\@M);
