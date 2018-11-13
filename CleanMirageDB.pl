@@ -66,6 +66,7 @@ open(my $gone,'>',$removedfile)    || die "\n  ERROR: Failed to open file '$remo
 
 
 # Record some data about how much we're changing
+my $num_dupls  = 0;
 my $num_fixes  = 0;
 my $num_gone   = 0;
 my $num_ghosts = 0;
@@ -92,6 +93,10 @@ if (eof($database)) {
 }
 
 
+# Track sequence names
+my %SeqNamesHash;
+
+
 # Cool! let's get to work
 while (!eof($database)) {
 
@@ -105,6 +110,17 @@ while (!eof($database)) {
     my $removed = 0;
     if ($fixedhead !~ /(\S+)\|(\S+)\|(\S+)\|(\S+)\|(\S+)/ || $fixedhead !~ /\|[^\|\s]+\s*$/) {
 	$removed = 1;
+    }
+
+    # Record the name that we're going to use, and if we've seen it
+    # before throw a minor fit
+    my $duplicate = 0;
+    if ($SeqNamesHash{$fixedhead}) {
+	$duplicate = 1;
+	$num_dupls++;
+	$removed = 1;
+    } else {
+	$SeqNamesHash{$fixedhead} = 1;
     }
     
     # How many actual lines were there?
@@ -125,7 +141,9 @@ while (!eof($database)) {
 
     # Was this an actual sequence?
     if ($removed) {
-	print $gone "$originalhead\n";
+	print $gone "$originalhead";
+	if ($duplicate) { print $gone " :  Duplicate sequence name"; }
+	print $gone "\n";
 	$num_gone++;
     } else {
 	if ($seqlines) {
@@ -151,7 +169,7 @@ close($gone);
 
 
 # Let the user know what we discovered
-if ($num_ghosts || $num_fixes || $num_gone || $comments) {
+if ($num_ghosts || $num_fixes || $num_gone || $num_dupls || $comments) {
 
     print "\n";
 
@@ -160,21 +178,25 @@ if ($num_ghosts || $num_fixes || $num_gone || $comments) {
     }
 
     if ($num_fixes) {
-	print "  Number of sequence names adjusted: $num_fixes (listed in '$corrections')\n";
+	print "  Number of sequence names adjusted:  $num_fixes (listed in '$corrections')\n";
     } else {
 	system("rm $corrections")  if (-e $corrections);
     }
 
     if ($num_ghosts) {
-	print "  Number of names without sequences: $num_ghosts (listed in '$ghostseqfile')\n";
+	print "  Number of names without sequences:  $num_ghosts (listed in '$ghostseqfile')\n";
     } else {	
 	system("rm $ghostseqfile") if (-e $ghostseqfile);
     }
 
     if ($num_gone) {
-	print "  Number of sequences removed:       $num_gone (listed in '$removedfile')";
+	print "  Number of sequences removed:        $num_gone (listed in '$removedfile')\n";
     } else {
 	system("rm $removedfile") if (-e $removedfile);
+    }
+
+    if ($num_dupls) {
+	print "  --- Number of sequences removed due to being duplicates: $num_dupls\n";
     }
 
     print "\n";
