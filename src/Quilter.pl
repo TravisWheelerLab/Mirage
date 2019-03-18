@@ -75,7 +75,7 @@ $location =~ s/Quilter\.pl//;
 # Find your friends!
 my $eslsfetch  = $location.'../inc/easel/miniapps/esl-sfetch';
 my $eslseqstat = $location.'../inc/easel/miniapps/esl-seqstat';
-my $spaln      = $location.'../inc/spaln2.2.2/src/spaln';
+my $spaln      = $location.'../inc/spaln2.3.3/src/spaln';
 
 
 # Option variables.

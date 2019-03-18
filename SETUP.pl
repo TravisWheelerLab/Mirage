@@ -26,7 +26,7 @@ while ($argcheck < scalar(@ARGV)) {
 
 
 # The name of the spaln folder (at the top for ease of adjustment)
-my $spalnDir = 'inc/spaln2.2.2';
+my $spalnDir = 'inc/spaln2.3.3';
 my $easelDir = 'inc/easel';
 my $blatDir  = 'inc/blat';
 my $spalnTar = $spalnDir.'.tgz';

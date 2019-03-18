@@ -973,7 +973,7 @@ sub CheckInstall
     push(@RequiredFiles,$location.'makefile');
     push(@RequiredFiles,$location.'../inc/easel/miniapps/esl-sfetch');
     push(@RequiredFiles,$location.'../inc/easel/miniapps/esl-seqstat');
-    push(@RequiredFiles,$location.'../inc/spaln2.2.2/src/spaln');
+    push(@RequiredFiles,$location.'../inc/spaln2.3.3/src/spaln');
     push(@RequiredFiles,$location.'../inc/blat/blat.linux.x86_64');
     push(@RequiredFiles,$location.'../inc/blat/blat.macOSX.x86_64');
     push(@RequiredFiles,$location.'../inc/blat/blat.macOSX.i386');
