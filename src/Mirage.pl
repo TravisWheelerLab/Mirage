@@ -1049,7 +1049,7 @@ sub ParseArgs
 	"time",
 	"stackarfs",
 	"forcecompile", # Hidden
-	"cleanmsa",     # Hidden
+	"cleanmsa=i",   # Hidden
 	"justspaln",    # Hidden
 	)
 	|| die "\n  ERROR:  Failed to parse command line arguments\n\n";
