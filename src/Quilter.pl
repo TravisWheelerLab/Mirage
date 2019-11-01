@@ -1032,7 +1032,7 @@ if (-s $bigBlat) {
     my $BlatStdErr  = $location.'temp/Quilter.BLAT.std.err';
     my $BlatResults = $location.'temp/'.lc($ARGV[3]).'.Quilter.BLAT.out';
     my $blatCmd = $blat.' -tileSize=7 -minIdentity=90 -maxIntron=1';
-    $blatCmd    = $blatCmd.' -t=dnax -q=prot -out=blast8 -minScore=80';
+    $blatCmd    = $blatCmd.' -t=dnax -q=prot -out=blast8 -minScore=40'; # minScore dropped from 80
     $blatCmd    = $blatCmd.' 1>'.$BlatStdOut.' 2>'.$BlatStdErr;
     $blatCmd    = $blatCmd.' '.$ARGV[1].' '.$bigBlat.' '.$BlatResults;
     $timeA = [Time::HiRes::gettimeofday()] if ($timing);
