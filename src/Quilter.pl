@@ -3121,6 +3121,14 @@ sub ParseSPALNOutput
     # final mapping of the protein to the genome, correcting
     # for micro-exons.
     #
+    # UPDATE (Nov. 2019): It looks like Spaln will, somewhat
+    # regularly, start/end exons with extraneous gaps, so I'm
+    # going to try to pay attention to the starts and ends of
+    # exons to make sure these don't drag good hits into the
+    # mud.
+    #
+    my $gap_run_len = 0;
+    my $starting_exon = 1;
     my $mismatches = 0;
     my @FullNuclSeq;
     my @FullProtSeq;
@@ -3148,6 +3156,8 @@ sub ParseSPALNOutput
 	    my $skiplen = int($1);
 	    if ($revcomp) { $current_pos -= $skiplen; }
 	    else          { $current_pos += $skiplen; }
+	    $starting_exon = 1; # Whatever we see next will start an exon
+	    $mismatches -= $gap_run_len; # If we had a run of gaps prior to the end of the exon, fugghet about 'em
 	    next;
 	}
 
@@ -3239,11 +3249,21 @@ sub ParseSPALNOutput
 	    }
 	    
 	    # Also, note a *SUBSTITUTION* mismatch (sorry for yelling)
-	    $mismatches++ 
-		if ($NextAAs[$i] =~ /\S/ 
-		    && $NextAAs[$i] ne $TransLine[$i] 
-		    && !(uc($TransLine[$i]) eq 'J' && uc($NextAAs[$i]) eq 'S') # Sometimes SPALN calls an 'S' a 'J'
-		);
+	    if ($NextAAs[$i] =~ /\S/
+		&& $NextAAs[$i] ne $TransLine[$i] 
+		&& !(uc($TransLine[$i]) eq 'J' && uc($NextAAs[$i]) eq 'S')) { # Sometimes SPALN calls an 'S' a 'J'
+		if ($NextAAs[$i] eq '-') {
+		    # Gap mismatch (could be a goof...)
+		    if (!$starting_exon) {
+			$gap_run_len++;
+			$mismatches++;
+		    }
+		} else {
+		    $mismatches++; # Genuine mismatch
+		}
+	    } else {
+		$gap_run_len=0;
+	    }
 	    # I'm using that format because we might see more delightful tricks
 
 
@@ -3270,6 +3290,8 @@ sub ParseSPALNOutput
 
     # If we aren't satisfied with the overall percent identity of the
     # hit go back (possibly to pull in more sequence and try again).
+    #
+    # * * * THIS IS THE PERCENT IDENTITY CHECK POSITION * * * 
     #
     return (0,1) if ($mismatches/$prot_len > 0.05);
     
