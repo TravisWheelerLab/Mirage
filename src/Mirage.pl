@@ -161,7 +161,7 @@ foreach $specname (@Species) {
 
 # Make species-specific databases, organized by gene family
 my ($speciesdbnames_ref,$MinorSpeciesDBName,$specprocesses_ref,$fambreaks_ref) 
-    = GenerateSpeciesDBs(\@Species,$ProteinDB,$numProcesses);
+    = GenerateSpeciesDBs(\@Species,$ProteinDB,$numProcesses,\%SpeciesDir);
 my @SpeciesDBNames   = @{$speciesdbnames_ref};
 my @SpeciesProcesses = @{$specprocesses_ref};
 my @SpeciesFamBreaks = @{$fambreaks_ref};
@@ -226,7 +226,11 @@ for ($i=0; $i<$numSpecies; $i++) {
     # Make that daaaaaang call.
     if (system($QuilterCmd)) {
 	my $tempdirname = $SpeciesDir{$Species[$i]}.'/temp';
-	system("rm -rf $tempdirname");
+	if (-d $tempdirname) { system("rm -rf $tempdirname"); }
+	for ($j=$i; $j<$numSpecies; $j++) {
+	    system("rm $SpeciesDBNames[$j]")      if (-e $SpeciesDBNames[$j]);
+	    system("rm $SpeciesDBNames[$j]\.ssi") if (-e $SpeciesDBNames[$j].'.ssi');
+	}
 	die "\n  *  ERROR:  Quilter.pl failed during execution  *\n\n";
     }
 
@@ -1311,14 +1315,16 @@ sub GenerateSpeciesDBs
     my $species_ref    = shift;
     my $ProteinDB_name = shift;
     my $numProcesses   = shift;
+    my $specdirref     = shift;
+    my %SpeciesDir = %{$specdirref};
 
     my $DB_base_name = $ProteinDB_name;
     $DB_base_name =~ s/\.[^\/\.]+$//; # remove the file extension.
 
     my @Species = @{$species_ref};
     my %SpeciesToDBNames;
-    foreach my $species (@Species) { $SpeciesToDBNames{$species} = $tempdirname.$species.'.prot.fa'; }
-    my $MinorSpeciesDBName = $tempdirname.'.minor-species.prot.fa';
+    foreach my $species (@Species) { $SpeciesToDBNames{$species} = $SpeciesDir{$species}.'/prot.fa'; }
+    my $MinorSpeciesDBName = $SpeciesDir{$Species[0]}.'/../minor-species.prot.fa';
     
     # The very first thing we'll do is scan through our database
     # making a set of species-AND-gene-family mini-databases, and
@@ -1343,7 +1349,7 @@ sub GenerateSpeciesDBs
 	    my $species = lc($1);
 	    my $genefam = lc($2);
 
-	    $spec_gene_filename = $tempdirname.$species.'-'.$genefam.'.fa';
+	    $spec_gene_filename = $SpeciesDir{$species}.'/'.$genefam.'.fa';
 	    $SpeciesGeneFileNames{$species.';'.$genefam} = $spec_gene_filename;
 	    
 	    open($SpecGeneFile,'>>',$spec_gene_filename) || die "\n  ERROR:  Failed to open output species-gene database '$spec_gene_filename'\n\n";
