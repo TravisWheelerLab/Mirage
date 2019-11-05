@@ -753,6 +753,10 @@ while (wait() != -1) {}
 
 
 # Well, why NOT put this here?!
+for ($i=0; $i<$numSpecies; $i++) {
+    system("rm \"$SpeciesDBNames[$i]\"")      if (-e $SpeciesDBNames[$i]);
+    system("rm \"$SpeciesDBNames[$i]\.ssi\"") if (-e $SpeciesDBNames[$i].'.ssi');
+}
 system("rm \"$MinorSpeciesDBName\"")      if (-e $MinorSpeciesDBName);
 system("rm \"$MinorSpeciesDBName\.ssi\"") if (-e $MinorSpeciesDBName.'.ssi');
 
