@@ -263,8 +263,14 @@ $TimingData[12] = Time::HiRes::tv_interval($timeA) if ($timing);
 # chromosome.
 
 
-# We want a temporary folder to stuff everything in
+# We want a temporary folder to stuff everything in (AND METHOD NEEDS TO ALLOW
+# MULTIPLE MIRAGE INSTANCES)
+$i=1;
 my $foldername = $location.'temp/Quilter/';
+while (-d $foldername) { 
+    $foltername = $location.'temp_'.$i.'/Quilter/'; 
+    $i++;
+}
 if (system("mkdir $foldername")) { die "\n\tFailed to generate temporary folder '$foldername'\n\n"; }
 
 
