@@ -125,7 +125,7 @@ my @Genomes    = @{$genomesref};
 
 
 # Make a directory to store results
-if (-e $ResultsDir) {
+if (-d $ResultsDir) {
     my $testDir = $ResultsDir;
     $i = 0;
     while (-e $testDir) {
@@ -151,11 +151,12 @@ foreach $specname (@Species) {
 }
 
 
-# Create a temp directory in src where we'll hide all of our secrets.
-my $tempdirname = $location.'temp/';
-if (-d($tempdirname)) { system("rm -rf $tempdirname"); }
-if (system("mkdir $tempdirname")) { die "\n  ERROR:  Failed to generate temporary directory '$tempdirname'\n\n"; }
-
+# Create a temp directory in the results directory where we'll hide all of our secrets.
+#my $tempdirname = $ResultsDir.'temp/';
+#if (-d($tempdirname)) { system("rm -rf $tempdirname"); }
+#if (system("mkdir $tempdirname")) { die "\n  ERROR:  Failed to generate temporary directory '$tempdirname'\n\n"; }
+#
+# EDIT: Each process is liable to have its own tempdir location, so we accomodate them
 
 # Make species-specific databases, organized by gene family
 my ($speciesdbnames_ref,$MinorSpeciesDBName,$specprocesses_ref,$fambreaks_ref) 
@@ -220,6 +221,7 @@ for ($i=0; $i<$numSpecies; $i++) {
 
     # Make that daaaaaang call.
     if (system($QuilterCmd)) {
+	my $tempdirname = $SpeciesDir{$Species[$i]}.'/temp';
 	system("rm -rf $tempdirname");
 	die "\n  *  ERROR:  Quilter.pl failed during execution  *\n\n";
     }
@@ -320,7 +322,6 @@ for ($i=0; $i<$numSpecies; $i++) {
     $MultiMSACmd = 'perl '.$location.'MultiMSA.pl '; # base call
     $MultiMSACmd = $MultiMSACmd.$HitFileName.' ';    # Quilter output
     $MultiMSACmd = $MultiMSACmd.$SpeciesDBNames[$i]; # isoform file
-    $MultiMSACmd = $MultiMSACmd.' '.$tempdirname;    # tempdir location
     
     # Guiding output towards our desired directory
     $MultiMSACmd = $MultiMSACmd.' -folder '.$MultiMSADir{$Species[$i]};
@@ -341,9 +342,14 @@ for ($i=0; $i<$numSpecies; $i++) {
 	print "  Generating MSAs for all identified $Species[$i] genes\n";
 	print "  $MultiMSACmd\n";
     }
+
+    # We'll anticipate the location of the multimsa temp file
+    my $tempdirname = $HitFileName;
+    $tempdirname =~ s/Hits\.Quilter\.out/multimsa\_temp\//;
+
     if (system($MultiMSACmd)) {
 	# Hamsters!
-	system("rm -rf $tempdirname");
+	if (-d $tempdirname) { system("rm -rf $tempdirname"); }
 	die "\n  *  ERROR:  MultiMSA.pl failed during execution  *\n\n";
     }
 
@@ -457,6 +463,9 @@ for ($i=0; $i<$numSpecies; $i++) {
     system("rm $singleseqfilename") if (-e $singleseqfilename);
     system("rm $singleseqresults")  if (-e $singleseqresults);
 
+    # That temporary directory isn't helping anybody anymore
+    system("rm -rf $tempdirname");
+
     # Knock it off with that darn timing!
     $MultiMSATimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
 
@@ -488,10 +497,7 @@ $IntervalStart = [Time::HiRes::gettimeofday()];
 
 # Make a directory to place our final MSAs in
 my $FinalDir = $ResultsDir.'/FinalMSAs';
-if (system("mkdir $FinalDir")) { 
-    system("rm -rf $tempdirname");
-    die "\n  Failed to create directory '$FinalDir'\n\n"; 
-}
+if (system("mkdir $FinalDir")) { die "\n  Failed to create directory '$FinalDir'\n\n"; }
 
 
 # Convert the hash entries to an array, so we can divvy it up
@@ -509,7 +515,6 @@ my $portion;
 if ($numProcesses) {
     $portion = $TotNumGroupFiles/$numProcesses;
 } else {
-    system("rm -rf $tempdirname");
     print "\n";
     print "  No genes were identified for alignment.\n";
     print "  Program Terminating Peacefully\n";
@@ -524,6 +529,8 @@ print "\n  Computing final cross-species MSAs (large genes can take up to 30 sec
 
 
 # Split up the work across the desired number of processes
+my $tempdirname = $ResultsDir.'/temp/';
+if (system("mkdir \"$tempdirname\"")) { die "\n  ERROR:  Failed to create Mirage tempdir '$tempdirname'\n\n"; }
 my $progressbase = $tempdirname.'mirage.thread_progress.';
 my $processes = 1;
 my $ThreadID  = 0; # In case of only one process

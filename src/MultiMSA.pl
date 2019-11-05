@@ -27,7 +27,7 @@ sub ResolveExon;        # When an error has been detected in an exon, try to adj
 sub CheckColumnProfile; # Build a profile of an MSA column
 
 
-if (@ARGV < 3) { die "\n  USAGE:  perl  MultiMSA.pl  <Quilter output>  <Protein database>  <tempdir>  [Opt.s]\n\n"; }
+if (@ARGV < 2) { die "\n  USAGE:  ./MultiMSA.pl [Quilter output] [Protein database] {Opt.s}\n\n"; }
 
 my $location = $0;
 $location =~ s/MultiMSA\.pl$//;
@@ -89,7 +89,9 @@ if (-e $outputfolder) {
 }
 system("mkdir $outputfolder");
 
-my $tempdirname = $ARGV[2];
+my $tempdirname = $ARGV[0];
+$tempdirname =~ s/Hits\.Quilter\.out/multimsa\_temp\//;
+if (system("mkdir \"$tempdirname\"")) { die "\n  ERROR:  Failed to create temporary directory '$tempdirname'\n\n"; }
 
 open(my $infile,'<',$ARGV[0]) || die "\n  Failed to open input file '$ARGV[0]'\n\n";
 my %ChrsByFam;
