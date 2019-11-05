@@ -911,7 +911,7 @@ foreach my $j (1..$CPUs-1) {
 # Whilst thread 0 dost enthieven, enthieven alsough thine Spaln outputith
 my $spalnlogname = 'Spaln.Quilter.out';
 if ($resdir) {
-    if ($ARGV[$resdir] =! /\/$/) { $spalnlogname = $ARGV[$resdir].$spalnlogname;     }
+    if ($ARGV[$resdir] =~ /\/$/) { $spalnlogname = $ARGV[$resdir].$spalnlogname;     }
     else                         { $spalnlogname = $ARGV[$resdir].'/'.$spalnlogname; }
 }
 for (my $j=0; $j<$CPUs; $j++) {
