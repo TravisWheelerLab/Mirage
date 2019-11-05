@@ -88,6 +88,8 @@ my $verbose = 0; # Use verbose printing
 my $spalner = 0; # Are we just running this as a means for getting SPALN output?
 my $noFD    = 0; # WHAT?! (Only run SPALN, not FD)
 
+# New option! Track how and where we're using SPALN!
+my $track_spaln_use = 0;
 
 # Stop points (per CPU, relative to protein DB)
 my @StopPoints;
@@ -132,6 +134,8 @@ while ($i < @ARGV) {
 	}
     } elsif ($opt =~ /\-spaln$/) {
 	$spalner = 1;
+    } elsif ($opt =~ /\-trackspaln$/) {
+	$track_spaln_use = 1;
     } elsif ($opt =~ /\-time$/) {
 	$timing = 1;
     } elsif ($opt =~ /\-fast$/) {
@@ -339,8 +343,10 @@ system("rm $missfilename") if (-e $missfilename);
 system("rm $blatfilename") if (-e $blatfilename);
 
 
-# A log file used to track how well spaln performs
-open(my $SpalnLog,'>',$foldername.'spaln_logfile_'.$threadID.'.Quilter.out');
+# For SPALN-related inquiries, please recognize that the following is at
+# your disposal:
+my $spalninfoname = $foldername.'spaln_info_'.$threadID.'.Quilter.out';
+open(my $ThreadSpalnLog,'>',$spalninfoname);
 
 
 # A file to hold all our hits and a file to hold our unhit sequence info.
@@ -691,8 +697,8 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 			
 			($next_score,$next_string) = ExonAssistedSPALN(\$Chromosome,\%ChrLengths,$ProtSeqNames[$i],
 								       $ARGV[1],$ProtFileNames[$i],$nuclfilename,
-								       $HitFile,$ProtSeqLengths[$i],$SpalnLog,$spalner,
-								       $timing,\@TimingData);
+								       $HitFile,$ProtSeqLengths[$i],$ThreadSpalnLog,
+								       $spalner,$timing,\@TimingData);
 			
 			# SPALN saves the day!!!
 			if ($next_score > $BestSpalnScores[$i]) {
@@ -898,6 +904,22 @@ foreach my $j (1..$CPUs-1) {
     }
     close($resultsfile);
     system("rm $resultsfilename");
+
+}
+
+
+# Whilst thread 0 dost enthieven, enthieven alsough thine Spaln outputith
+my $spalnlogname = 'Spaln.Quilter.out';
+if ($resdir) {
+    if ($ARGV[$resdir] =! /\/$/) { $spalnlogname = $ARGV[$resdir].$spalnlogname;     }
+    else                         { $spalnlogname = $ARGV[$resdir].'/'.$spalnlogname; }
+}
+for (my $j=0; $j<$CPUs; $j++) {
+    $spalninfoname = $foldername.'spaln_info_'.$threadID.'.Quilter.out';
+    if (-e $spalninfoname) {
+	system("cat \"$spalninfoname\" >> $spalnlogname");
+	system("rm \"$spalninfoname\"");
+    }
 }
 
 
@@ -1060,15 +1082,21 @@ if (-s $bigBlat) {
     $progmsg = '  Quilter.pl:  Using SPALN on BLAT output ('.lc($reqSpecies).')';
     while (length($progmsg) < 63) { $progmsg = $progmsg.' '; }
     print "$progmsg\r";
+
+    # We'll concatenate onto the end of the larger spaln log file from our
+    # earlier work
+    open(my $SpalnLog,'>>',$spalnlogname);
     
     # Run SPALN on the results of the BLAT search
     open(my $Results,'>',$finalHits);
     open(my $Misses,'>',$finalMisses);
     BLATAssistedSPALN(\%ChrLengths,\%SeqLengths,\%BlatNameIndex,$ARGV[1],$ARGV[0],
 		      $BlatResults,$Results,$Misses,$SpalnLog,$ARGV[3],$CPUs,
-		      $spalner,$timing,\@TimingData);
+		      $SpalnLog,$spalner,$timing,\@TimingData);
     close($Results);
     close($Misses);
+
+    close($SpalnLog);
     
     # Clean up
     system("rm $BlatResults") if (-e $BlatResults);
@@ -1086,8 +1114,8 @@ while (length($progmsg) < 63) { $progmsg = $progmsg.' '; }
 print "$progmsg\r" if (!$verbose);
 
 
-# Close the "SpalnLog" file
-close($SpalnLog);
+# Are we holding onto that Spaln output? Of course we... are...n't? Who knows!
+if (!$track_spaln_use && -e $spalnlogname) { system("rm \"$spalnlogname\""); }
 
 
 # Now thread 0 can print out its results, if that's something you're into
@@ -2349,7 +2377,7 @@ sub ExonAssistedSPALN
 
     my $ProtLength = shift;
     
-    my $SpalnMisses = shift;
+    my $SpalnLog = shift;
 
     # Are we specifically looking for SPALN output?
     my $spalner = shift;
@@ -2372,6 +2400,19 @@ sub ExonAssistedSPALN
     $minNucl = MAX($minNucl-100000,1);
     $maxNucl = MIN($maxNucl+100000,$ChrLengths{$chrname});
 
+    # Ways for SPALN to succeed or not...
+    my @SpalnCodes;
+    push(@SpalnCodes,"Presumed hit! (early jump)\n");
+    push(@SpalnCodes,"Unexpected EOF [1]\n");
+    push(@SpalnCodes,"Unexpected score line format\n");
+    push(@SpalnCodes,"Unexpected EOF [3]\n");
+    push(@SpalnCodes,"Found fewer aminos than expected\n");
+    push(@SpalnCodes,"Unexpected EOF [5]\n");
+    push(@SpalnCodes,"No initial jump...\n");
+    push(@SpalnCodes,"Percent identity too low\n");
+    push(@SpalnCodes,"Unexpected amino count despite SelenocysteineCheck\n");
+    push(@SpalnCodes,"TRUE HIT!\n");
+
     # Toss the selected sequence into our file
     my $eslsfetchCmd;
     $eslsfetchCmd = $eslsfetch.' -c '.$minNucl.'..'.$maxNucl;
@@ -2386,11 +2427,13 @@ sub ExonAssistedSPALN
     $spalnCmd = $spalnCmd.' |';
 
     # Run and parse SPALN's output
-    my ($hitscore,$hitline) = ParseSPALNOutput($spalnCmd,$revcomp,$minNucl-1,0,$Chromosome->{ChrName},
-					       $seqname,$ProtLength,$protfilename,$SpalnMisses,
-					       $spalner,$timing,$timingdata);
+    my ($hitscore,$hitline,$report) = ParseSPALNOutput($spalnCmd,$revcomp,$minNucl-1,0,$Chromosome->{ChrName},$seqname,
+						       $ProtLength,$protfilename,$spalner,$timing,$timingdata);
     @{$timingdata}[6]++ if ($timing);
 
+
+    # What happened in there?
+    print $SpalnLog "EXON: $seqname $chrname $minNucl..$maxNucl $SpalnCodes[$report]";
 
     # Return your bliss if we got a clean hit, bail if things look bad
     if    ($hitscore)               { return ($hitscore,$hitline); }
@@ -2423,10 +2466,11 @@ sub ExonAssistedSPALN
 
     # Run and parse SPALN's output
     ($hitscore,$hitline) = ParseSPALNOutput($spalnCmd,$revcomp,$minNucl-1,0,$Chromosome->{ChrName},
-					    $seqname,$ProtLength,$protfilename,$SpalnMisses,
-					    $spalner,$timing,$timingdata);
+					    $seqname,$ProtLength,$protfilename,$spalner,$timing,$timingdata);
     @{$timingdata}[6]++ if ($timing);
 
+    # What happened in there, for real?
+    print $SpalnLog "EAS: $seqname $chrname $minNucl..$maxNucl $SpalnCodes[$report]";
 
     # How's that bliss looking now?
     if ($hitscore) { return ($hitscore,$hitline); }
@@ -2472,6 +2516,8 @@ sub BLATAssistedSPALN
     my $InputSpecies = shift;
 
     my $CPUs = shift;
+
+    my $SpalnLog = shift;
 
     # Are we just looking at SPALN output?
     my $spalner = shift;
@@ -2612,6 +2658,20 @@ sub BLATAssistedSPALN
     }
     close($blatout);
 
+    # Ways for SPALN to succeed or not...
+    my @SpalnCodes;
+    push(@SpalnCodes,"Presumed hit! (early jump)\n");
+    push(@SpalnCodes,"Unexpected EOF [1]\n");
+    push(@SpalnCodes,"Unexpected score line format\n");
+    push(@SpalnCodes,"Unexpected EOF [3]\n");
+    push(@SpalnCodes,"Found fewer aminos than expected\n");
+    push(@SpalnCodes,"Unexpected EOF [5]\n");
+    push(@SpalnCodes,"No initial jump...\n");
+    push(@SpalnCodes,"Percent identity too low\n");
+    push(@SpalnCodes,"Unexpected amino count despite SelenocysteineCheck\n");
+    push(@SpalnCodes,"TRUE HIT!\n");
+
+
     # We'll sort these just to make sure things stay constant
     # across our threads.
     my @SeqNames;
@@ -2623,6 +2683,7 @@ sub BLATAssistedSPALN
 
     # If we have fewer SeqIDs than CPUs make that not the case
     if ($num_seq_ids < $CPUs) { $CPUs = $num_seq_ids; }
+
 
     # Once again, Thread 0 calls on its friends to save the day
     my $processes = 1;
@@ -2647,9 +2708,11 @@ sub BLATAssistedSPALN
     my $thread_hits   = $foldername.'Quilter.BAS.hits.'.$threadID.'.out';
     my $thread_misses = $foldername.'Quilter.BAS.misses.'.$threadID.'.out';
     my $thread_tes    = $foldername.'Quilter.BAS.TEs.'.$threadID.'.out';
+    my $thread_spaln  = $foldername.'Quilter.BAS.spaln.'.$threadID.'.out';
     open(my $ThreadHitFile,'>',$thread_hits)    || die "\n  ERROR:  Failed to open BLAT hit file '$thread_hits'\n\n";
     open(my $ThreadMissFile,'>',$thread_misses) || die "\n  ERROR:  Failed to open BLAT miss file '$thread_misses'\n\n";
     open(my $ThreadTEFile,'>',$thread_tes)      || die "\n  ERROR:  Failed to open BLAT TE file '$thread_misses'\n\n";
+    open(my $ThreadSpalnFile,'>',$thread_spaln) || die "\n  ERROR:  Failed to open BLAT spaln file '$thread_spaln'\n\n";
 
     # Where do you want to start?  End?
     my $division_size = int($num_seq_ids / $CPUs);
@@ -2833,11 +2896,13 @@ sub BLATAssistedSPALN
 		    if ($revcomp) { $chrname = $chrname.'[revcomp]'; }
 		    
 		    # Parse SPALN's output
-		    my ($nextScore,$nextLine) = ParseSPALNOutput($spalnCmd,$revcomp,$minNucl-1,$highscore,
-								 $chrname,$seqname,$seqlength,$protfilename,
-								 $CmdLog,$spalner,$timing,$timingdata);
+		    my ($nextScore,$nextLine,$report) = ParseSPALNOutput($spalnCmd,$revcomp,$minNucl-1,$highscore,
+									 $chrname,$seqname,$seqlength,$protfilename,
+									 $spalner,$timing,$timingdata);
 		    @{$timingdata}[10]++ if ($timing);
 
+		    # What happened in there?
+		    print $SpalnLog "BLAT: $seqname $chrname $minNucl..$maxNucl $SpalnCodes[$report]";
 		    
 		    # Is this better than any hit we've seen?
 		    if ($nextScore > $highscore) {
@@ -2921,6 +2986,16 @@ sub BLATAssistedSPALN
 	    system("rm \"$thread_tes\"");
 	}
 
+	$thread_spaln = $foldername.'Quilter.BAS.spaln.'.$threadID.'.out';
+	if (-e $thread_spaln) {
+	    open($ThreadSpalnFile,'<',$thread_spaln) || die "\n  ERROR:  Failed to open BLAT Spaln file '$thread_spaln' (input)\n\n";
+	    while (my $line = <$ThreadSpalnFile>) {
+		print $SpalnLog "$line";
+	    }
+	    close($ThreadSpalnFile);
+	    system("rm \"$thread_spaln\"");
+	}
+
     }
 
     close($TEfile);
@@ -2958,8 +3033,6 @@ sub ParseSPALNOutput
     my $prot_len     = shift;
     my $protfilename = shift;
     
-    my $SpalnMisses = shift;
-
     # NOTE: When we're just looking for SPALN output we can't just
     #       run the command and jump ship, due to how the various
     #       functions depend on score comparison (well, BLAT).
@@ -2997,7 +3070,7 @@ sub ParseSPALNOutput
     # If we've hit the end of the file, no point continuing
     if (eof($stdout)) {
 	close($stdout);
-	return(0,0); 
+	return(0,0,1); 
     }
 
 
@@ -3043,7 +3116,7 @@ sub ParseSPALNOutput
 		# (0,1) return).
 		#
 		close($stdout);
-		return(0,1);
+		return(0,1,2);
 		
 	    }
 
@@ -3070,10 +3143,10 @@ sub ParseSPALNOutput
     # jump ship.
     if (eof($stdout)) {
 	close($stdout); 
-	return(0,0); 
+	return(0,0,3); 
     } elsif ($true_num_chars < $prot_len) {
 	close($stdout);
-	return(0,1); # <- This '1' might give us a second chance (pull in more sequence)
+	return(0,1,4); # <- This '1' might give us a second chance (pull in more sequence)
     }
     
     
@@ -3087,7 +3160,7 @@ sub ParseSPALNOutput
     # Still not totally stoked on seeing an eof
     if (eof($stdout)) {
 	close($stdout);
-	return(0,0);
+	return(0,0,5);
     }
 
 
@@ -3108,7 +3181,7 @@ sub ParseSPALNOutput
 
 	close($stdout);
 
-	return($hitscore,$hitstring);
+	return($hitscore,$hitstring,0);
 	
     }
 
@@ -3211,7 +3284,7 @@ sub ParseSPALNOutput
 		$first_jump = 1;
 
 	    } else {
-		return(0,0);
+		return(0,0,6);
 	    }
 
 	}
@@ -3305,7 +3378,7 @@ sub ParseSPALNOutput
     #
     # * * * THIS IS THE PERCENT IDENTITY CHECK POSITION * * * 
     #
-    return (0,1) if ($mismatches/$prot_len > 0.05);
+    return (0,1,7) if ($mismatches/$prot_len > 0.05);
     
 
     # Selenocysteine does some crazy stuff, man.  I translated some once
@@ -3318,7 +3391,7 @@ sub ParseSPALNOutput
 	@AAPositions = @{$aap_ref};
 	$num_aas = scalar(@FullProtSeq);
 
-	return (0,0) if ($num_aas != $prot_len);
+	return (0,0,8) if ($num_aas != $prot_len);
 
     }
 
@@ -3625,7 +3698,7 @@ sub ParseSPALNOutput
     $hitline    = $hitline."Match Pos.s: $CodonCenters\n\n";
 
 
-    return ($hitscore,$hitline);
+    return ($hitscore,$hitline,9);
 
 }
 

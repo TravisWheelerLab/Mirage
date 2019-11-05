@@ -93,6 +93,7 @@ my $stack_arfs   = $Options{stackarfs};
 my $forcecompile = $Options{forcecompile}; # Hidden
 my $cleanMSA     = $Options{cleanmsa};     # Hidden
 my $just_spaln   = $Options{justspaln};    # Hidden
+my $track_spaln  = $Options{trackspaln};   # Hidden
 
 
 # Verify that we have all the files we need on-hand
@@ -212,6 +213,9 @@ for ($i=0; $i<$numSpecies; $i++) {
 
     # Are we timing?
     $QuilterCmd = $QuilterCmd.' -time' if ($timed);
+
+    # Do we want to hold onto some tracking info about spaln?
+    $QuilterCmd = $QuilterCmd.' -trackspaln' if ($track_spaln);
 
     # Display the call if we're being loud
     if ($verbose) {
@@ -1058,6 +1062,7 @@ sub ParseArgs
 	"forcecompile", # Hidden
 	"cleanmsa=i",   # Hidden
 	"justspaln",    # Hidden
+	"trackspaln",   # Hidden
 	)
 	|| die "\n  ERROR:  Failed to parse command line arguments\n\n";
 
