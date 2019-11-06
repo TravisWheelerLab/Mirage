@@ -451,8 +451,8 @@ for ($i=0; $i<$numSpecies; $i++) {
     # Now that we have MSAs for all the groups that we had hits for,
     # align any that we missed using Needleman-Wunsch.
     print "  Aligning missed isoforms to gene MSAs\n" if ($verbose && keys %QuilterMisses);
-    my $singleseqfilename = $tempdirname.'Mirage.Single.Temp.fa';
-    my $singleseqresults  = $tempdirname.'Mirage.Multi.Temp.afa';
+    my $singleseqfilename = $SpeciesDir{$Species[$i]}.'Mirage.Single.Temp.fa';
+    my $singleseqresults  = $SpeciesDir{$Species[$i]}.'Mirage.Multi.Temp.afa';
 
     foreach my $missedgroup (keys %QuilterMisses) {
 	my @seqnames = split('&',$QuilterMisses{$missedgroup});
@@ -465,9 +465,6 @@ for ($i=0; $i<$numSpecies; $i++) {
     }
     system("rm $singleseqfilename") if (-e $singleseqfilename);
     system("rm $singleseqresults")  if (-e $singleseqresults);
-
-    # That temporary directory isn't helping anybody anymore
-    system("rm -rf $tempdirname");
 
     # Knock it off with that darn timing!
     $MultiMSATimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);

@@ -48,7 +48,7 @@ my $CPUs = 2;
 my $canonical_species;
 my $mask_arfs = 1;
 
-$i = 3;
+$i = 2;
 while ($i < @ARGV) {
     if ($ARGV[$i] eq '-species') {
 	$i++;
@@ -89,7 +89,7 @@ if (-e $outputfolder) {
 }
 system("mkdir $outputfolder");
 
-my $tempdirname = $outputfolder.'multimsa_temp';
+my $tempdirname = $outputfolder.'/multimsa_temp';
 if (system("mkdir \"$tempdirname\"")) { die "\n  ERROR:  Failed to create temporary directory '$tempdirname'\n\n"; }
 
 open(my $infile,'<',$ARGV[0]) || die "\n  Failed to open input file '$ARGV[0]'\n\n";
