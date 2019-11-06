@@ -846,6 +846,10 @@ for ($i = 0; $i < $CPUs; $i++) {
 }
 
 
+# Burn the temporary directory to the ground!
+system("rm -rf \"$tempdirname\"");
+
+
 # Final report
 $progmsg = '  MultiMSA.pl: '.$canonical_species.' complete';
 while (length($progmsg) < 63) { $progmsg = $progmsg.' '; }
