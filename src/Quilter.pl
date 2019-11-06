@@ -2547,7 +2547,7 @@ sub BLATAssistedSPALN
     my %TargetRev;
 
     # Tracks how many hits scored better than 1e-20 (many indicates possible TE)
-    open(my $TEfile,'>',$location.'temp/'.$InputSpecies.'.TEs.Quilter.out');
+    open(my $TEfile,'>',$foldername.'.TEs.Quilter.out');
     my %TEtracker;
     
     # Parse the blast output

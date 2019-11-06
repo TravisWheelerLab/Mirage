@@ -351,13 +351,8 @@ for ($i=0; $i<$numSpecies; $i++) {
 	print "  $MultiMSACmd\n";
     }
 
-    # We'll anticipate the location of the multimsa temp file
-    my $tempdirname = $HitFileName;
-    $tempdirname =~ s/Hits\.Quilter\.out/multimsa\_temp\//;
-
     if (system($MultiMSACmd)) {
-	# Hamsters!
-	if (-d $tempdirname) { system("rm -rf $tempdirname"); }
+	# HAMSTERS!
 	die "\n  *  ERROR:  MultiMSA.pl failed during execution  *\n\n";
     }
 

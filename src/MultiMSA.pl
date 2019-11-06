@@ -43,7 +43,7 @@ my $FinalMisses = 'MultiMSA.misses.out';
 my $printConsensus = 0;
 my $verbose  = 0;
 my $specific = 0;
-my $outputfolder = 'multilignments';
+my $outputfolder = 'multimsa_output';
 my $CPUs = 2;
 my $canonical_species;
 my $mask_arfs = 1;
@@ -89,8 +89,7 @@ if (-e $outputfolder) {
 }
 system("mkdir $outputfolder");
 
-my $tempdirname = $ARGV[0];
-$tempdirname =~ s/Hits\.Quilter\.out/multimsa\_temp\//;
+my $tempdirname = $outputfolder.'multimsa_temp';
 if (system("mkdir \"$tempdirname\"")) { die "\n  ERROR:  Failed to create temporary directory '$tempdirname'\n\n"; }
 
 open(my $infile,'<',$ARGV[0]) || die "\n  Failed to open input file '$ARGV[0]'\n\n";
