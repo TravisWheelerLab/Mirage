@@ -2470,7 +2470,7 @@ sub ExonAssistedSPALN
     @{$timingdata}[6]++ if ($timing);
 
     # What happened in there, for real?
-    print $SpalnLog "EAS: $seqname $chrname $minNucl..$maxNucl $SpalnCodes[$report]";
+    print $SpalnLog "EXON: $seqname $chrname $minNucl..$maxNucl $SpalnCodes[$report]";
 
     # How's that bliss looking now?
     if ($hitscore) { return ($hitscore,$hitline); }
@@ -2891,7 +2891,7 @@ sub BLATAssistedSPALN
 		    $spalnCmd = $spalnCmd.' 2>/dev/null';# if (!$verbose);
 		    $spalnCmd = $spalnCmd.' |';	
 		    
-		    print $CmdLog "> (".localtime()." $spalnCmd\n\n";
+		    #print $CmdLog "> (".localtime()." $spalnCmd\n\n";
 
 		    if ($revcomp) { $chrname = $chrname.'[revcomp]'; }
 		    
