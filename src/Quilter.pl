@@ -3813,8 +3813,8 @@ sub PullTightSpalnRange
     close($inf);
 
     my $last_pos = $first_pos;
-    if ($revcomp) { $last_pos -= $total_skip_len; }
-    else          { $last_pos += $total_skip_len; }
+    if ($revcomp) { $last_pos -= ($total_skip_len + $num_used_nucls); }
+    else          { $last_pos += ($total_skip_len + $num_used_nucls); }
     return($first_pos,$last_pos);
 
 }
