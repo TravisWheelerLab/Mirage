@@ -325,8 +325,8 @@ my $protfile_ext    = '.Quilter.fa';
 my $hitfilename     = $foldername.'hit_tempfile_'.$threadID.'.Quilter.out';
 my $missfilename    = $foldername.'miss_tempfile_'.$threadID.'.Quilter.out';
 my $blatfilename    = $foldername.'blat_tempfile_'.$threadID.'.Quilter.fa'; 
+my $spalnfilename   = $foldername.'spaln_tempfile_'.$threadID.'.Quilter.in';
 my $resultsfilename = $resultsfilehead.$threadID.'.Quilter.out';
-
 
 # Each thread writes its progress (number of completed families)
 # to a file containing
@@ -696,7 +696,7 @@ while (!eof($isoformfile) && $lineNum < $stoppoint) {
 			$timeA = [Time::HiRes::gettimeofday()] if ($timing);
 			
 			($next_score,$next_string) = ExonAssistedSPALN(\$Chromosome,\%ChrLengths,$ProtSeqNames[$i],
-								       $ARGV[1],$ProtFileNames[$i],$nuclfilename,
+								       $ARGV[1],$ProtFileNames[$i],$nuclfilename,$spalnfilename,
 								       $HitFile,$ProtSeqLengths[$i],$ThreadSpalnLog,
 								       $spalner,$timing,\@TimingData);
 			
@@ -850,6 +850,7 @@ if ($threadID) {
 
 # No need for these files anymore.
 system("rm $nuclfilename") if (-e $nuclfilename);
+system("rm $spalnfilename") if (-e $spalnfilename);
 for ($i=1; $i<=$max_gene_seqs; $i++) {
     my $protfilename = $protbasename.$i.$protfile_ext;
     system("rm $protfilename") if (-e $protfilename);
@@ -927,13 +928,16 @@ for (my $j=0; $j<$CPUs; $j++) {
 # (we don't want to overwrite past outputs).
 my $finalHits   = 'Hits.Quilter.out';
 my $finalMisses = 'Misses.Quilter.out';
+my $finalNears  = 'NearMisses.Quilter.out';
 if ($resdir) {
     if ($ARGV[$resdir] =~ /\/$/) {
 	$finalHits   = $ARGV[$resdir].$finalHits;
 	$finalMisses = $ARGV[$resdir].$finalMisses;
+	$finalNears  = $ARGV[$resdir].$finalNears;
     } else {
 	$finalHits   = $ARGV[$resdir].'/'.$finalHits;
 	$finalMisses = $ARGV[$resdir].'/'.$finalMisses;
+	$finalNears  = $ARGV[$resdir].'/'.$finalNears;
     }
 }
 if (!$overw) {
@@ -941,11 +945,13 @@ if (!$overw) {
     while (-e $finalHits || -e $finalMisses) {
 	$finalHits   = 'Hits.'.$i.'.Quilter.out';
 	$finalMisses = 'Misses.'.$i.'.Quilter.out';
+	$finalNears  = 'NearMisses.'.$i.'.Quilter.out';
 	$i++;
     }
 } else {
     if (-e $finalHits)   { system("rm $finalHits");   }
     if (-e $finalMisses) { system("rm $finalMisses"); }
+    if (-e $finalNears)  { system("rm $finalNears");  }
 }
 
 
@@ -1090,11 +1096,13 @@ if (-s $bigBlat) {
     # Run SPALN on the results of the BLAT search
     open(my $Results,'>',$finalHits);
     open(my $Misses,'>',$finalMisses);
+    open(my $NearMisses,'>',$finalNears);
     BLATAssistedSPALN(\%ChrLengths,\%SeqLengths,\%BlatNameIndex,$ARGV[1],$ARGV[0],
-		      $BlatResults,$Results,$Misses,$SpalnLog,$ARGV[3],$CPUs,
-		      $SpalnLog,$spalner,$timing,\@TimingData);
+		      $BlatResults,$Results,$Misses,$NearMisses,$SpalnLog,$ARGV[3],
+		      $CPUs,$SpalnLog,$spalner,$timing,\@TimingData);
     close($Results);
     close($Misses);
+    close($NearMisses);
 
     close($SpalnLog);
     
@@ -2370,8 +2378,9 @@ sub ExonAssistedSPALN
 
     my $genomefilename = shift;
 
-    my $protfilename = shift;
-    my $nuclfilename = shift;
+    my $protfilename  = shift;
+    my $nuclfilename  = shift;
+    my $spalnfilename = shift;
     
     my $HitFile = shift;
 
@@ -2424,11 +2433,11 @@ sub ExonAssistedSPALN
     # Assemble the sytem call to run SPALN
     my $spalnCmd = $spaln.' -Q3 -O1 -S3 -ya3 '.$nuclfilename.' '.$protfilename;
     $spalnCmd = $spalnCmd.' 2>/dev/null';# if (!$verbose);
-    $spalnCmd = $spalnCmd.' |';
+    $spalnCmd = $spalnCmd.' 1>'.$spalnfilename;
 
     # Run and parse SPALN's output
-    my ($hitscore,$hitline,$report) = ParseSPALNOutput($spalnCmd,$revcomp,$minNucl-1,0,$Chromosome->{ChrName},$seqname,
-						       $ProtLength,$protfilename,$spalner,$timing,$timingdata);
+    my ($hitscore,$hitline,$report) = ParseSPALNOutput($spalnCmd,$spalnfilename,$revcomp,$minNucl-1,0,$Chromosome->{ChrName},
+						       $seqname,$ProtLength,$protfilename,$spalner,$timing,$timingdata);
     @{$timingdata}[6]++ if ($timing);
 
 
@@ -2462,10 +2471,10 @@ sub ExonAssistedSPALN
     # Assemble the sytem call to run SPALN
     $spalnCmd = $spaln.' -Q3 -O1 -S3 -ya3 '.$nuclfilename.' '.$protfilename;
     $spalnCmd = $spalnCmd.' 2>/dev/null';# if (!$verbose);
-    $spalnCmd = $spalnCmd.' |';
+    $spalnCmd = $spalnCmd.' 1>'.$spalnfilename;
 
     # Run and parse SPALN's output
-    ($hitscore,$hitline) = ParseSPALNOutput($spalnCmd,$revcomp,$minNucl-1,0,$Chromosome->{ChrName},
+    ($hitscore,$hitline) = ParseSPALNOutput($spalnCmd,$spalnfilename,$revcomp,$minNucl-1,0,$Chromosome->{ChrName},
 					    $seqname,$ProtLength,$protfilename,$spalner,$timing,$timingdata);
     @{$timingdata}[6]++ if ($timing);
 
@@ -2510,6 +2519,7 @@ sub BLATAssistedSPALN
 
     my $HitFile  = shift;
     my $MissFile = shift;
+    my $NearFile = shift;
 
     my $CmdLog = shift;
 
@@ -2660,16 +2670,16 @@ sub BLATAssistedSPALN
 
     # Ways for SPALN to succeed or not...
     my @SpalnCodes;
-    push(@SpalnCodes,"Presumed hit! (early jump)\n");
-    push(@SpalnCodes,"Unexpected EOF [1]\n");
-    push(@SpalnCodes,"Unexpected score line format\n");
-    push(@SpalnCodes,"Unexpected EOF [3]\n");
-    push(@SpalnCodes,"Found fewer aminos than expected\n");
-    push(@SpalnCodes,"Unexpected EOF [5]\n");
-    push(@SpalnCodes,"No initial jump...\n");
-    push(@SpalnCodes,"Percent identity too low\n");
-    push(@SpalnCodes,"Unexpected amino count despite SelenocysteineCheck\n");
-    push(@SpalnCodes,"TRUE HIT!\n");
+    push(@SpalnCodes,"Presumed hit! (intentional early jump -- 'spalner')\n"); # 0
+    push(@SpalnCodes,"Unexpected EOF [1]\n"); # 1
+    push(@SpalnCodes,"Unexpected score line format\n"); #2
+    push(@SpalnCodes,"Unexpected EOF [3]\n"); # 3
+    push(@SpalnCodes,"Found fewer aminos than expected\n"); # 4
+    push(@SpalnCodes,"Unexpected EOF [5]\n"); # 5
+    push(@SpalnCodes,"No initial jump...\n"); # 6
+    push(@SpalnCodes,"Percent identity too low\n"); # 7
+    push(@SpalnCodes,"Unexpected amino count despite SelenocysteineCheck\n"); #8
+    push(@SpalnCodes,"TRUE HIT!\n"); # 9
 
 
     # We'll sort these just to make sure things stay constant
@@ -2705,12 +2715,15 @@ sub BLATAssistedSPALN
     # Name all the files each thread will have access to
     my $protfilename  = $foldername.'Quilter.BAS.'.$threadID.'.prot.fa';
     my $nuclfilename  = $foldername.'Quilter.BAS.'.$threadID.'.nucl.fa';
+    my $spalnfname    = $foldername.'Quilter.BAS.spaln.'.$threadID.'.in'; # The actual spaln output
     my $thread_hits   = $foldername.'Quilter.BAS.hits.'.$threadID.'.out';
     my $thread_misses = $foldername.'Quilter.BAS.misses.'.$threadID.'.out';
+    my $thread_nears  = $foldername.'Quilter.BAS.nears'.$threadID.'.out';
     my $thread_tes    = $foldername.'Quilter.BAS.TEs.'.$threadID.'.out';
-    my $thread_spaln  = $foldername.'Quilter.BAS.spaln.'.$threadID.'.out';
+    my $thread_spaln  = $foldername.'Quilter.BAS.spaln.'.$threadID.'.out'; # Where we record info about spalnery
     open(my $ThreadHitFile,'>',$thread_hits)    || die "\n  ERROR:  Failed to open BLAT hit file '$thread_hits'\n\n";
     open(my $ThreadMissFile,'>',$thread_misses) || die "\n  ERROR:  Failed to open BLAT miss file '$thread_misses'\n\n";
+    open(my $ThreadNearFile,'>',$thread_nears)  || die "\n  ERROR:  Failed to open BLAT near-miss file '$thread_nears'\n\n";
     open(my $ThreadTEFile,'>',$thread_tes)      || die "\n  ERROR:  Failed to open BLAT TE file '$thread_misses'\n\n";
     open(my $ThreadSpalnFile,'>',$thread_spaln) || die "\n  ERROR:  Failed to open BLAT spaln file '$thread_spaln'\n\n";
 
@@ -2755,7 +2768,7 @@ sub BLATAssistedSPALN
 	    # looking.
 	    my $BestScore = $BestScore{$seqname};
 	    my $chrname   = $TargetChr{$seqname};
-	    my $revcomp   = $TargetRev{$seqname};	    
+	    my $revcomp   = $TargetRev{$seqname};
 
 	    # Generate an index that sorts the start positions
 	    my @NStarts;
@@ -2855,6 +2868,9 @@ sub BLATAssistedSPALN
 	    # 1:  10  MB
 	    # 0:  Bail
 	    #
+	    my $last_report;
+	    my $reported_chr;
+	    my $reported_off;
 	    my $highscore = 0;
 	    my $hitline;
 	    my $remaining_attempts = 3;
@@ -2889,21 +2905,27 @@ sub BLATAssistedSPALN
 		    # Assemble the sytem call to run SPALN
 		    my $spalnCmd = $spaln.' -Q3 -O1 -S3 -ya3 '.$nuclfilename.' '.$protfilename;
 		    $spalnCmd = $spalnCmd.' 2>/dev/null';# if (!$verbose);
-		    $spalnCmd = $spalnCmd.' |';	
+		    $spalnCmd = $spalnCmd.' 1>'.$spalnfname;
 		    
 		    #print $CmdLog "> (".localtime()." $spalnCmd\n\n";
 
 		    if ($revcomp) { $chrname = $chrname.'[revcomp]'; }
 		    
 		    # Parse SPALN's output
-		    my ($nextScore,$nextLine,$report) = ParseSPALNOutput($spalnCmd,$revcomp,$minNucl-1,$highscore,
-									 $chrname,$seqname,$seqlength,$protfilename,
-									 $spalner,$timing,$timingdata);
+		    my ($nextScore,$nextLine,$report) = ParseSPALNOutput($spalnCmd,$spalnfname,$revcomp,$minNucl-1,
+									 $highscore,$chrname,$seqname,$seqlength,
+									 $protfilename,$spalner,$timing,$timingdata);
 		    @{$timingdata}[10]++ if ($timing);
+
+		    # Cut my life into pieces
+		    # This is my last report
+		    $last_report  = $report;
+		    $reported_chr = $chrname;
+		    $reported_off = $minNucl-1;
 
 		    # What happened in there?
 		    print $SpalnLog "BLAT: $seqname $chrname $minNucl..$maxNucl $SpalnCodes[$report]";
-		    
+
 		    # Is this better than any hit we've seen?
 		    if ($nextScore > $highscore) {
 			$highscore = $nextScore;
@@ -2922,8 +2944,29 @@ sub BLATAssistedSPALN
 	    if ($highscore) {
 		$hitline =~ s/Method     \: SPALN/Method     \: SPALN\+BLAT/;
 		print $ThreadHitFile  "$hitline";
-	    } else { 
-		print $ThreadMissFile "$seqname\n"; 
+	    } else {
+
+		# If there's some amount of the sequence that hit we'll do a quick pull
+		# of the specific region where we're mapping and note it as a near miss.
+		# This gives MultiMSA an opportunity to identify that parts of the sequence
+		# map.
+		if ($last_report == 4 || $last_report == 6 || $last_report == 7 || $last_report == 8) {
+
+		    my $orig_chr = $reported_chr;
+		    my $revcomp  = 0;
+		    if ($orig_chr =~ /\[revcomp\]/) {
+			$orig_chr =~ s/\[revcomp\]//;
+			$revcomp = 1;
+		    }
+		    my ($tightstart,$tightend) = PullTightSpalnRange($spalnfname,$orig_chr,$revcomp);
+
+		    # TOO EASY!
+		    print $ThreadNearFile "$seqname $reported_chr $tightstart\.\.$tightend\n";
+
+		} else {
+		    print $ThreadMissFile "$seqname\n"; 
+		}
+
 	    }
 	    
 	} else {
@@ -2938,11 +2981,13 @@ sub BLATAssistedSPALN
     #
     if (-e $nuclfilename) { system("rm $nuclfilename"); }
     if (-e $protfilename) { system("rm $protfilename"); }
+    if (-e $spalnfname)   { system("rm $spalnfname");   }
 
     # Close up the thread-specific files
     #
     close($ThreadHitFile);
     close($ThreadMissFile);
+    close($ThreadNearFile);
     close($ThreadTEFile);
 
     # de-fork
@@ -2996,6 +3041,16 @@ sub BLATAssistedSPALN
 	    system("rm \"$thread_spaln\"");
 	}
 
+	$thread_nears = $foldername.'Quilter.BAS.nears'.$threadID.'.out';
+	if (-e $thread_nears) {
+	    open($ThreadNearFile,'<',$thread_nears) || die "\n  ERROR:  Failed to open BLAT near-miss file '$thread_nears'\n\n";
+	    while (my $line = <$ThreadNearFile>) {
+		print $NearFile "$line";
+	    }
+	    close($ThreadNearFile);
+	    system("rm \"$thread_nears\"");
+	}
+
     }
 
     close($TEfile);
@@ -3021,10 +3076,11 @@ sub ParseSPALNOutput
 {
     my ($i,$j,$k);
 
-    my $spalnCmd  = shift;
-    my $revcomp   = shift;
-    my $offset    = shift;
-    my $highscore = shift;
+    my $spalnCmd   = shift;
+    my $spalnfname = shift;
+    my $revcomp    = shift;
+    my $offset     = shift;
+    my $highscore  = shift;
 
     my $ChrName = shift;
 
@@ -3056,7 +3112,8 @@ sub ParseSPALNOutput
 
     
     $timeA = [Time::HiRes::gettimeofday()] if ($timing);
-    open(my $stdout,$spalnCmd) || die "\n  ERROR: Spaln command '$spalnCmd' failed\n\n";
+    if (system($spalnCmd)) { die "\n  ERROR: Spaln command '$spalnCmd' failed\n\n"; }
+    open(my $stdout,'<',$spalnfname) || die "\n  ERROR: Failed to open Spaln output '$spalnfname'\n\n";
     @{$timingdata}[$timing] += Time::HiRes::tv_interval($timeA) if ($timing);
 
 
@@ -3273,7 +3330,7 @@ sub ParseSPALNOutput
 	#
 	if ($first_jump == 0) {
 
-	    if ($line =~ /\s+(\d+)/) {
+	    if ($line =~ /^\s*(\d+)/) {
 
 		$first_jump = $1;
 
@@ -3702,6 +3759,65 @@ sub ParseSPALNOutput
 
 }
 
+
+
+
+
+#########################################################################
+#
+#  Function Name: PullTightSpalnRange
+#
+#  About: When we have a sequence that seems like it nearly had a Spaln
+#         mapping but failed for a minor error we'll just grab the specific
+#         nucleotide region where the mapping is (not the huge window)
+#         and record that.
+#
+sub PullTightSpalnRange
+{
+    my $spalnfname = shift;
+    my $chr = shift;
+    my $revcomp = shift;
+
+    open(my $inf,'<',$spalnfname) || die "\n  ERROR:  Failed to open Spaln output file '$spalnfname'\n\n";
+
+    my $first_pos;
+    while (my $line = <$inf>) {
+	if ($line =~ /$chr\/(\d+)\-\d+/) {
+	    $first_pos = $1;
+	    last;
+	}
+    }
+
+    my $num_used_nucls = 0;
+    my $total_skip_len = 0;
+    while (my $line = <$inf>) {
+	if ($line =~ /\s*(\d+) ([^\|]+)\| $chr\/\d+\-\d+/) {
+	    $first_pos += $1;
+	    my $nucls = $2;
+	    $nucls =~ s/[^A-Z]//g;
+	    $num_used_nucls += length($nucls);
+	    last;
+	}
+    }
+
+    while (my $line = <$inf>) {
+	if ($line =~ /\s*\d+ ([^\|]+)\| $chr\/\d+\-\d+/) {
+	    my $nucls = $1;
+	    $nucls =~ s/[^A-Z]//g;
+	    $num_used_nucls += length($nucls);
+	} elsif ($line =~ /\;\; skip (\d+) nt/) {
+	    $total_skip_len += $1;
+	}
+    }
+
+    close($inf);
+
+    my $last_pos = $first_pos;
+    if ($revcomp) { $last_pos -= $total_skip_len; }
+    else          { $last_pos += $total_skip_len; }
+    return($first_pos,$last_pos);
+
+}
 
 
 
