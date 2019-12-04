@@ -316,6 +316,7 @@ for ($i=0; $i<$numSpecies; $i++) {
     # Grab a hold of your toys (confirming that they're where they should be)
     my $HitFileName  = $SpeciesDir{$Species[$i]}.'/Hits.Quilter.out';
     my $MissFileName = $SpeciesDir{$Species[$i]}.'/Misses.Quilter.out';
+    my $NearFileName = $SpeciesDir{$Species[$i]}.'/NearHits.Quilter.out';
     #if (!(-e $HitFile)) { die "\n  Failed to locate Quilter output '$HitFile'\n\n"; }
 
     # Name the directory where we'll be putting the output from MultiMSA.pl
@@ -394,6 +395,10 @@ for ($i=0; $i<$numSpecies; $i++) {
     # If we didn't have any disagreements, kill the disagreement file
     system("rm $DisFilename") if (-e $DisFilename && !(-s $DisFilename));
 
+    # We're also now splitting all of the 'Hit' data off into gene-family-
+    # specific files, so presumably we should also be free to kill this file
+    system("rm \"$HitFileName\"");
+
 
     # Make a hash of all the names of sequences that we missed.
     # This will include any sequences that hit to a different 
@@ -417,6 +422,40 @@ for ($i=0; $i<$numSpecies; $i++) {
 	close($MissFile);
     }
     
+    
+    # You'll also need to know who had decent (but presumably not good enough)
+    # Spaln mapping.  These will be recorded as both Misses and as their own thing
+    #
+    # NOTE: The chromosomes labeled in this file will have '[revcomp]' if revcomp
+    #
+    my %QuilterNearHits;
+    if (-e $NearFileName) {
+	open(my $NearFile,'<',$NearFileName);
+	while (my $line = <$MissFile>) {
+	    $line =~ s/\n|\r//g;
+	    next if (!$line);
+	    $line =~ /^(\S+) (\S+) (\S+)$/;
+	    my $seqname = $1;
+	    my $chromosome = $2;
+	    my $maprange = $3;
+	    $seqname =~ /\|([^\|]+)$/;
+	    my $fam_name = lc($1);
+	    # First off, this is technically a miss
+	    if ($QuilterMisses{$fam_name}) { 
+		$QuilterMisses{$fam_name} = $QuilterMisses{$fam_name}.'&'.$seqname;
+	    } else {
+		$QuilterMisses{$fam_name} = $seqname;
+	    }
+	    # Second off, this was a close hit -- keep the three fields single-space separated
+	    if ($QuilterNearHits{$fam_name}) {
+		$QuilterNearHits{$fam_name} = $QuilterNearHits{$fam_name}.'&'.$line;
+	    } else {
+		$QuilterNearHits{$fam_name} = $line;
+	    }
+	}
+	close($NearFile);
+    }
+
 
     # Figure out which groups have MSAs in this species
     foreach my $filename (@DirContents) {
@@ -455,19 +494,31 @@ for ($i=0; $i<$numSpecies; $i++) {
     my $singleseqresults  = $SpeciesDir{$Species[$i]}.'Mirage.Multi.Temp.afa';
 
     foreach my $missedgroup (keys %QuilterMisses) {
-	my @seqnames = split('&',$QuilterMisses{$missedgroup});
-	foreach my $seq (@seqnames) {
+	my @MissedSeqs = split('&',$QuilterMisses{$missedgroup});
+	foreach my $seq (@MissedSeqs) {
 	    my $GBSref = AttachSeqToMSA($seq,$MultiMSADir{$Species[$i]},$missedgroup,
 					$SpeciesDBNames[$i],\%GroupsBySpecies,$i+1,
 					$singleseqfilename,$singleseqresults);
 	    %GroupsBySpecies = %{$GBSref};
 	}
     }
+
     system("rm $singleseqfilename") if (-e $singleseqfilename);
     system("rm $singleseqresults")  if (-e $singleseqresults);
 
     # Knock it off with that darn timing!
     $MultiMSATimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
+
+
+    ##################################################################
+    #                                                                #
+    #   NEW STAGE: Finding mappings after we've established an MSA   #
+    #                                                                #
+    ##################################################################
+
+    
+    # NOTE: We're going to need to parallelize here
+    
 
 }
 
