@@ -510,15 +510,39 @@ for ($i=0; $i<$numSpecies; $i++) {
     $MultiMSATimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
 
 
+
+
     ##################################################################
     #                                                                #
     #   NEW STAGE: Finding mappings after we've established an MSA   #
     #                                                                #
     ##################################################################
 
+
+
     
     # NOTE: We're going to need to parallelize here
+    my $processes = 1;
+    my $threadID  = 0;
+    my $pid;
+    while ($processes < $numProcesses) {
+	if ($pid = fork) {
+	    if (not defined $pid) { die "\n  ERROR: Fork failed (Mirage.pl:PartialMap)\n\n"; }
+	    $threadID = 0;
+	} else {
+	    $threadID = $processes;
+	    last;
+	}
+	$processes++;
+    }
+
     
+    # Pick out which of the missed files you're going to study
+
+
+    # All done with those lil' snaccs
+    if ($threadID) { exit(0); }
+    while (wait() > -1) { }
 
 }
 
