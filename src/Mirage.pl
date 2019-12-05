@@ -431,7 +431,7 @@ for ($i=0; $i<$numSpecies; $i++) {
     my %QuilterNearHits;
     if (-e $NearFileName) {
 	open(my $NearFile,'<',$NearFileName);
-	while (my $line = <$MissFile>) {
+	while (my $line = <$NearFile>) {
 	    $line =~ s/\n|\r//g;
 	    next if (!$line);
 	    $line =~ /^(\S+) (\S+) (\S+)$/;
