@@ -928,7 +928,7 @@ for (my $j=0; $j<$CPUs; $j++) {
 # (we don't want to overwrite past outputs).
 my $finalHits   = 'Hits.Quilter.out';
 my $finalMisses = 'Misses.Quilter.out';
-my $finalNears  = 'NearMisses.Quilter.out';
+my $finalNears  = 'NearHits.Quilter.out';
 if ($resdir) {
     if ($ARGV[$resdir] =~ /\/$/) {
 	$finalHits   = $ARGV[$resdir].$finalHits;
@@ -945,7 +945,7 @@ if (!$overw) {
     while (-e $finalHits || -e $finalMisses) {
 	$finalHits   = 'Hits.'.$i.'.Quilter.out';
 	$finalMisses = 'Misses.'.$i.'.Quilter.out';
-	$finalNears  = 'NearMisses.'.$i.'.Quilter.out';
+	$finalNears  = 'NearHits.'.$i.'.Quilter.out';
 	$i++;
     }
 } else {
@@ -1096,13 +1096,13 @@ if (-s $bigBlat) {
     # Run SPALN on the results of the BLAT search
     open(my $Results,'>',$finalHits);
     open(my $Misses,'>',$finalMisses);
-    open(my $NearMisses,'>',$finalNears);
+    open(my $NearHits,'>',$finalNears);
     BLATAssistedSPALN(\%ChrLengths,\%SeqLengths,\%BlatNameIndex,$ARGV[1],$ARGV[0],
-		      $BlatResults,$Results,$Misses,$NearMisses,$SpalnLog,$ARGV[3],
+		      $BlatResults,$Results,$Misses,$NearHits,$SpalnLog,$ARGV[3],
 		      $CPUs,$SpalnLog,$spalner,$timing,\@TimingData);
     close($Results);
     close($Misses);
-    close($NearMisses);
+    close($NearHits);
 
     close($SpalnLog);
     
@@ -3196,8 +3196,8 @@ sub ParseSPALNOutput
     }
 
     
-    # If we've hit the end of the file or have worse than 97% identity
-    # jump ship.
+    # If we've hit the end of the file or don't have all of the characters
+    # we were hoping to see.
     if (eof($stdout)) {
 	close($stdout); 
 	return(0,0,3); 

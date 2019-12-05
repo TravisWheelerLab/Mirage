@@ -7,7 +7,8 @@ use POSIX;
 sub ReadMSA;
 sub BuildMapMSA;
 sub SquishMSAs;
-
+sub PMParseSPALNOutput;
+sub SelenocysteineCheck;
 
 # NOTES (to keep me from losing my mind)
 #
@@ -403,19 +404,51 @@ if ($num_maps) {
 	    
 	    my $spalnCmd = $spaln.' -Q3 -O1 -S3 -ya3 "'.$dnafilename.'" "[prot]" 1>"[out]" 2>/dev/null';
 	    
+	    # Now we can run our two separate SPALNs and see if they give us *ANY* decent mapping.
+	    # This is largely just a copy of the now infamous 'ParseSPALNOutput' from Quilter, but with
+	    # some of the finer points shaved down, 'cuz that's the way I do it, baby.
+	    # The returned hashes map amino indices from the split sequences to positions in the genome.
+	    
 	    my $LspalnCmd = $spalnCmd;
 	    $LspalnCmd =~ s/\[prot\]/$Lprotfname/;
 	    $LspalnCmd =~ s/\[out\]/$Lspalnfname/;
-	    if (system($LspalnCmd)) { die "\n  Spaln command '$LspalnCmd' failed\n\n"; }
+	    my $LAITGPref = PMParseSPALNOutput($LspalnCmd,$Lspalnfname,$revcomp,$offset,$Lprotfname);
+	    my %LAminoIndexToGenPos = %{$LAITGPref};
 	    
 	    my $RspalnCmd = $spalnCmd;
 	    $RspalnCmd =~ s/\[prot\]/$Rprotfname/;
 	    $RspalnCmd =~ s/\[out\]/$Rspalnfname/;
-	    if (system($RspalnCmd)) { die "\n  Spaln command '$RspalnCmd' failed\n\n"; }
+	    my $RAITGPref = PMParseSPALNOutput($RspalnCmd,$Rspalnfname,$revcomp,$offset,$Rprotfname);
+	    my %RAminoIndexToGenPos = %{$RAITGPref};
 
-	    # Now that we have our two separate SPALNs, let's see if they give us *ANY* decent mapping.
-	    # This is largely just a copy of the now infamous 'ParseSPALNOutput' from Quilter, but with
-	    # some of the finer points shaved down, 'cuz that's the way I do it, baby.
+
+	    # First -- are these mappings consistent (assuming we did get successful mappings from both)?
+	    my @LeftAminoKeys   = sort {$a <=> $b} keys %LAminoIndexToGenPos;
+	    my @RightAminoKeys  = sort {$a <=> $b} keys %RAminoIndexToGenPos;
+	    if (scalar(@LeftAminoKeys) && scalar(@RightAminoKeys)) {
+
+		my $consistent = 1; # Let's just assume the best?
+		if ($revcomp) {
+		    $consistent = 0 if ($LeftAminoKeys[scalar(@LeftAminoKeys)-1] < $RightAminoKeys[0]);
+		} else {
+		    $consistent = 0 if ($LeftAminoKeys[scalar(@LeftAminoKeys)-1] > $RightAminoKeys[0]);
+		}
+		
+		# If the mappings aren't consistent, I guess we'll pick the longest one?
+		if (!$consistent) {
+		    if (scalar(@LeftAminoKeys) > scalar(@RightAminoKeys)) {
+			%RAminoIndexToGenPos = ();
+			@RightAminoKeys = ();
+		    } else {
+			%LAminoIndexToGenPos = ();
+			@LightAminoKeys = ();			
+		    }
+		}
+	    }
+
+	    # Now we can take our indices and see if they're consistent with the mappings used by
+	    # the more satisfactorily mapped sequences.
+
 	    
 	    
 	} else {
@@ -425,6 +458,8 @@ if ($num_maps) {
 	    # In this case we just re-run SPALN and examine whether there's just a little
 	    # goof preventing us from calling it a good mapping...
 	    #
+
+	    
 	    
 	}
 
@@ -734,6 +769,882 @@ sub SquishMSAs
     return (\@MSASquish,\@MapMSASquish);
 
 }
+
+
+
+
+
+
+#########################################################################
+#
+#  Function Name: ParseSPALNOutput
+#
+#  About: The name says it all.  Run a SPALN command and make sense of
+#         its wisdom.
+#
+#  BUT ALSO: This has been modified for PartialMap -- I'll try to just
+#         comment-out anything that gets turned off, so in case it ever
+#         turns out we need to turn things back on they'll be ready for
+#         us.
+#
+#         I think the direction I'm going to take this is that we do all
+#         of the standard error-checking / bug-correction, but don't worry
+#         about any issues of length / percent ID -- instead, we'll return
+#         a hash where each position in the protein sequence is a key and
+#         its mapping on the genome is the value.
+#
+#  YELLING! I HAVEN'T THOUGHT ABOUT HOW INSERTIONS WILL WORK IN THIS MODEL!!!
+#
+#    1.  Don't trust percent identities.
+#    2.  J = S.
+#
+sub PMParseSPALNOutput
+{
+    my ($i,$j,$k);
+
+    my $spalnCmd   = shift;
+    my $spalnfname = shift;
+    my $revcomp    = shift;
+    my $offset     = shift;
+
+    # PM: I'm so bored of these variables
+    #my $highscore  = shift;
+    #my $ChrName = shift;
+    #my $seqname = shift;
+    #my $prot_len     = shift;
+
+    # PM: Need this for 'SelenocysteineCheck'
+    my $protfilename = shift;
+    
+    # NOTE: When we're just looking for SPALN output we can't just
+    #       run the command and jump ship, due to how the various
+    #       functions depend on score comparison (well, BLAT).
+    #       For this reason, we'll set the 'hitstring' to be the full
+    #       output AFTER we get the score.
+    #
+    #my $spalner = shift;
+
+    # Are we timing?
+    #my $timing     = shift;
+    #my $timingdata = shift;
+    #my $timeA;
+
+    my ($line,$hitstring);
+
+    # DEBUGGING
+    #my $printspalnCmd = $spalnCmd;
+    #$printspalnCmd =~ s/\|$//;
+    #system($printspalnCmd);
+    # DEBUGGING
+
+    
+    #$timeA = [Time::HiRes::gettimeofday()] if ($timing);
+    if (system($spalnCmd)) { die "\n  ERROR: Spaln command '$spalnCmd' failed\n\n"; }
+    open(my $stdout,'<',$spalnfname) || die "\n  ERROR: Failed to open Spaln output '$spalnfname'\n\n";
+    #@{$timingdata}[$timing] += Time::HiRes::tv_interval($timeA) if ($timing);
+
+
+    # Look for where SPALN has called the start and end of the region.
+    my ($range_low,$range_high);
+    $line = readline($stdout);
+    while (!eof($stdout) && $line !~ /\S+\/(\d+)\-(\d+)/) {
+	$line = readline($stdout);
+    }
+
+    # If we've hit the end of the file, no point continuing
+    if (eof($stdout)) {
+	close($stdout);
+	return(0,0,1); 
+    }
+
+
+    # Grab the range of positions on the chromosome that we hit in.
+    # Note that we want these to be formatted low=start, high=end
+    $line =~ /\S+\/(\d+)\-(\d+)/;
+    my $start_pos = $1;
+    my $end_pos   = $2;
+
+
+    # Go to the section that lays out the score and identity
+    #
+    # NOTE: Even though we generally know what's going on with the
+    #       complementarity going into our adventures with SPALN,
+    #       it at least one case there's been a flip.
+    #
+    my $saw_complement = 0;
+    my ($hitscore,$percent,$true_num_chars);
+    while ($line = <$stdout>) {
+
+	# Complementarity marker!
+	if ($line =~ /\;C complement\(/) {
+	    $saw_complement = 1;
+	}
+
+	if ($line =~ /Score \= (\d+)/) {
+
+	    # PM: I don't think we really need any of the information
+	    #     stored here -- we'll just keep this while loop to
+	    #     make sure we always end up where we want to be.
+	    last;
+	    
+	    # SPALN's score
+	    #
+	    $hitscore = $1;
+
+	    # It turns out we need to manually confirm that every
+	    # character is included, because SPALN loves pranking
+	    # me around.
+	    #
+	    if ($line =~ /Score \= \S+ \S+\, (\d+)\.\d+ \S+\, (\d+)\.\d+ \S+\, (\d+)\.\d+ \S+\, (\d+)\.\d+/) {
+		$true_num_chars = $1 + $2 + $3 + $4;
+	    } else {
+
+		# It seems that in cases where SPALN gives BAD hits
+		# it breaks away from the expected format, so we'll
+		# just assume that we want to try again (hence the
+		# (0,1) return).
+		#
+		close($stdout);
+		return(0,1,2);
+		
+	    }
+
+	    last;
+	}
+    }
+
+
+    # PM: Shouldn't make much of a difference
+    #
+    # Check for any unexpected complementarity stuff
+    #if ($revcomp) {
+    #if (!$saw_complement) {
+    #$revcomp = 0;
+    #$ChrName =~ s/\[revcomp\]//;
+    #}
+    #} else {
+    #if ($saw_complement) {
+    #$revcomp = 1;
+    #$ChrName = $ChrName.'[revcomp]';	    
+    #}
+    #}
+
+    
+    # PM: Still don't want an EOF, but we'll take what we can get
+    #
+    # If we've hit the end of the file or have worse than 97% identity
+    # jump ship.
+    if (eof($stdout)) {
+	close($stdout); 
+	return(0,0,3); 
+	#} elsif ($true_num_chars < $prot_len) {
+	#close($stdout);
+	#return(0,1,4); # <- This '1' might give us a second chance (pull in more sequence)
+    }
+    
+    
+    # NOW we can go to the real business (the alignment lines)
+    $line = readline($stdout); # 'ALIGNMENT'
+    while (!eof($stdout) && $line !~ /ALIGNMENT/) {
+	$line = readline($stdout);
+    }
+
+
+    # Still not totally stoked on seeing an eof
+    if (eof($stdout)) {
+	close($stdout);
+	return(0,0,5);
+    }
+
+
+    # PM: Not. Relevant. SIR.
+    #
+    # Here's where we'll gather the SPALN output when we're looking
+    # to see the actual SPALN output, for debugging.
+    #
+    #if ($spalner) {
+    #close($stdout);
+    #open($stdout,$spalnCmd) || die "\n  ERROR:  Spaln command '$spalnCmd' failed\n\n";
+    #$hitstring = 'SEQ: '.$seqname."\n";
+    #$hitstring = $hitstring.'CMD: '.$spalnCmd."\n";
+    #while ($line = <$stdout>) { $hitstring = $hitstring.$line; }
+    #$hitstring = $hitstring."\nEND\n\n";
+    #close($stdout);
+    #return($hitscore,$hitstring,0);
+    #}
+
+
+    #
+    # ALRIGHT, GENTS AND LADIES, it looks like we're actually
+    # doing this thing.
+    #
+
+    
+    # BIG PM NOTE
+    # -----------
+    #
+    # The plan is to let all of this run exactly the way that it would in
+    # Quilter, but then we sneak in at the end and re-traverse the output
+    # to figure out the specific amino acid coordinates (w.r.t. potentially
+    # split-apart sequences) and do some (hopefully) straightforward offset-ery.
+    #
+
+
+    # Scan through the SPALN output constructing 4 arrays:
+    #
+    #     - An array with the DNA sequence characters
+    #     - An array with the protein sequence characters
+    #     - An array mapping protein sequence indices to
+    #       DNA sequence indices
+    #     - An array mapping DNA sequence characters to
+    #       positions in the genome
+    #
+    # The combination of these arrays will allow us to do
+    # all of the work we need in terms of generating our
+    # final mapping of the protein to the genome, correcting
+    # for micro-exons.
+    #
+    # UPDATE (Nov. 2019): It looks like Spaln will, somewhat
+    # regularly, start/end exons with extraneous gaps, so I'm
+    # going to try to pay attention to the starts and ends of
+    # exons to make sure these don't drag good hits into the
+    # mud.
+    #
+    my $gap_run_len = 0;
+    my $starting_exon = 1;
+    my $mismatches = 0;
+    my @FullNuclSeq;
+    my @FullProtSeq;
+    my @AAPositions;
+    my @NuclPositions;    
+    my $trans_line;
+    my $full_length = 0;
+    my $num_aas     = 0; 
+    my $current_pos = $offset;
+    my $first_jump  = 0;
+    while (!eof($stdout)) {
+
+	# Grab the next line, clean it up, make sure it's
+	# meaningful.
+	#
+	$line = readline($stdout);
+	$line =~ s/\n|\r//g;
+	next if (!$line);
+
+
+	# If we're skipping around in the genome, adjust
+	# the position variable accordingly.
+	#
+	if ($line =~ /skip\s+(\d+)\s+nt/) {
+	    my $skiplen = int($1);
+	    if ($revcomp) { $current_pos -= $skiplen; }
+	    else          { $current_pos += $skiplen; }
+	    $starting_exon = 1; # Whatever we see next will start an exon
+	    $mismatches -= $gap_run_len; # If we had a run of gaps prior to the end of the exon, fugghet about 'em
+	    next;
+	}
+
+
+	# If we've made it this far but don't match this
+	# terminal format then we're looking at SPALN's
+	# translation of the nucleotide sequence
+	#
+	if ($line !~ /\| \S+\/\d+\-\d+/) {
+	    $trans_line = $line;
+	    next;
+	}
+
+	my $nn_line = $line;
+
+	# EXCELLENT!  This is the next line of DNA characters
+	#
+	my @NextNucls = split(//,$line);
+
+	# We also split up what would be the translation, so that
+	# we can evaluate percent ID for ourselves.
+	#
+	my @TransLine = split(//,$trans_line);
+
+	# The final check we need to do is to add/subtract
+	# the initial 'jump' into the hit (but only if this
+	# is the very beginning)
+	#
+	if ($first_jump == 0) {
+
+	    if ($line =~ /^\s*(\d+)/) {
+
+		$first_jump = $1;
+
+		# Special catch for BLAT parsing
+		if ($revcomp==3) { $current_pos  = ($start_pos+1)-$first_jump; }
+		else             { $current_pos += $first_jump;                }
+
+		$first_jump = 1;
+
+	    } else {
+		return(0,0,6);
+	    }
+
+	}
+
+	
+	# ... which means that the following line is the next
+	# line of protein characters.
+	#
+	$line = readline($stdout);
+	$line =~ s/\n|\r//g;
+	my @NextAAs = split('',$line);
+
+
+	# Advance to the actual DNA sequence.
+	# NOTE:  it's possible for SPALN to have a line of
+	#        '-' characters, which we'd want to throw
+	#        away.  BUT we still need to count up the
+	#        position indices when we encounter these. << Do we?
+	#
+	$i = 0;
+	#while ($i < @NextNucls && $NextNucls[$i] !~ /[a-zA-Z]|\|/) { $i++; }
+	while ($i < @NextNucls && $NextNucls[$i] =~ /\s/) { $i++; }
+	while ($i < @NextNucls && $NextNucls[$i] !~ /\s/) { $i++; }
+	while ($i < @NextNucls && $NextNucls[$i] =~ /\s/) { $i++; }
+	
+
+
+	# Some sort of SPALN weirdness...
+	#
+	next if ($i == @NextNucls || $NextNucls[$i] eq '|');
+
+
+	# Run along the two lines storing all of the relevant
+	# information that we can get out of them.
+	#
+	while ($NextNucls[$i] !~ /\|/) {
+	    
+	    push(@FullNuclSeq,$NextNucls[$i]);
+	    push(@NuclPositions,$current_pos);
+
+	    # If we're centered on a codon, take note.
+	    #
+	    if ($NextAAs[$i] =~ /\w/) {		
+		push(@FullProtSeq,$NextAAs[$i]);
+		push(@AAPositions,$full_length);
+		$num_aas++;
+	    }
+	    
+	    # Also, note a *SUBSTITUTION* mismatch (sorry for yelling)
+	    if ($NextAAs[$i] =~ /\S/
+		&& $NextAAs[$i] ne $TransLine[$i] 
+		&& !(uc($TransLine[$i]) eq 'J' && uc($NextAAs[$i]) eq 'S')) { # Sometimes SPALN calls an 'S' a 'J'
+		if ($NextAAs[$i] eq '-') {
+		    # Gap mismatch (could be a goof...)
+		    if (!$starting_exon) {
+			$gap_run_len++;
+			$mismatches++;
+		    }
+		} else {
+		    $mismatches++; # Genuine mismatch
+		}
+	    } else {
+		$gap_run_len=0;
+	    }
+	    # I'm using that format because we might see more delightful tricks
+
+
+	    # Increment the position in the genome
+	    #
+	    if ($NextNucls[$i] =~ /\w/) {
+		if ($revcomp) { $current_pos--; }
+		else          { $current_pos++; }
+	    }
+
+	    $full_length++;
+	    $i++;
+	    
+	}
+	
+    }
+    
+
+    # Done reading input!  Now we just need to verify that
+    # any and all micro-exons get cleaned up!
+    #
+    close($stdout);
+
+
+    # If we aren't satisfied with the overall percent identity of the
+    # hit go back (possibly to pull in more sequence and try again).
+    #
+    # * * * THIS IS THE PERCENT IDENTITY CHECK POSITION * * * 
+    #
+    return (0,1,7) if ($mismatches/$prot_len > 0.05);
+    
+
+    # Selenocysteine does some crazy stuff, man.  I translated some once
+    # and I'm still coming down.
+    #
+    if ($num_aas != $prot_len) {
+	
+	my ($fps_ref,$aap_ref) = SelenocysteineCheck(\@FullNuclSeq,\@FullProtSeq,\@AAPositions,$protfilename);
+	@FullProtSeq = @{$fps_ref};
+	@AAPositions = @{$aap_ref};
+	$num_aas = scalar(@FullProtSeq);
+
+	# PM: It's still good to check for Selenocysteine, but we no
+	#     don't mind so much about our mapping covering the full
+	#     protein sequence (well, technically partial, but whatever)
+	#return (0,0,8) if ($num_aas != $prot_len);
+
+    }
+
+
+    # ********************************************************************
+    # *** 'IF ZERO' WILL TOGGLE MICRO EXON SEARCHING OFF *****************
+    # ********************************************************************
+    #
+    #
+    #if (0) {
+
+    # Run along SPALN's output looking for 'exons' with
+    # improbably low amino acid counts.  Currently, we
+    # say that an exon should have at least 4 amino acids.
+    #
+    my @MicroExonRuns;
+    my $micro_start = -1;
+    my $micro_end   = 0;
+    
+    $i = 0;
+    while ($i < $num_aas) {
+
+
+	# Figure out the genome position of the current amino
+	# acid, so that we can infer exon boundaries (large
+	# changes in nucleotide position).
+	#
+	my $aa_loc   = $NuclPositions[$AAPositions[$i]];
+	my $aa_start = $i;
+	my $exon_len = 1;
+
+	
+	# Run through this exon, counting how many amino acids
+	# it has.
+	#
+	$i++;
+	while ($i < $num_aas && abs($NuclPositions[$AAPositions[$i]] - $NuclPositions[$AAPositions[$i-1]]) < 5) {
+	    $exon_len++;
+	    $i++;
+	}
+
+
+	# If we have too few amino acids, then we're working
+	# with a micro exon, baby!  Observe that we chain together
+	# runs of contiguous micro-exons.
+	#
+	if ($exon_len < 4) {
+	    
+	    if ($micro_start == -1) { $micro_start = $aa_start; }
+	    $micro_end = $i;
+	    
+	} elsif ($micro_start != -1) {
+	    
+	    push(@MicroExonRuns,$micro_start.'-'.$micro_end);
+	    $micro_start = -1;
+	    
+	}
+	
+    }
+    
+    
+    # Next we'll run through each of the indicated micro-exon
+    # regions ('regions' because they can be chained together)
+    # and try to re-align the amino acids to the ends of the
+    # 'major' exons that flank them.
+    #
+    # NOTE: Be careful that we don't step over a breakpoint by
+    #       checking whether NuclPositions[i] and NP[i+1] are
+    #       1 off from one another.
+    #
+    foreach my $micro_run_str (@MicroExonRuns) {
+
+	
+	# Split the indices out of the string
+	#
+	my @MicroRun = split(/\-/,$micro_run_str);
+	$micro_start = $MicroRun[0];
+	$micro_end   = $MicroRun[1]; # One past actual end, so we can do strict '<'
+
+
+	# Identify the amino acid sequence that constitutes
+	# this micro exon (or chain of micro exons)
+	#
+	my @MicroAAs;
+	for ($j = $micro_start; $j < $micro_end; $j++) {
+	    push(@MicroAAs,$FullProtSeq[$j]);
+	}
+
+	# Figure out how long the micro exon is (keeping in mind that '_end' is
+	# one position past the actual end index)
+	#
+	my $micro_len = $micro_end-$micro_start;
+
+	
+	# Look at the preceding exon
+	#
+	my @RearExt;
+	my $rear_ext_len = 0;
+	if ($micro_start > 0) {
+
+	    
+	    # Get situated so that we can start trying to
+	    # transfer amino acids from our micro exons to
+	    # the back end of the preceding exon.
+	    #
+	    # NOTE (for making sense of this):
+	    # --------------------------------
+	    # NuclPositions are the chromosome indices, AAPositions are the
+	    # array indices that SPALN has identified as codon centers -- thus
+	    # looking up the NuclPosition of an AAPosition gets you the genome
+	    # index for the AAPosition's codon center.
+	    #
+	    my $rear_codon_center = $NuclPositions[$AAPositions[$micro_start-1]];
+	    my $nuclseq_pos = $AAPositions[$micro_start-1]+3; # Which array index are we centered around?
+	    while ($rear_ext_len < $micro_len) {
+		
+		# Make sure we don't overstep (by checking if we've passed over
+		# an stretch of genome indices indicating an intron)
+		#
+		my $step_check = $NuclPositions[$nuclseq_pos];
+		if ($revcomp) { $step_check += 3 * ($rear_ext_len+1); }
+		else          { $step_check -= 3 * ($rear_ext_len+1); }
+		
+		last if ($step_check != $rear_codon_center);
+
+
+		# Figure out what the next codon is
+		#
+		my @NextCodon = ();
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos-1]);
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos]);
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos+1]);
+
+		
+		# If we have a match we are very happy.  If
+		# we do not have a match we are very sad.
+		#
+		# Why would we do 'micro_start+(rear_ext_len+1)'?
+		#
+		if (uc($FullProtSeq[$micro_start+$rear_ext_len]) eq uc(TranslateCodon(\@NextCodon))) {
+		    push(@RearExt,$nuclseq_pos);
+		    $nuclseq_pos += 3;
+		    $rear_ext_len++;
+		} else {
+		    last;
+		}
+		
+	    }
+	    
+	}
+	
+	# If we found a complete run, we're sooooo stoked!
+	#
+	if ($rear_ext_len == $micro_len) {
+
+	    # Record our triumph
+	    #
+	    for ($i=0; $i<$micro_len; $i++) { $AAPositions[$micro_start+$i] = $RearExt[$i]; }
+	    next;
+	    
+	}
+
+	
+	# Look at the exon ahead
+	#
+	my @FwdExt;
+	my $fwd_ext_len = 0;
+	if ($micro_end < $num_aas) {
+	    
+	    # Try to find a good extension to the front of
+	    # the upcoming exon.
+	    #
+	    my $fwd_codon_center = $NuclPositions[$AAPositions[$micro_end]];
+	    my $nuclseq_pos = $AAPositions[$micro_end]-3;
+	    while ($fwd_ext_len < $micro_len) {
+
+		
+		# Make sure we don't overstep
+		#
+		my $step_check = $NuclPositions[$nuclseq_pos];
+		if ($revcomp) { $step_check -= 3 * ($fwd_ext_len+1); }
+		else          { $step_check += 3 * ($fwd_ext_len+1); }
+		
+		last if ($step_check != $fwd_codon_center);
+
+
+		# What does the next codon encode?
+		#
+		my @NextCodon = ();
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos-1]);
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos]);
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos+1]);
+		
+
+		# If we have a match, in terms of what the codon
+		# encodes, then we can continue our considerations.
+		# Otherwise we cannot.
+		#
+		# Note that the first nucleotide position in the
+		# 'FwdExt' array corresponds to the last amino acid
+		# in the micro-exon region.
+		#
+		if (uc($FullProtSeq[$micro_end-($fwd_ext_len+1)]) eq uc(TranslateCodon(\@NextCodon))) {
+		    push(@FwdExt,$nuclseq_pos);
+		    $nuclseq_pos -= 3;
+		    $fwd_ext_len++;
+		} else {
+		    last;
+		}
+		
+	    }
+	    
+	}
+
+	
+	# Did we find a complete run?
+	#
+	if ($fwd_ext_len == $micro_len) {
+	    
+	    for ($i=0; $i<$micro_len; $i++) { $AAPositions[$micro_end-($i+1)] = $FwdExt[$i]; }
+	    next;
+	    
+	}
+	
+
+	# Append as much as you can to the preceding
+	# major exon first.  We don't put any work into
+	# evaluating whether amino acids that could go
+	# either way should be fitted to one or the other
+	# side.
+	#
+	$i = 0;
+	while ($i < $rear_ext_len) {
+	    $AAPositions[$micro_start+$i] = $RearExt[$i];
+	    $i++;
+	}
+
+	
+	# Skip ahead to the stuff we're appending to the
+	# upcoming major exon, if you need to.
+	#
+	if ($i < $micro_len - $fwd_ext_len) { $i = $micro_len - $fwd_ext_len; }
+
+
+	# Append this stuff onto the forward friend.
+	#
+	$j = $fwd_ext_len - 1;
+	while ($i < $micro_len) {
+	    $AAPositions[$micro_end-($micro_len-$i)] = $FwdExt[$j];
+	    $i++;
+	    $j--;
+	}
+	
+    }
+    
+
+    #}
+    #
+    #
+    # ********************************************************************
+    # *** 'IF ZERO' TOGGLE END *******************************************
+    # ********************************************************************
+
+    #
+    # PM: This will be our largest departure from the original approach.
+    #     instead of a list, we'll pair each position in the amino acid
+    #     sequence with its codon center in a hash (since we don't have a
+    #     1..seqlen mapping guaranteed).
+    #
+    #     HOWEVER, we'll benefit from making an initial list like the
+    #     original would have outputted, and then rewinding to get the
+    #     actual amino indices.
+    #
+    # *** WHEN THERE ARE INSERTIONS: We'll have to stack them.
+    #
+
+    # Radical, dude!  Now all we need to do is just convert
+    # our list of amino acid positions into a list of
+    # their corresponding middle amino acids (with '*'s to
+    # denote splice site boundaries).
+    #
+    # We'll try to be careful about how we place codons that are
+    # called as insertions into the genome.
+    #
+    my $prev_codon_c = $NuclPositions[$AAPositions[0]];
+    my @CodonCenters;
+    push(@CodonCenters,$prev_codon_c);
+    for ($i = 1; $i < $num_aas; $i++) {
+
+	# A gap of more than 4 is taken to deserve a splice site marker
+	#
+	#if (abs($NuclPositions[$AAPositions[$i]] - $NuclPositions[$AAPositions[$i-1]]) > 4) {
+	#$CodonCenters = $CodonCenters.',*';
+	#}
+
+	# Prepping for a fresh character!
+	#
+	#$CodonCenters = $CodonCenters.',';
+	
+	# Are we in an insertion (wrt genome)?
+	#
+	if ($FullNuclSeq[$AAPositions[$i]] !~ /\w/) {
+	    #$CodonCenters = $CodonCenters.$prev_codon_c;
+	    push(@CodonCenters,$prev_codon_c);
+	} else {
+	    $prev_codon_c = $NuclPositions[$AAPositions[$i]];
+	    #$CodonCenters = $CodonCenters.$prev_codon_c;
+	    push(@CodonCenters,$prev_codon_c);
+	}
+	
+    }
+    
+    # PM: OK, time to convert this list to a hash, using smarts and intelligents.
+    #     More specifically, we'll rewind the file and run along the alignment
+    #     using Spaln's signposts to tell us which aminos in the sequence have
+    #     actually been incorporated into the alignment.
+    #
+    #     Happily, we know that this file FOLLOWS THE DAMN RULES, so we can move
+    #     relatively quickly
+
+    open($stdout,'<',$spalnfname);
+
+    # Scan to the start of the alignment
+    while ($line = <$stdout>) {
+	last if ($line =~ /ALIGNMENT/);
+    }
+
+    my %AminoIndexToGenomePos;
+    my $codon_centers_pos = 0;
+    while ($line = <$stdout>) {
+
+	# Every time we see a translated line, we have our bearings.
+	if ($line =~ /\| \S+\/\d+\-\d+/) { # trans line
+
+	    $line = <$stdout>; # nucl line
+	    $line = <$stdout>; # INPUT PROTEIN LINE!
+
+	    $line =~ /^\s*(\d+)([^\|]+)\|/;
+	    my $aminoid  = $1 - 1; # We'll work with 0..[seqlen-1] indices
+	    my $aminostr = $2;
+
+	    # Break up the line and attribute the appropriate codon center
+	    # to each amino index;
+	    $aminostr =~ s/[^A-Za-z]//g;
+	    foreach my $amino (split(//,$aminostr)) {
+		$AminoIndexToGenomePos{$aminoid} = $CodonCenters[$codon_centers_pos];
+		$amino_id++;
+		$codon_centers_pos++;
+	    }
+
+	}
+
+    }
+
+    close($stdout);
+
+    return(\%AminoIndexToGenomePos);
+
+    # Now that we've got our purty little hit, we write it on out and tell
+    # 'em how happy that made us feel.
+    #my $hitline = "Isoform ID : $seqname\n";
+    #$hitline    = $hitline."Method     : SPALN\n";
+    #$hitline    = $hitline."Chromosome : $ChrName\n";
+    #$hitline    = $hitline."Match Pos.s: $CodonCenters\n\n";
+    #return ($hitscore,$hitline,9);
+
+}
+
+
+
+
+
+
+
+
+#########################################################################
+#
+#  Function Name: SelenocysteineCheck
+#
+#  About: This function checks if a selonocyteine (U, encoded by TGA)
+#         explains an observed absence of aminos in SPALN output.
+#
+sub SelenocysteineCheck
+{
+    my $nucl_seq_ref = shift;
+    my $prot_seq_ref = shift;
+    my $aa_pos_ref   = shift;
+    my $protfilename = shift;
+
+    my @NuclSeq = @{$nucl_seq_ref};
+    my @ProtSeq = @{$prot_seq_ref};
+    my @AAPos   = @{$aa_pos_ref};
+
+    my @TrueProtSeq;
+    open(my $protfile,'<',$protfilename) || die "\n  ERROR:  Failed to open file '$protfilename' during selenocysteine check\n\n";
+    while (my $line = <$protfile>) {
+	$line =~ s/\n|\r//g;
+	next if ($line =~ /\>/);
+	foreach my $amino (split(//,$line)) { push(@TrueProtSeq,uc($amino)); }
+    }
+    close($protfile);
+
+
+    my $aa_pos = 0;
+    while ($aa_pos < scalar(@TrueProtSeq)) {
+
+	# Looks like we've discovered a selenocysteine in our midst!
+	if ($TrueProtSeq[$aa_pos] eq 'U' && $aa_pos < scalar(@ProtSeq) && $ProtSeq[$aa_pos] ne 'U') {
+
+	    # Is this consistent with stepping forward 3 from the previous
+	    # amino's position?  3 back from forthcoming amino?
+	    my $nailed_it = 0;
+	    if ($aa_pos) {
+		
+		# Should be to the right of the last position...
+		my $nucl_pos = $AAPos[$aa_pos-1] + 2;
+		my $codon = uc($NuclSeq[$nucl_pos].$NuclSeq[$nucl_pos+1].$NuclSeq[$nucl_pos+2]);
+		if ($codon eq 'TGA') {
+
+		    # Note:  Splice moves everything at the indicated position to
+		    #        the right and sticks in what you want there.
+		    splice(@ProtSeq,$aa_pos,0,'U');
+		    splice(@AAPos,$aa_pos,0,$nucl_pos+1);
+		    $nailed_it = 1;
+		} 
+
+	    } 
+
+	    if (!$nailed_it && $aa_pos < scalar(@ProtSeq)-1) {
+		
+		# ... Or left of the next position
+		my $nucl_pos = $AAPos[$aa_pos] - 4;
+		my $codon = uc($NuclSeq[$nucl_pos].$NuclSeq[$nucl_pos+1].$NuclSeq[$nucl_pos+2]);
+		if ($codon eq 'TGA') {
+		    splice(@ProtSeq,$aa_pos-1,0,'U');
+		    splice(@AAPos,$aa_pos-1,0,$nucl_pos+1);
+		} 
+
+	    }
+
+	}
+
+	$aa_pos++;
+
+    }
+
+    return (\@ProtSeq,\@AAPos);
+
+}
+
+
+
 
 
 
