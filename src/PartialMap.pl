@@ -9,6 +9,8 @@ sub BuildMapMSA;
 sub SquishMSAs;
 sub PMParseSPALNOutput;
 sub SelenocysteineCheck;
+sub UpdateMapMSA;
+
 
 # NOTES (to keep me from losing my mind)
 #
@@ -40,10 +42,13 @@ my $spaln      = $location.'../inc/spaln2.3.3/src/spaln';
 my $eslsfetch  = $location.'../inc/easel/miniapps/esl-sfetch';
 my $eslseqstat = $location.'../inc/easel/miniapps/esl-seqstat';
 
-my $inmsafile = $ARGV[0];
-my $inhitfile = $ARGV[1];
-my $protdb    = $ARGV[2];
-my $genome    = $ARGV[3];
+my $inmsafname = $ARGV[0];
+my $inhitfname = $ARGV[1];
+my $protdb     = $ARGV[2];
+my $genome     = $ARGV[3];
+
+$inmsafname =~ /\/?([^\/]+)\.afa$/;
+my $gene = $1;
 
 # We're (hopefully) going to need to know the lengths of the chromosomes
 # in our genome, so let's get our hands on that file Quilter generated.
@@ -67,26 +72,31 @@ while ($i<scalar(@ARGV)) {
     push(@NearHitRanges,$ARGV[$i++]);
 }
 
-my ($msaref,$seqnamesref,$num_seqs,$msa_len) = ReadMSA($inmsafile);
+my ($msaref,$seqnamesref,$num_seqs,$msa_len) = ReadMSA($inmsafname);
 my @MSA = @{$msaref};
 my @SeqNames = @{$seqnamesref};
 
 # In case we've recorded any ARF info, we'll need the original names
 my @OrigNames;
 for ($i=0; $i<$num_seqs; $i++) {
-    my $OrigNames[$i] = $SeqNames[$i];
+    $OrigNames[$i] = $SeqNames[$i];
     $OrigNames[$i] =~ s/\|ARFs?\:[^\|]+\|/\|/;
 }
 
 # Use the hitfile to identify where specific positions in the MSA 
 # can be attributable to mapping coordinates
 my ($mapmsaref,$usesmapref,$num_maps,$map_chr,$min_genome_index,$max_genome_index) 
-    = BuildMapMSA(\@MSA,\@OrigNames,$num_seqs,$msa_len,$inhitfile);
+    = BuildMapMSA(\@MSA,\@OrigNames,$num_seqs,$msa_len,$inhitfname);
 my @MapMSA = @{$mapmsaref};
 my @UsesMap = @{$usesmapref};
 
 # Alrighty, lads.  Now we have the info. that we need to determine
 # which of the paths we're on.
+#
+# Our overarching goal through this section is to fill in MapMSA
+# for any sequences that didn't start off with a mapping.
+#
+my @NewlyMappedSeqs;
 if ($num_maps) {
 
     # RAD! Our MSA is already built around there being some way to map
@@ -118,17 +128,23 @@ if ($num_maps) {
     $high_genome_pos    = $ChrLens{$chr} if ($high_genome_pos > $ChrLens{$chr});
 
     # NOTE: We'll go ahead and flip things if we're in revcomp land
+    my $revcomp = 0;
     if ($map_chr =~ /\[revcomp\]/) {
+	$revcomp = 1;
 	my $temp_genome_pos = $low_genome_pos;
 	$low_genome_pos = $high_genome_pos;
 	$high_genome_pos = $temp_genome_pos;
     }
 
     # We should be all set for extraction!
-    my $dnafilename = $inmsafile;
+    my $dnafilename = $inmsafname;
     $dnafilename =~ s/\.afa/\.dna\.fa/;
     my $sfetchCmd = $eslsfetch." -c $low_genome_pos\.\.$high_genome_pos \"$genome\" \"$chr\" > \"$dnafilename\"";
     if (system($sfetchCmd)) { die "\n  Failed to pull in DNA region ($sfetchCmd)\n\n"; }
+
+    # This is somewhat unnecessary, but I want to keep my verbage
+    # as close as possible to the original ParseSPALNOutput
+    my $offset = $low_genome_pos-1; # NOTE: I'm not 100% on why we do this subtraction, but *whatever*
 
     # Let's also get a handle on where the exon start and stop positions are.
     my @ExonStarts;
@@ -317,9 +333,9 @@ if ($num_maps) {
 
 	    # Find where in the MSA corresponds to the identified exon
 	    my $break_pos = -1;
-	    for (my $i=0; $i<$last_left_exon; $i++) {
+	    for (my $i=0; $i<$last_left_exon; $i++) { # Just counting up
 		# Advance to the next exon with content for this sequence
-		for (my $j=$break_pos+1; $j<$num_exons; $j++) {
+		for (my $exon=$break_pos+1; $exon<$num_exons; $exon++) {
 		    if ($ExonPctsID[$j][$exon] ne '-') {
 			$break_pos = $j;
 			last;
@@ -342,11 +358,11 @@ if ($num_maps) {
 	    $SeqNames[$seqid] =~ /^[^\|]+\|([^\|]+)\|/;
 	    my $iso = $1;
 	    
-	    my $Lprotfname = $infmsaname;
+	    my $Lprotfname = $inmsafname;
 	    $Lprotfname =~ s/\.afa$/\./;
 	    $Lprotfname = $Lprotfname.$iso.'.left-prot.fa';
 	    
-	    my $Rprotfname = $infmsaname;
+	    my $Rprotfname = $inmsafname;
 	    $Rprotfname =~ s/\.afa$/\./;
 	    $Rprotfname = $Rprotfname.$iso.'.right-prot.fa';
 	    
@@ -357,8 +373,10 @@ if ($num_maps) {
 	    #
 	    my $Lstr = '>Left-'.$gene.'-'.$iso."\n";
 	    my $newline = 60;
+	    my $Roffset = 0; # This will count what the index of the first Right seq char is
 	    for (my $i=0; $i<$break_pos; $i++) {
 		if ($MSA[$seqid][$i] =~ /[A-Za-z]/) {
+		    $Roffset++;
 		    $Lstr = $Lstr.$MSA[$seqid][$i];
 		    $newline--;
 		    if (!$newline) {
@@ -425,6 +443,8 @@ if ($num_maps) {
 	    # First -- are these mappings consistent (assuming we did get successful mappings from both)?
 	    my @LeftAminoKeys   = sort {$a <=> $b} keys %LAminoIndexToGenPos;
 	    my @RightAminoKeys  = sort {$a <=> $b} keys %RAminoIndexToGenPos;
+	    next if (scalar(@LeftAminoKeys) + scalar(@RightAminoKeys) == 0);
+	    
 	    if (scalar(@LeftAminoKeys) && scalar(@RightAminoKeys)) {
 
 		my $consistent = 1; # Let's just assume the best?
@@ -441,15 +461,30 @@ if ($num_maps) {
 			@RightAminoKeys = ();
 		    } else {
 			%LAminoIndexToGenPos = ();
-			@LightAminoKeys = ();			
+			@LeftAminoKeys = ();			
 		    }
 		}
 	    }
 
-	    # Now we can take our indices and see if they're consistent with the mappings used by
-	    # the more satisfactorily mapped sequences.
+	    # Because our 'Right' indices are all w.r.t. the right part of the sequence
+	    # we're going to have to shift them.  These shifts will increase the values,
+	    # so we start with the highest and decrease.  We'll remove entries to avoid
+	    # conflicts when we integrate w/ LAITGP
+	    for (my $i=scalar(@RightAminoKeys)-1; $i>=0; $i--) {
+		my $key = $RightAminoKeys[$i];
+		$RAminoIndexToGenPos{$key+$Roffset} = $RAminoIndexToGenPos{$key};
+		$RAminoIndexToGenPos{$key} = 0;
+	    }
 
-	    
+	    # Now we combine 'em.  Yeah.  Think about that.
+	    my %AminoIndexToGenPos;
+	    foreach my $aminoindex (keys %LAminoIndexToGenPos) { $AminoIndexToGenPos{$aminoindex} = $LAminoIndexToGenPos{$aminoindex}; }
+	    foreach my $aminoindex (keys %RAminoIndexToGenPos) { $AminoIndexToGenPos{$aminoindex} = $RAminoIndexToGenPos{$aminoindex}; }
+
+	    # UPDATE OUR MAPMSA
+	    $mapmsaref = UpdateMapMSA(\@MSA,\@MapMSA,\%AminoIndexToGenPos,$seqid,$msa_len);
+	    @MapMSA    = @{$mapmsaref};
+	    push(@NewlyMappedSeqs,$seqid);
 	    
 	} else {
 
@@ -459,8 +494,43 @@ if ($num_maps) {
 	    # goof preventing us from calling it a good mapping...
 	    #
 
-	    
-	    
+	    $SeqNames[$seqid] =~ /^[^\|]+\|([^\|]+)\|/;
+	    my $iso = $2;
+
+	    my $protfname = $inmsafname;
+	    $protfname =~ s/\.afa$/\./;
+	    $protfname = $protfname.$iso.'.prot.fa';
+
+	    my $Pstr = '>'.$SeqNames[$seqid]."\n";
+	    my $newline = 60;
+	    for (my $i=0; $i<$msa_len; $i++) {
+		if ($MSA[$seqid][$i] =~ /[A-Za-z]/) {
+		    $Pstr = $Pstr.$MSA[$seqid][$i];
+		    $newline--;
+		    if (!$newline) {
+			$Pstr = $Pstr."\n";
+			$newline = 60;
+		    }
+		}
+	    }
+	    $Pstr = $Pstr."\n" if ($newline != 60);
+
+	    open(my $Protf,'>',$protfname);
+	    print $Protf "$Pstr\n";
+	    close($Protf);
+
+	    my $spalnfname = $protfname;
+	    $spalnfname =~ s/prot\.fa/spaln\.out/;
+
+	    my $spalnCmd = $spaln.' -Q3 -O1 -S3 -ya3 "'.$dnafilename.'" "'.$protfname.'" 1>"'.$spalnfname.'" 2>/dev/null';
+	    my $AITGPref = PMParseSPALNOutput($spalnCmd,$spalnfname,$revcomp,$offset,$protfname);
+	    my %AminoIndexToGenPos;
+
+	    # UPDATE OUR MAPMSA
+	    $mapmsaref = UpdateMapMSA(\@MSA,\@MapMSA,\%AminoIndexToGenPos,$seqid,$msa_len);
+	    @MapMSA    = @{$mapmsaref};
+	    push(@NewlyMappedSeqs,$seqid);
+
 	}
 
     }
@@ -481,6 +551,9 @@ if ($num_maps) {
 
     # If we don't have a context to work in, mayhaps we can draw consensus on a chromosome
     # (and, based on that consensus, a range on that chromosome to work in).
+    #
+    # Also, we won't do anything to remove [revcomp]s -- DEAL WITH IT
+    #
     my %ChrCounts;
     for (my $i=0; $i<scalar(@NearHitChrs); $i++) {
 	my $next_chr = $NearHitChrs[$i];
@@ -504,41 +577,115 @@ if ($num_maps) {
 	# HELLA SWAG!
 	my $chr = $top_chr;
 
+	# Now we can remove [revcomp] from chr if appropriate (for pulling purposes)
+	my $revcomp = 0;
+	if ($chr =~ /\[revcomp\]/) {
+	    $revcomp = 1;
+	    $chr =~ s/\[revcomp\]//;
+	}
+
 	# Now, where on EARTH are we looking on that chromosome?!
 	my $low_genome_pos  = 10 ** 10;
 	my $high_genome_pos = 0;
 
 	for (my $i=0; $i<scalar(@NearHitChrs); $i++) {
 	    if ($NearHitChrs[$i] eq $top_chr) {
+
 		$NearHitRanges[$i] =~ /(\d+)\.\.(\d+)/;
 		my $range_start = $1;
 		my $range_end   = $2;
-		# I'm not sure if 'start' is always lower, so let's be chill for like one second
+		
+		# If we're in revcomp land the 'start' index will be larger than the 'end' index
 		if ($range_start < $low_genome_pos ) { $low_genome_pos  = $range_start; }
 		if ($range_start > $high_genome_pos) { $high_genome_pos = $range_start; }
 		if ($range_end   < $low_genome_pos ) { $low_genome_pos  = $range_end;   }
 		if ($range_end   > $high_genome_pos) { $high_genome_pos = $range_end;   }
+
 	    }
 	}
 
 	# Let's pull in that range, with a spare 1Mb on either side
 	$low_genome_pos  -= 1000000;
-	$low_genome_pos   = 1 if ($low_genom_pos < 1);
+	$low_genome_pos   = 1 if ($low_genome_pos < 1);
 	$high_genome_pos += 1000000;
 	$high_genome_pos  = $ChrLens{$chr} if ($high_genome_pos > $ChrLens{$chr});
 
-	my $dnafilename = $inmsafile;
+	# Again, we're going to do this thing I just love doing and will never stop doing EVER
+	my $offset = $low_genome_pos-1;
+
+	my $dnafilename = $inmsafname;
 	$dnafilename =~ s/\.afa/\.dna\.fa/;
 	my $sfetchCmd = $eslsfetch." -c $low_genome_pos\.\.$high_genome_pos \"$genome\" \"$chr\" > \"$dnafilename\"";
 	if (system($sfetchCmd)) { die "\n  Failed to pull in DNA region ($sfetchCmd)\n\n"; }
 
+
+	# As is our natural desire, we shall examine with great care the relationship of
+	# our protein sequences to this region of the genome.
+	for (my $i=0; $i<$num_seqs; $i++) {
+	    
+	    # NOTE that this portion is basically identical to how we handle single-state
+	    # sequences when we have an established genome region to examine, but that after
+	    # we get the mapping things take a different turn.
+	    $SeqNames[$i] =~ /^[^\|]+\|([^\|]+)\|/;
+	    my $iso = $2;
+
+	    my $protfname = $inmsafname;
+	    $protfname =~ s/\.afa$/\./;
+	    $protfname = $protfname.$iso.'.prot.fa';
+
+	    my $Pstr = '>'.$SeqNames[$i]."\n";
+	    my $newline = 60;
+	    for (my $j=0; $j<$msa_len; $j++) {
+		if ($MSA[$i][$j] =~ /[A-Za-z]/) {
+		    $Pstr = $Pstr.$MSA[$i][$j];
+		    $newline--;
+		    if (!$newline) {
+			$Pstr = $Pstr."\n";
+			$newline = 60;
+		    }
+		}
+	    }
+	    $Pstr = $Pstr."\n" if ($newline != 60);
+
+	    open(my $Protf,'>',$protfname);
+	    print $Protf "$Pstr\n";
+	    close($Protf);
+
+	    my $spalnfname = $protfname;
+	    $spalnfname =~ s/prot\.fa/spaln\.out/;
+
+	    my $spalnCmd = $spaln.' -Q3 -O1 -S3 -ya3 "'.$dnafilename.'" "'.$protfname.'" 1>"'.$spalnfname.'" 2>/dev/null';
+	    my $AITGPref = PMParseSPALNOutput($spalnCmd,$spalnfname,$revcomp,$offset,$protfname);
+	    my %AminoIndexToGenPos = %{$AITGPref};
+
+	    next if (!scalar(keys %AminoIndexToGenPos));
+	    
+	    # UPDATE OUR MAPMSA
+	    $mapmsaref = UpdateMapMSA(\@MSA,\@MapMSA,\%AminoIndexToGenPos,$i,$msa_len);
+	    @MapMSA    = @{$mapmsaref};
+	    push(@NewlyMappedSeqs,$i);
+
+	}
+
+
     }
 
-} else {
-    # No "else" since we require some bit of info. better than just redoing Quilter's work
-    # ... At least not yet.  We might try to ID a happy chunk and restrict ourselves just to
-    #     partial sequences.
+    #} else {
+    # No "else" since we require some bit of info. better than just redoing Quilter's work.
+    #
+    # NOTE: While I sort of hinted at leaving the door open to this, I had forgotten that we
+    #       now hold onto the BLAT indices that we've played around with, so there really
+    #       doesn't seem to be any reason to think we can try something different with these
+    #       sequences and suddenly find ourselves with a decent map.
+    #
 }
+
+
+##
+##
+##  BIG DEAL!!! We now have (1) an updated MapMSA and (2) a list of NewlyMappedSeqs
+##
+##
 
 
 1;
@@ -808,10 +955,10 @@ sub PMParseSPALNOutput
     my $offset     = shift;
 
     # PM: I'm so bored of these variables
-    #my $highscore  = shift;
+    #my $highscore = shift;
     #my $ChrName = shift;
     #my $seqname = shift;
-    #my $prot_len     = shift;
+    #my $prot_len = shift;
 
     # PM: Need this for 'SelenocysteineCheck'
     my $protfilename = shift;
@@ -1176,25 +1323,26 @@ sub PMParseSPALNOutput
     #
     # * * * THIS IS THE PERCENT IDENTITY CHECK POSITION * * * 
     #
-    return (0,1,7) if ($mismatches/$prot_len > 0.05);
+    #return (0,1,7) if ($mismatches/$prot_len > 0.05);
     
 
     # Selenocysteine does some crazy stuff, man.  I translated some once
     # and I'm still coming down.
     #
-    if ($num_aas != $prot_len) {
+    #if ($num_aas != $prot_len) { # <--- Start of original Seleno conditional
 	
-	my ($fps_ref,$aap_ref) = SelenocysteineCheck(\@FullNuclSeq,\@FullProtSeq,\@AAPositions,$protfilename);
-	@FullProtSeq = @{$fps_ref};
-	@AAPositions = @{$aap_ref};
-	$num_aas = scalar(@FullProtSeq);
+    # PM: I think we'll just do this automatically, instead of conditionally.
+    my ($fps_ref,$aap_ref) = SelenocysteineCheck(\@FullNuclSeq,\@FullProtSeq,\@AAPositions,$protfilename);
+    @FullProtSeq = @{$fps_ref};
+    @AAPositions = @{$aap_ref};
+    $num_aas = scalar(@FullProtSeq);
 
-	# PM: It's still good to check for Selenocysteine, but we no
-	#     don't mind so much about our mapping covering the full
-	#     protein sequence (well, technically partial, but whatever)
-	#return (0,0,8) if ($num_aas != $prot_len);
+    # PM: It's still good to check for Selenocysteine, but we no
+    #     don't mind so much about our mapping covering the full
+    #     protein sequence (well, technically partial, but whatever)
+    #return (0,0,8) if ($num_aas != $prot_len);
 
-    }
+    #} # <--- End of original Seleno conditional
 
 
     # ********************************************************************
@@ -1531,14 +1679,14 @@ sub PMParseSPALNOutput
 	    $line = <$stdout>; # INPUT PROTEIN LINE!
 
 	    $line =~ /^\s*(\d+)([^\|]+)\|/;
-	    my $aminoid  = $1 - 1; # We'll work with 0..[seqlen-1] indices
+	    my $amino_id = $1 - 1; # We'll work with 0..[seqlen-1] indices
 	    my $aminostr = $2;
 
 	    # Break up the line and attribute the appropriate codon center
 	    # to each amino index;
 	    $aminostr =~ s/[^A-Za-z]//g;
 	    foreach my $amino (split(//,$aminostr)) {
-		$AminoIndexToGenomePos{$aminoid} = $CodonCenters[$codon_centers_pos];
+		$AminoIndexToGenomePos{$amino_id} = $CodonCenters[$codon_centers_pos];
 		$amino_id++;
 		$codon_centers_pos++;
 	    }
@@ -1645,6 +1793,40 @@ sub SelenocysteineCheck
 
 
 
+
+
+
+#########################################################################
+#
+#  FUNCTION: UpdateMapMSA
+#
+sub UpdateMapMSA
+{
+
+    my $msaref     = shift;
+    my $mapmsaref  = shift;
+    my $maphashref = shift;
+
+    my @MSA     = @{$msaref};
+    my @MapMSA  = @{$mapmsaref};
+    my %MapHash = %{$maphashref};
+
+    my $seqid   = shift;
+    my $msa_len = shift;
+
+    my $seq_char_id = 0;
+    for (my $i=0; $i<$msa_len; $i++) {
+	if ($MSA[$seqid][$i] =~ /[A-Za-z]/) {
+	    if ($MapHash{$seq_char_id}) {
+		$MapMSA[$seqid][$i] = $MapHash{$seq_char_id};
+	    }
+	    $seq_char_id++;
+	}
+    }
+
+    return \@MapMSA;
+
+}
 
 
 
