@@ -908,7 +908,7 @@ foreach my $hitfamname (keys %FamHitFiles) {
 	my $tmphitfname = $FamHitFiles{$hitfamname};
 	my $outhitfname = $tmphitfname;
 	$outhitfname =~ s/\.tmp$/\.out/;
-	system("mv \"$tmphitfname\" \"$outhitfname\"");
+	system("mv \"$tmphitfname\" \"$outhitfname\"") if (-e $tmphitfname);
     }
 }
 
