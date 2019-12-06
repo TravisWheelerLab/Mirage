@@ -430,30 +430,45 @@ for ($i=0; $i<$numSpecies; $i++) {
     #
     my %QuilterNearHits;
     if (-e $NearFileName) {
+
 	open(my $NearFile,'<',$NearFileName);
 	while (my $line = <$NearFile>) {
+
 	    $line =~ s/\n|\r//g;
 	    next if (!$line);
+
 	    $line =~ /^(\S+) (\S+) (\S+)$/;
 	    my $seqname = $1;
 	    my $chromosome = $2;
 	    my $maprange = $3;
+
 	    $seqname =~ /\|([^\|]+)$/;
 	    my $fam_name = lc($1);
+
 	    # First off, this is technically a miss
 	    if ($QuilterMisses{$fam_name}) { 
 		$QuilterMisses{$fam_name} = $QuilterMisses{$fam_name}.'&'.$seqname;
 	    } else {
 		$QuilterMisses{$fam_name} = $seqname;
 	    }
+
 	    # Second off, this was a close hit -- keep the three fields single-space separated
+	    # NOTE: Since these may end up being provided as commandline arguments,
+	    #       we'll need them to be all quoted-up
+	    $seqname    = '"'.$seqname.'"';
+	    $chromosome = '"'.$chromosome.'"';
+	    $maprange   = '"'.$maprange.'"';
+	    my $triple  = $seqname.' '.$chromosome.' '.$maprange;
 	    if ($QuilterNearHits{$fam_name}) {
-		$QuilterNearHits{$fam_name} = $QuilterNearHits{$fam_name}.'&'.$line;
+		$QuilterNearHits{$fam_name} = $QuilterNearHits{$fam_name}.'&'.$triple;
 	    } else {
-		$QuilterNearHits{$fam_name} = $line;
+		$QuilterNearHits{$fam_name} = $triple;
 	    }
+
 	}
+
 	close($NearFile);
+
     }
 
 
@@ -520,6 +535,11 @@ for ($i=0; $i<$numSpecies; $i++) {
 
 
 
+    # Before we really get to work, make a public list of gene families that
+    # need to get investigated, and roughly divvy-up the load.
+    my @PartialMapFams = keys %QuilterMisses;
+    my $threadportion  = int(scalar(@PartialMapFams) / $numProcesses);
+
     
     # NOTE: We're going to need to parallelize here
     my $processes = 1;
@@ -537,8 +557,45 @@ for ($i=0; $i<$numSpecies; $i++) {
     }
 
     
-    # Pick out which of the missed files you're going to study
+    # Which families is this thread in charge of?
+    my $startfam = $threadportion * $threadID;
+    my $endfam   = $threadportion * ($threadID+1); # Tech., the first fam of the next thread
+    $endfam = scalar(@PartialMapFams) if ($endfam > scalar(@PartialMapFams));
+    
+    for (my $fam_id=$startfam; $fam_id<$endfam; $fam_id++) {
 
+	my $fam = $PartialMapFams[$fam_id];
+
+	# Does this sequence have a hitfile?
+	my $fam_msa_fname = $MultiMSADir{$Species[$i]}.'/'.$fam.'.afa';
+	my $hitfilename   = $MultiMSADir{$Species[$i]}.'/'.$fam.'.hits.out';
+
+	my $PMcmd = 'perl '.$location.'PartialMap.pl '.$fam_msa_fname.' ';
+	if (-e $hitfilename) {
+
+	    # Let's keep it simple, smarty
+	    $PMcmd = $PMcmd.$hitfilename.' '.$SpeciesDBNames[$i].' '.$Genomes[$i];
+
+	} elsif ($QuilterNearHits{$fam}) { # Perhaps some 'NearHits' entries are more this family's speed?
+	    
+	    # We've already put our triples in quotes, so this should be safe for
+	    # the commandline...
+	    $PMcmd = $PMcmd.'- '.$SpeciesDBNames[$i].' '.$Genomes[$i];
+	    foreach my $near_hit_triple (split(/\&/,$QuilterNearHits{$fam})) {
+		$PMcmd = $PMcmd.' '.$near_hit_triple;
+	    }
+	    
+	} else {
+
+	    # NOTHING GOOD HERE
+	    next;
+
+	}
+
+	# Run PartialMap.pl and see if we can make our nastiness fresh
+	if (system($PMcmd)) { die "\n  ERROR:  PartialMap.pl failed ($PMcmd)\n\n"; }
+
+    }
 
     # All done with those lil' snaccs
     if ($threadID) { exit(0); }

@@ -898,6 +898,9 @@ foreach my $fam (keys %FamBadHits) {
     foreach my $demappedseq (keys %DemappedSequences) { print $outhitf "$DemappedSequences{$demappedseq}"; }
     close($outhitf);
 
+    # Remove this family from our list and keep things moving along!
+    $FamBadHits{$fam} = 0;
+
 }
 
 
@@ -908,7 +911,7 @@ foreach my $hitfamname (keys %FamHitFiles) {
 	my $tmphitfname = $FamHitFiles{$hitfamname};
 	my $outhitfname = $tmphitfname;
 	$outhitfname =~ s/\.tmp$/\.out/;
-	system("mv \"$tmphitfname\" \"$outhitfname\"") if (-e $tmphitfname);
+	system("mv \"$tmphitfname\" \"$outhitfname\"");
     }
 }
 

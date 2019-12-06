@@ -30,6 +30,7 @@ sub UpdateMapMSA;
 #
 
 
+# NOTE: We should be perfectly okay taking '-' if there isn't an actual 'fam.hits.out'
 if (@ARGV < 4 || (@ARGV - 4) % 3 != 0) { 
     die "\n  USAGE: PartialMap.pl [fam.afa] [fam.hits.out] [ProteinDB.fa] [Genome.fa] { [seq] [chr] [range] }\n\n"; 
 }
@@ -85,7 +86,7 @@ for ($i=0; $i<$num_seqs; $i++) {
 
 # Use the hitfile to identify where specific positions in the MSA 
 # can be attributable to mapping coordinates
-my ($mapmsaref,$usesmapref,$num_maps,$map_chr,$min_genome_index,$max_genome_index) 
+my ($mapmsaref,$usesmapref,$num_maps,$map_chr,$min_genome_index,$max_genome_index)
     = BuildMapMSA(\@MSA,\@OrigNames,$num_seqs,$msa_len,$inhitfname);
 my @MapMSA = @{$mapmsaref};
 my @UsesMap = @{$usesmapref};
@@ -97,6 +98,8 @@ my @UsesMap = @{$usesmapref};
 # for any sequences that didn't start off with a mapping.
 #
 my @NewlyMappedSeqs;
+my @MSASquish;
+my @MapMSASquish;
 if ($num_maps) {
 
     # RAD! Our MSA is already built around there being some way to map
@@ -114,8 +117,8 @@ if ($num_maps) {
     # and the format of the mapping profile is the same, but with positions instead of characters.
     # If indels (for non-mappers) created a column with no mapped sequences, it'll have a '0'
     my ($msasquish_ref,$mapmsasquish_ref) = SquishMSAs(\@MSA,\@MapMSA,\@MappedSeqIDs,$num_seqs,$num_maps,$msa_len);
-    my @MSASquish = @{$msasquish_ref};
-    my @MapMSASquish = @{$mapmsasquish_ref};
+    @MSASquish = @{$msasquish_ref};
+    @MapMSASquish = @{$mapmsasquish_ref};
 
     # Because we're working with a specific sequence range, we can extract the specific region of the
     # genome that we're restricted to considering (we'll pull in an extra 100Kb for good measure, though)
@@ -670,7 +673,8 @@ if ($num_maps) {
 
     }
 
-    #} else {
+} else {
+
     # No "else" since we require some bit of info. better than just redoing Quilter's work.
     #
     # NOTE: While I sort of hinted at leaving the door open to this, I had forgotten that we
@@ -678,14 +682,90 @@ if ($num_maps) {
     #       doesn't seem to be any reason to think we can try something different with these
     #       sequences and suddenly find ourselves with a decent map.
     #
+    exit(0);
+
 }
 
 
-##
-##
-##  BIG DEAL!!! We now have (1) an updated MapMSA and (2) a list of NewlyMappedSeqs
-##
-##
+# If we didn't get anything out of updating our mappings, there's no more work
+# to do -- jump ship.
+exit(0) if (scalar(@NewlyMappedSeqs) == 0);
+
+
+
+#########################################################################################
+#########################################################################################
+###                                                                                   ###
+###  BIG DEAL!!! We now have (1) an updated MapMSA and (2) a list of NewlyMappedSeqs  ###
+###                                                                                   ###
+#########################################################################################
+#########################################################################################
+
+
+# Sadly, our sense of national unity was short-lived.  We'll need to split off 
+# again based on whether or not any sequences mapped initially, since we'll either
+# be looking for confirmation of mapped characters (do their NW-based positions
+# correspond to characters placed by mapping?) or else... something?
+
+if ($num_maps) {
+
+    # For each of the sequences that we were able to (at least partially) map back to
+    # the genome, check whether their newfound mapping positions make sense with the
+    # positions established for the other sequences.
+    foreach my $seq (@NewlyMappedSeqs) {
+
+	# We'll track all of the positions that are consistent with the established
+	# mappings and all of the inconsistent positions, because we can.
+	my @ConsistentPos;
+	my @InconsistentPos;
+	my $consistencies = 0;
+	my $inconsistencies = 0;
+
+	# ALSO, since I guess I never got this count, for the sake of measuring
+	# success, let's attend to how much of each newly mapped sequence was included
+	# in the new mapping.
+	my $seqlen = 0;
+
+	for (my $j=0; $j<$msa_len; $j++) {
+
+	    # If this position has a letter, I'll bet it's part of the sequence.
+	    # You can't pull the wool over my eyes!
+	    $seqlen++ if ($MSA[$seq][$j] =~ /[A-Za-z]/);
+
+	    # If this position has been imbued with a mapping... check it out!
+	    if ($MapMSA[$seq][$j]) {
+		my $new_pos = $MapMSA[$seq][$j];
+		if ($MapMSASquish[$j] =~ /\:$new_pos/) {
+		    push(@ConsistentPos,$j);
+		    $consistencies++;
+		} else {
+		    push(@InconsistentPos,$j);
+		    $inconsistencies++;
+		}
+	    }
+
+	}
+
+	# Well, that was easy.  How'd we do? (percent range = [0..100])
+	my $map_accuracy   = int(1000.0 * $consistencies / ($consistencies+$inconsistencies)) / 10.0;
+	my $pct_seq_mapped = int(1000.0 * ($consistencies+$inconsistencies) / $seqlen) / 10.0;
+
+	# For NOW let's just print these statistics out, since we really haven't
+	# done ANY flippin' verification...
+	my $outstr = "  Percent Seq Mapped: $pct_seq_mapped\%\n  Mapping Accuracy  : $map_accuracy\%\n\n";
+	print "$outstr";
+
+    }
+
+} else {
+
+    # I'm just putting this off for now, because I can -- I'll need to come up
+    # with a thoughtful approach for how (if at all) I ought to resolve any 
+    # disagreements around mapping positions.
+
+}
+
+
 
 
 1;
@@ -768,6 +848,9 @@ sub BuildMapMSA
 
     my $min_genome_index = 10 ** 10;
     my $max_genome_index = 0;
+
+    # This probably looks dumb, but for specific cool-dude purposes I'm doing this here
+    if (!(-e $hitfilename)) { return(\@MapMSA,\@UsesMap,$num_maps,0,0,0); }
 
     open(my $hitfile,'<',$hitfilename);
     while (my $line = <$hitfile>) {
