@@ -716,6 +716,10 @@ if ($num_maps) {
 
 	# We'll track all of the positions that are consistent with the established
 	# mappings and all of the inconsistent positions, because we can.
+	#
+	# NOTE that we'll make the values in the arrays [1..seqlen], since that's
+	# the way we'll want to record that information for our bio-pals.
+	#
 	my @ConsistentPos;
 	my @InconsistentPos;
 	my $consistencies = 0;
@@ -736,24 +740,36 @@ if ($num_maps) {
 	    if ($MapMSA[$seq][$j]) {
 		my $new_pos = $MapMSA[$seq][$j];
 		if ($MapMSASquish[$j] =~ /\:$new_pos/) {
-		    push(@ConsistentPos,$j);
+		    push(@ConsistentPos,$j+1);
 		    $consistencies++;
 		} else {
-		    push(@InconsistentPos,$j);
+		    push(@InconsistentPos,$j+1);
 		    $inconsistencies++;
 		}
 	    }
 
 	}
 
-	# Well, that was easy.  How'd we do? (percent range = [0..100])
-	my $map_accuracy   = int(1000.0 * $consistencies / ($consistencies+$inconsistencies)) / 10.0;
-	my $pct_seq_mapped = int(1000.0 * ($consistencies+$inconsistencies) / $seqlen) / 10.0;
+	
+	# I think it makes sense to hold onto the lists we've built, so I'll
+	# just set this to hang around for later debugging output.
+	if (1) {
 
-	# For NOW let's just print these statistics out, since we really haven't
-	# done ANY flippin' verification...
-	my $outstr = "  Percent Seq Mapped: $pct_seq_mapped\%\n  Mapping Accuracy  : $map_accuracy\%\n\n";
-	print "  $gene\n$outstr";
+	    # Well, that was easy.  How'd we do? (percent range = [0..100])
+	    my $map_accuracy   = int(1000.0 * $consistencies / ($consistencies+$inconsistencies)) / 10.0;
+	    my $pct_seq_mapped = int(1000.0 * ($consistencies+$inconsistencies) / $seqlen) / 10.0;
+	    
+	    # For NOW let's just print these statistics out, since we really haven't
+	    # done ANY flippin' verification...
+	    my $outstr = "  Percent Seq Mapped: $pct_seq_mapped\%\n  Mapping Accuracy  : $map_accuracy\%\n\n";
+	    print "  $gene\n$outstr";
+
+	}
+
+	# Keep in mind that we'll be first just changing the names (no matter
+	# what else we do), and then *MAYBE* re-working the MSAs to better
+	# represent newly-mapped characters
+
 
     }
 
@@ -805,6 +821,8 @@ sub ReadMSA
 	}
 
     }
+
+    $num_seqs++;
 
     close($msafile);
 
@@ -863,8 +881,18 @@ sub BuildMapMSA
 	    my $seqname = $1;
 
 	    my $i = 0;
-	    $i++ while ($SeqNames[$i] ne $seqname);
-	   
+	    while ($SeqNames[$i] ne $seqname) {
+		$i++;
+		#debugging
+		if ($i >= $num_seqs) {
+		    print "\n  '$seqname' not in this list:\n";
+		    for ($i=0; $i<$num_seqs; $i++) {
+			print "   $SeqNames[$i]\n";
+		    }
+		    die "\n";
+		}
+	    }
+
 	    $line = <$hitfile>; # Nobody ever cares about the method line :'(
 
 	    $line = <$hitfile>;
