@@ -753,7 +753,7 @@ if ($num_maps) {
 	# For NOW let's just print these statistics out, since we really haven't
 	# done ANY flippin' verification...
 	my $outstr = "  Percent Seq Mapped: $pct_seq_mapped\%\n  Mapping Accuracy  : $map_accuracy\%\n\n";
-	print "$outstr";
+	print "  $gene\n$outstr";
 
     }
 
