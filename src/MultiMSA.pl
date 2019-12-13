@@ -912,7 +912,11 @@ foreach my $hitfamname (keys %FamHitFiles) {
 	my $tmphitfname = $FamHitFiles{$hitfamname};
 	my $outhitfname = $tmphitfname;
 	$outhitfname =~ s/\.tmp$/\.out/;
-	if (-e $tmphitfname) { system("mv \"$tmphitfname\" \"$outhitfname\""); }
+	if (-x $tmphitfname) { 
+	    if (system("mv \"$tmphitfname\" \"$outhitfname\"")) {
+		die "\n  FUCK THIS SHIT\n\n";
+	    }
+	}
     }
 }
 

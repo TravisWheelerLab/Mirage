@@ -53,7 +53,7 @@ my $gene = $1;
 
 # We're (hopefully) going to need to know the lengths of the chromosomes
 # in our genome, so let's get our hands on that file Quilter generated.
-open(my $chrlenfile,'<',$genome.'.chr_len_index');
+open(my $chrlenfile,'<',$genome.'.chr_length_index') || die "\n  ERROR:  Failed to locate chromosome length index file for '$genome'\n\n";
 my %ChrLens;
 while (my $line = <$chrlenfile>) {
     $line =~ s/\n|\r//g;
@@ -91,6 +91,14 @@ my ($mapmsaref,$usesmapref,$num_maps,$map_chr,$min_genome_index,$max_genome_inde
 my @MapMSA = @{$mapmsaref};
 my @UsesMap = @{$usesmapref};
 
+# We'll just make ourselves a couple of cozy little arrays
+my @MappedSeqIDs;
+my @UnmappedSeqIDs;
+for (my $i=0; $i<$num_seqs; $i++) {
+    if ($UsesMap[$i]) { push(@MappedSeqIDs,$i);   }
+    else              { push(@UnmappedSeqIDs,$i); }
+}
+
 # Alrighty, lads.  Now we have the info. that we need to determine
 # which of the paths we're on.
 #
@@ -105,14 +113,6 @@ if ($num_maps) {
     # RAD! Our MSA is already built around there being some way to map
     # to a particular range of a chromosome, so we'll work off of that.
     
-    # First step is to squish our MSAs into consensus-like arrays (really, more like profiles)
-    my @MappedSeqIDs;
-    my @UnmappedSeqIDs;
-    for (my $i=0; $i<$num_seqs; $i++) {
-	if ($UsesMap[$i]) { push(@MappedSeqIDs,$i);   }
-	else              { push(@UnmappedSeqIDs,$i); }
-    }
-
     # The format of the MSA profile is a comma-separated list of character:count pairs,
     # and the format of the mapping profile is the same, but with positions instead of characters.
     # If indels (for non-mappers) created a column with no mapped sequences, it'll have a '0'
@@ -630,12 +630,12 @@ if ($num_maps) {
 	    # sequences when we have an established genome region to examine, but that after
 	    # we get the mapping things take a different turn.
 	    $SeqNames[$i] =~ /^[^\|]+\|([^\|]+)\|/;
-	    my $iso = $2;
+	    my $iso = $1;
 
 	    my $protfname = $inmsafname;
 	    $protfname =~ s/\.afa$/\./;
 	    $protfname = $protfname.$iso.'.prot.fa';
-
+	    
 	    my $Pstr = '>'.$SeqNames[$i]."\n";
 	    my $newline = 60;
 	    for (my $j=0; $j<$msa_len; $j++) {
@@ -771,13 +771,115 @@ if ($num_maps) {
 	# represent newly-mapped characters
 
 
+	##############
+	#            #
+	#  BIG MOOD  #
+	#            #
+	##############
+
+
+	# Regardless of what additional re-tooling we do around finding
+	# alternative places to stick characters to ID consistencies,
+	# we'll need to identify which characters didn't map (as runs)
+	# and add that to the sequence information.
+	#
+	# Also, this is easy and I'm VERY caffeinated, so I'm blasting
+	# some MFing Excision and knocking this basic trash OUT.
+	if ($inconsistencies) {
+
+	    # AGAIN, keep in mind that these positions are already '+1'
+	    my @UnmappedRuns;
+	    my $start_incon_pos = $InconsistentPos[0];
+	    my $last_incon_pos  = $start_incon_pos;
+	    for (my $i=1; $i<$inconsistencies; $i++) {
+		if ($InconsistentPos[$i] != $last_incon_pos+1) {
+		    if ($last_incon_pos == $start_incon_pos) { push(@UnmappedRuns,$start_incon_pos);                      }
+		    else                                     { push(@UnmappedRuns,$start_incon_pos.'..'.$last_incon_pos); }
+		    $start_incon_pos = $InconsistentPos[$i];
+		}
+		$last_incon_pos = $InconsistentPos[$i];
+	    }
+	    
+	    # Wrap it up with the final run
+	    if ($last_incon_pos == $start_incon_pos) { push(@UnmappedRuns,$start_incon_pos);                      }
+	    else                                     { push(@UnmappedRuns,$start_incon_pos.'..'.$last_incon_pos); }
+	    
+
+	    # Make the string and shove it into the sequence name
+	    my $unmapped_str = 'UNMAPPED:'.$UnmappedRuns[0];
+	    for (my $i=1; $i<$inconsistencies; $i++) { 
+		$unmapped_str = $unmapped_str.','.$UnmappedRuns[$i]; 
+	    }
+	    
+	    my $seqname = $SeqNames[$seq];
+	    $seqname =~ /\|([^\|]+)\|[^\|]+$/;
+	    my $accession = $1;
+
+	    my $replacement_acc = $unmapped_str.'|'.$accession;
+	    $seqname =~ s/\|$accession\|/\|$replacement_acc\|/;
+
+	    $SeqNames[$seq] = $seqname;
+	    
+	}
+
     }
 
-} else {
+    # To keep sequences that we couldn't partially map easily (visually)
+    # identifiable, we'll need to make sure that they get written out first,
+    # potentially re-ordering sequences in the MSA...
+    my $big_out_str = '';
 
-    # I'm just putting this off for now, because I can -- I'll need to come up
-    # with a thoughtful approach for how (if at all) I ought to resolve any 
-    # disagreements around mapping positions.
+    # First off, make sure we have all of the fully unmapped sequences
+    foreach my $seq (@UnmappedSeqIDs) {
+
+	# Scan the list of freshly (partially) mapped sequences to make sure
+	# this is a genuinely unmapped sequence.
+	my $part_mapped = 0;
+	for ($i=0; $i<scalar(@NewlyMappedSeqs); $i++) {
+	    if ($seq == $NewlyMappedSeqs[$i]) {
+		$part_mapped = 1;
+		last;
+	    }
+	}
+	next if ($part_mapped);
+
+	# Uh-oh, looks like somebody didn't even partially map :(
+	$big_out_str = $big_out_str.">$SeqNames[$seq]";
+	for (my $j=0; $j<$msa_len; $j++) {
+	    if ($j % 60 == 0) { $big_out_str = $big_out_str."\n"; }
+	    $big_out_str = $big_out_str.$MSA[$seq][$j];
+	}
+	$big_out_str = $big_out_str."\n\n";
+
+    }
+
+    # Next up, the newly (partially) mapped sequences -- note that they've been
+    # upgraded to splice-site-marker status!
+    foreach my $seq (@NewlyMappedSeqs) {
+	$big_out_str = $big_out_str.">$SeqNames[$seq]";
+	for (my $j=0; $j<$msa_len; $j++) {
+	    if ($j % 60 == 0) { $big_out_str = $big_out_str."\n"; }
+	    if ($MSASquish[$seq][$j] eq '*') { $big_out_str = $big_out_str.'*';            } # All grown up!
+	    else                             { $big_out_str = $big_out_str.$MSA[$seq][$j]; }
+	}
+	$big_out_str = $big_out_str."\n\n";	
+    }
+
+    # Finally, tell me what I already knew all over again
+    foreach my $seq (@MappedSeqIDs) {
+	$big_out_str = $big_out_str.">$SeqNames[$seq]";
+	for (my $j=0; $j<$msa_len; $j++) {
+	    if ($j % 60 == 0) { $big_out_str = $big_out_str."\n"; }
+	    $big_out_str = $big_out_str.$MSA[$seq][$j];
+	}
+	$big_out_str = $big_out_str."\n\n";
+    }
+
+    # Alrighty, time for the big re-write of the book of this gene family
+    # -- NOTE: for debugging, let's add a little somethin' somethin'
+    open(my $msafile,'>',$inmsafname.'.somethin-somethin') || die "\n  ERROR:  Now you've really done it\n\n";
+    print $msafile "$big_out_str";
+    close($msafile);
 
 }
 
@@ -785,6 +887,152 @@ if ($num_maps) {
 
 
 1;
+
+
+
+
+
+
+
+
+
+#########################################################################
+#
+#  Function Name: TranslateCodon
+#
+#  About: Convert a DNA triple to an amino acid. ('x' for 'stop')
+#
+sub TranslateCodon
+{
+    
+    my $codonref   = shift;
+    my @codonArray = @{$codonref};
+    
+    # In case we didn't get a hold of a full codon (fair game) or
+    # something weird slipped in (less fair, but maybe fair),
+    # spit an 'X'
+    return 'X' if (!(@codonArray && $codonArray[0] && $codonArray[1] && $codonArray[2]));
+    my $codon = $codonArray[0].$codonArray[1].$codonArray[2];
+    $codon    =  uc($codon);
+    $codon    =~ s/U/T/g;
+    return 'X' if ($codon =~ /[^ACGT]/);
+
+    
+    # Guarantees uppercase
+    @codonArray = split('',$codon);
+
+    
+    if ($codonArray[0] eq 'A') {
+	if ($codonArray[1] eq 'A') {
+	    if ($codon eq "AAA") { return 'K'; }
+	    if ($codon eq "AAC") { return 'N'; }
+	    if ($codon eq "AAG") { return 'K'; }
+	    if ($codon eq "AAT") { return 'N'; }
+	}
+	if ($codonArray[1] eq 'C') {
+	    if ($codon eq "ACA") { return 'T'; }
+	    if ($codon eq "ACC") { return 'T'; }
+	    if ($codon eq "ACG") { return 'T'; }
+	    if ($codon eq "ACT") { return 'T'; }
+	}
+	if ($codonArray[1] eq 'G') {
+	    if ($codon eq "AGA") { return 'R'; }
+	    if ($codon eq "AGC") { return 'S'; }
+	    if ($codon eq "AGG") { return 'R'; }
+	    if ($codon eq "AGT") { return 'S'; }
+	}
+	if ($codonArray[1] eq 'T') {
+	    if ($codon eq "ATA") { return 'I'; }
+	    if ($codon eq "ATC") { return 'I'; }
+	    if ($codon eq "ATG") { return 'M'; }
+	    if ($codon eq "ATT") { return 'I'; }
+	}
+    }
+
+    if ($codonArray[0] eq 'C') {
+	if ($codonArray[1] eq 'A') {
+	    if ($codon eq "CAA") { return 'Q'; }
+	    if ($codon eq "CAC") { return 'H'; }
+	    if ($codon eq "CAG") { return 'Q'; }
+	    if ($codon eq "CAT") { return 'H'; }
+	}
+	if ($codonArray[1] eq 'C') {
+	    if ($codon eq "CCA") { return 'P'; }
+	    if ($codon eq "CCC") { return 'P'; }
+	    if ($codon eq "CCG") { return 'P'; }
+	    if ($codon eq "CCT") { return 'P'; }
+	}
+	if ($codonArray[1] eq 'G') {
+	    if ($codon eq "CGA") { return 'R'; }
+	    if ($codon eq "CGC") { return 'R'; }
+	    if ($codon eq "CGG") { return 'R'; }
+	    if ($codon eq "CGT") { return 'R'; }
+	}
+	if ($codonArray[1] eq 'T') {
+	    if ($codon eq "CTA") { return 'L'; }
+	    if ($codon eq "CTC") { return 'L'; }
+	    if ($codon eq "CTG") { return 'L'; }
+	    if ($codon eq "CTT") { return 'L'; }
+	}
+    }
+    
+    if ($codonArray[0] eq 'G') {
+	if ($codonArray[1] eq 'A') {
+	    if ($codon eq "GAA") { return 'E'; }
+	    if ($codon eq "GAC") { return 'D'; }
+	    if ($codon eq "GAG") { return 'E'; }
+	    if ($codon eq "GAT") { return 'D'; }
+	}
+	if ($codonArray[1] eq 'C') {	    
+	    if ($codon eq "GCA") { return 'A'; }
+	    if ($codon eq "GCC") { return 'A'; }
+	    if ($codon eq "GCG") { return 'A'; }
+	    if ($codon eq "GCT") { return 'A'; }
+	}
+	if ($codonArray[1] eq 'G') {
+	    if ($codon eq "GGA") { return 'G'; }
+	    if ($codon eq "GGC") { return 'G'; }
+	    if ($codon eq "GGG") { return 'G'; }
+	    if ($codon eq "GGT") { return 'G'; }
+	}
+	if ($codonArray[1] eq 'T') {
+	    if ($codon eq "GTA") { return 'V'; }
+	    if ($codon eq "GTC") { return 'V'; }
+	    if ($codon eq "GTG") { return 'V'; }
+	    if ($codon eq "GTT") { return 'V'; }
+	}
+    }
+    if ($codonArray[0] eq 'T') {
+	if ($codonArray[1] eq 'A') {
+	    if ($codon eq "TAA") { return 'x'; }
+	    if ($codon eq "TAC") { return 'Y'; }
+	    if ($codon eq "TAG") { return 'x'; }
+	    if ($codon eq "TAT") { return 'Y'; }
+	}
+	if ($codonArray[1] eq 'C') {
+	    if ($codon eq "TCA") { return 'S'; }
+	    if ($codon eq "TCC") { return 'S'; }
+	    if ($codon eq "TCG") { return 'S'; }
+	    if ($codon eq "TCT") { return 'S'; }
+	}
+	if ($codonArray[1] eq 'G') {
+	    if ($codon eq "TGA") { return 'x'; }
+	    if ($codon eq "TGC") { return 'C'; }
+	    if ($codon eq "TGG") { return 'W'; }
+	    if ($codon eq "TGT") { return 'C'; }
+	}
+	if ($codonArray[1] eq 'T') {
+	    if ($codon eq "TTA") { return 'L'; }
+	    if ($codon eq "TTC") { return 'F'; }
+	    if ($codon eq "TTG") { return 'L'; }
+	    if ($codon eq "TTT") { return 'F'; }
+	}
+    }
+
+    # Weird codon is weird. TO THE BIN WITH YOU!
+    return 'X';
+    
+}
 
 
 
@@ -1783,13 +2031,12 @@ sub PMParseSPALNOutput
     my $codon_centers_pos = 0;
     while ($line = <$stdout>) {
 
-	# Every time we see a translated line, we have our bearings.
-	if ($line =~ /\| \S+\/\d+\-\d+/) { # trans line
+	# Every time we see a nucleotide line, we have our bearings.
+	if ($line =~ /\| \S+\/\d+\-\d+/) { # nucl line
 
-	    $line = <$stdout>; # nucl line
 	    $line = <$stdout>; # INPUT PROTEIN LINE!
-
 	    $line =~ /^\s*(\d+)([^\|]+)\|/;
+
 	    my $amino_id = $1 - 1; # We'll work with 0..[seqlen-1] indices
 	    my $aminostr = $2;
 
