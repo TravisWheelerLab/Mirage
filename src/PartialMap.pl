@@ -99,6 +99,10 @@ for (my $i=0; $i<$num_seqs; $i++) {
     else              { push(@UnmappedSeqIDs,$i); }
 }
 
+# If we ever find ourselves latching onto a special chromosome, we'll
+# deinitely want to know who the lucky lady / boylady is!
+my $chr;
+
 # Alrighty, lads.  Now we have the info. that we need to determine
 # which of the paths we're on.
 #
@@ -122,7 +126,7 @@ if ($num_maps) {
 
     # Because we're working with a specific sequence range, we can extract the specific region of the
     # genome that we're restricted to considering (we'll pull in an extra 100Kb for good measure, though)
-    my $chr = $map_chr;
+    $chr = $map_chr;
     $chr =~ s/\[revcomp\]//;
 
     my $low_genome_pos  = $min_genome_index - 100000;
@@ -578,7 +582,7 @@ if ($num_maps) {
     if ($top_chr_counts >= int((scalar(@NearHitChrs)/2.0))+0.5) {
 
 	# HELLA SWAG!
-	my $chr = $top_chr;
+	$chr = $top_chr;
 
 	# Now we can remove [revcomp] from chr if appropriate (for pulling purposes)
 	my $revcomp = 0;
@@ -670,6 +674,12 @@ if ($num_maps) {
 
 	}
 
+	# Before we call things quits-ies, should we consider marking splice-sites?
+	#
+	# I THINK NOT! If we only have partially-mapped sequences, then that could
+	# misleadingly indicate that the unmapped regions are single exons that
+	# failed to map.
+
 
     }
 
@@ -708,6 +718,12 @@ exit(0) if (scalar(@NewlyMappedSeqs) == 0);
 # correspond to characters placed by mapping?) or else... something?
 
 if ($num_maps) {
+
+    # We'll write out the partial mappings to the family's hits.out file.
+    # '-' will be used to indicate any unmapped positions.
+    my $partialhitstr = "------------------------ PARTIAL MAPPINGS -----------------------\n\n";
+
+    
 
     # For each of the sequences that we were able to (at least partially) map back to
     # the genome, check whether their newfound mapping positions make sense with the
@@ -819,10 +835,36 @@ if ($num_maps) {
 	    $seqname =~ s/\|$accession\|/\|$replacement_acc\|/;
 
 	    $SeqNames[$seq] = $seqname;
-	    
+
 	}
 
+	# We'll also want to have a string to concatenate onto this sequence
+	# family's hits.out file <-[which might not exist...]
+	$partialhitstr = $partialhitstr."Isoform ID : $SeqNames[$seq]\n";
+	$partialhitstr = $partialhitstr."Method     : PartialMap\n";
+	$partialhitstr = $partialhitstr."Chromosome : $chr\n";
+	$partialhitstr = $partialhitstr."Match Pos.s: ";
+	for (my $j=0; $j<$msa_len; $j++) {
+	    if ($MSA[$seq][$j] =~ /[A-Za-z]/) {
+		if ($MapMSA[$seq][$j]) { $partialhitstr = $partialhitstr.$MapMSA[$seq][$j]; }
+		else                   { $partialhitstr = $partialhitstr.'-';               }
+		$partialhitstr = $partialhitstr.',';
+	    }
+	}
+	$partialhitstr =~ s/\,$//; # We'll have one comma too many at the end of this endeavor
+	$partialhitstr = $partialhitstr."\n\n";
+
     }
+
+    # We are now prepared to cry and scream about where all these partial
+    # mappings led us.
+    if ($inhitfname !~ /\.hits\.out/) { 
+	$inhitfname = $inmsafname;
+	$inhitfname =~ s/\.afa$/\.hits\.out/;
+    }
+    open(my $inhitf,'>>',$inhitfname);
+    print $inhitf "$partialhitstr";
+    close($inhitf);
 
     # To keep sequences that we couldn't partially map easily (visually)
     # identifiable, we'll need to make sure that they get written out first,
@@ -877,7 +919,7 @@ if ($num_maps) {
 
     # Alrighty, time for the big re-write of the book of this gene family
     # -- NOTE: for debugging, let's add a little somethin' somethin'
-    open(my $msafile,'>',$inmsafname.'.somethin-somethin') || die "\n  ERROR:  Now you've really done it\n\n";
+    open(my $msafile,'>',$inmsafname.'.somethin-somethin');
     print $msafile "$big_out_str";
     close($msafile);
 
