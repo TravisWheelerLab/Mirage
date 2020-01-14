@@ -439,6 +439,10 @@ if ($num_maps) {
 	    $LspalnCmd =~ s/\[out\]/$Lspalnfname/;
 	    my ($LAITGPref,$Lerr) = PMParseSPALNOutput($LspalnCmd,$Lspalnfname,$revcomp,$offset,$Lprotfname);
 	    
+	    # Delete those dumb ol' files
+	    system("rm \"$Lspalnfname\"") if (-e $Lspalnfname);
+	    system("rm \"$Lprotfname\"")  if (-e $Lprotfname);
+
 	    next if (!$LAITGPref);
 	    my %LAminoIndexToGenPos = %{$LAITGPref};
 
@@ -447,6 +451,10 @@ if ($num_maps) {
 	    $RspalnCmd =~ s/\[prot\]/$Rprotfname/;
 	    $RspalnCmd =~ s/\[out\]/$Rspalnfname/;
 	    my ($RAITGPref,$Rerr) = PMParseSPALNOutput($RspalnCmd,$Rspalnfname,$revcomp,$offset,$Rprotfname);
+
+	    # Delete those dumb ol' files
+	    system("rm \"$Rspalnfname\"") if (-e $Rspalnfname);
+	    system("rm \"$Rprotfname\"")  if (-e $Rprotfname);
 
 	    next if (!$RAITGPref);
 	    my %RAminoIndexToGenPos = %{$RAITGPref};
@@ -471,31 +479,38 @@ if ($num_maps) {
 		
 		# If the mappings aren't consistent, I guess we'll pick the longest one?
 		if (!$consistent) {
-		    die "  STILL?!\n";
 		    if (scalar(@LeftAminoKeys) > scalar(@RightAminoKeys)) {
 			%RAminoIndexToGenPos = ();
 			@RightAminoKeys = ();
 		    } else {
 			%LAminoIndexToGenPos = ();
-			@LeftAminoKeys = ();			
+			@LeftAminoKeys = ();	
 		    }
 		}
+	    }
+
+	    # Now we combine 'em, starting with the left side
+	    my %AminoIndexToGenPos;
+	    foreach my $aminoindex (keys %LAminoIndexToGenPos) { 
+		$AminoIndexToGenPos{$aminoindex} = $LAminoIndexToGenPos{$aminoindex}; 
 	    }
 
 	    # Because our 'Right' indices are all w.r.t. the right part of the sequence
 	    # we're going to have to shift them.  These shifts will increase the values,
 	    # so we start with the highest and decrease.  We'll remove entries to avoid
 	    # conflicts when we integrate w/ LAITGP
-	    for (my $i=scalar(@RightAminoKeys)-1; $i>=0; $i--) {
-		my $key = $RightAminoKeys[$i];
-		$RAminoIndexToGenPos{$key+$Roffset} = $RAminoIndexToGenPos{$key};
-		$RAminoIndexToGenPos{$key} = 0;
-	    }
+	    #
+	    # Previously, we would rewrite these values just to the 'Right' hash.
+	    # Obviously, this was the foolishness of youth corrupting our rationality.
+	    #for (my $i=scalar(@RightAminoKeys)-1; $i>=0; $i--) {
+	    #my $key = $RightAminoKeys[$i];
+	    #$RAminoIndexToGenPos{$key+$Roffset} = $RAminoIndexToGenPos{$key};
+	    #$RAminoIndexToGenPos{$key} = 0;
+	    #}
 
-	    # Now we combine 'em.  Yeah.  Think about that.
-	    my %AminoIndexToGenPos;
-	    foreach my $aminoindex (keys %LAminoIndexToGenPos) { $AminoIndexToGenPos{$aminoindex} = $LAminoIndexToGenPos{$aminoindex}; }
-	    foreach my $aminoindex (keys %RAminoIndexToGenPos) { $AminoIndexToGenPos{$aminoindex} = $RAminoIndexToGenPos{$aminoindex}; }
+	    foreach my $aminoindex (keys %RAminoIndexToGenPos) { 
+		$AminoIndexToGenPos{$aminoindex+$Roffset} = $RAminoIndexToGenPos{$aminoindex}; 
+	    }
 
 	    # UPDATE OUR MAPMSA
 	    $mapmsaref = UpdateMapMSA(\@MSA,\@MapMSA,\%AminoIndexToGenPos,$seqid,$msa_len);
@@ -539,8 +554,17 @@ if ($num_maps) {
 	    $spalnfname =~ s/prot\.fa/spaln\.out/;
 
 	    my $spalnCmd = $spaln.' -Q3 -O1 -S3 -ya3 "'.$dnafilename.'" "'.$protfname.'" 1>"'.$spalnfname.'" 2>/dev/null';
-	    my $AITGPref = PMParseSPALNOutput($spalnCmd,$spalnfname,$revcomp,$offset,$protfname);
-	    my %AminoIndexToGenPos;
+	    my ($AITGPref,$Aerr) = PMParseSPALNOutput($spalnCmd,$spalnfname,$revcomp,$offset,$protfname);
+	    
+	    
+	    # Delete those dumb ol' files
+	    system("rm \"$spalnfname\"")  if (-e $spalnfname);
+	    system("rm \"$protfname\"")   if (-e $protfname);
+	    
+	    
+	    next if (!$AITGPref);
+	    my %AminoIndexToGenPos = %{$AITGPref};
+	    next if (!scalar(keys %AminoIndexToGenPos));
 
 	    # UPDATE OUR MAPMSA
 	    $mapmsaref = UpdateMapMSA(\@MSA,\@MapMSA,\%AminoIndexToGenPos,$seqid,$msa_len);
@@ -550,6 +574,9 @@ if ($num_maps) {
 	}
 
     }
+
+    # Once we've hit this point, we're all done with the extracted DNA
+    system("rm \"$dnafilename\"") if (-e $dnafilename);
 	
     # Alrighty, lads -- we find ourselves faced with 2 options.
     #
@@ -672,8 +699,14 @@ if ($num_maps) {
 
 	    my $spalnCmd = $spaln.' -Q3 -O1 -S3 -ya3 "'.$dnafilename.'" "'.$protfname.'" 1>"'.$spalnfname.'" 2>/dev/null';
 	    my ($AITGPref,$spaln_err) = PMParseSPALNOutput($spalnCmd,$spalnfname,$revcomp,$offset,$protfname);
-	    next if (!$AITGPref);
 
+
+	    # Delete those dumb ol' files
+	    system("rm \"$spalnfname\"")  if (-e $spalnfname);
+	    system("rm \"$protfname\"")   if (-e $protfname);
+
+	    
+	    next if (!$AITGPref);
 	    my %AminoIndexToGenPos = %{$AITGPref};
 	    next if (!scalar(keys %AminoIndexToGenPos));
 	    
@@ -690,6 +723,8 @@ if ($num_maps) {
 	# misleadingly indicate that the unmapped regions are single exons that
 	# failed to map.
 
+	# But, in any case, we simply *must* delete the DNA file
+	system("rm \"$dnafilename\"") if (-e $dnafilename);    
 
     }
 
@@ -765,15 +800,15 @@ if ($num_maps) {
 	    # If this position has been imbued with a mapping... check it out!
 	    if ($MapMSA[$seq][$j]) {
 		my $new_pos = $MapMSA[$seq][$j];
-		print "  $new_pos  ::>>  $MapMSASquish[$j]  [";
+		#print "  $new_pos  ::>>  $MapMSASquish[$j]  [";
 		if ($MapMSASquish[$j] =~ /$new_pos\:/) {
-		    push(@ConsistentPos,$j+1);
+		    push(@ConsistentPos,$seqlen);
 		    $consistencies++;
-		    print "x]\n";
+		    #print "x]\n";
 		} else {
-		    push(@InconsistentPos,$j+1);
+		    push(@InconsistentPos,$seqlen);
 		    $inconsistencies++;
-		    print " ]\n";
+		   # print " ]\n";
 		}
 	    }
 
@@ -784,8 +819,6 @@ if ($num_maps) {
 	# just set this to hang around for later debugging output.
 	if (1) {
 
-	    die "\n  $SeqNames[$seq]\n  >>>   consistencies: $consistencies\n  >>> inconsistencies: $inconsistencies\n\n";
-
 	    # Well, that was easy.  How'd we do? (percent range = [0..100])
 	    my $map_accuracy   = int(1000.0 * $consistencies / ($consistencies+$inconsistencies)) / 10.0;
 	    my $pct_seq_mapped = int(1000.0 * ($consistencies+$inconsistencies) / $seqlen) / 10.0;
@@ -793,7 +826,7 @@ if ($num_maps) {
 	    # For NOW let's just print these statistics out, since we really haven't
 	    # done ANY flippin' verification...
 	    my $outstr = "  Percent Seq Mapped: $pct_seq_mapped\%\n  Mapping Accuracy  : $map_accuracy\%\n\n";
-	    print "  $gene\n$outstr";
+	    print "  $gene: $SeqNames[$seq]\n$outstr";
 
 	}
 
@@ -838,7 +871,7 @@ if ($num_maps) {
 
 	    # Make the string and shove it into the sequence name
 	    my $unmapped_str = 'UNMAPPED:'.$UnmappedRuns[0];
-	    for (my $i=1; $i<$inconsistencies; $i++) { 
+	    for (my $i=1; $i<scalar(@UnmappedRuns); $i++) { 
 		$unmapped_str = $unmapped_str.','.$UnmappedRuns[$i]; 
 	    }
 	    
@@ -916,8 +949,8 @@ if ($num_maps) {
 	$big_out_str = $big_out_str.">$SeqNames[$seq]";
 	for (my $j=0; $j<$msa_len; $j++) {
 	    if ($j % 60 == 0) { $big_out_str = $big_out_str."\n"; }
-	    if ($MSASquish[$seq][$j] eq '*') { $big_out_str = $big_out_str.'*';            } # All grown up!
-	    else                             { $big_out_str = $big_out_str.$MSA[$seq][$j]; }
+	    if ($MSASquish[$j] eq "*") { $big_out_str = $big_out_str.'*';            } # All grown up!
+	    else                       { $big_out_str = $big_out_str.$MSA[$seq][$j]; }
 	}
 	$big_out_str = $big_out_str."\n\n";	
     }
@@ -933,8 +966,8 @@ if ($num_maps) {
     }
 
     # Alrighty, time for the big re-write of the book of this gene family
-    # -- NOTE: for debugging, let's add a little somethin' somethin'
-    open(my $msafile,'>',$inmsafname.'.somethin-somethin');
+    #open(my $msafile,'>',$inmsafname.'.somethin-somethin'); # DEBUGGING
+    open(my $msafile,'>',$inmsafname);
     print $msafile "$big_out_str";
     close($msafile);
 
@@ -1584,6 +1617,7 @@ sub PMParseSPALNOutput
     my $full_length = 0;
     my $num_aas     = 0; 
     my $current_pos = $offset;
+    my $last_end_pos;
     my $first_jump  = 0;
     while (!eof($stdout)) {
 
@@ -1677,6 +1711,12 @@ sub PMParseSPALNOutput
 	#
 	next if ($i == @NextNucls || $NextNucls[$i] eq '|');
 
+	# Did SPALN lie to us about having skipped?
+	$nn_line =~ /\s*(\d+)\s/;
+	my $reported_pos = $1 + $offset;
+	if ($last_end_pos && $reported_pos == $last_end_pos) {
+	    $current_pos = $last_end_pos;
+	}
 
 	# Run along the two lines storing all of the relevant
 	# information that we can get out of them.
@@ -1724,6 +1764,8 @@ sub PMParseSPALNOutput
 	    $i++;
 	    
 	}
+
+	$last_end_pos = $current_pos;
 	
     }
     

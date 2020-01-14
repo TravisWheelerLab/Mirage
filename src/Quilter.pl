@@ -3280,6 +3280,7 @@ sub ParseSPALNOutput
     my $full_length = 0;
     my $num_aas     = 0; 
     my $current_pos = $offset;
+    my $last_end_pos; # To catch a possible SPALN error (false 'skip's)
     my $first_jump  = 0;
     while (!eof($stdout)) {
 
@@ -3344,6 +3345,14 @@ sub ParseSPALNOutput
 		return(0,0,6);
 	    }
 
+	}
+
+
+	# Does it look like SPALN lied to us about skipping?
+	$nn_line =~ /^\s*(\d+)\s/;
+	my $reported_pos = $1 + $offset;
+	if ($last_end_pos && $last_end_pos == $reported_pos) {
+	    $current_pos = $last_end_pos;
 	}
 
 	
@@ -3420,6 +3429,8 @@ sub ParseSPALNOutput
 	    $i++;
 	    
 	}
+
+	$last_end_pos = $current_pos;
 	
     }
     
