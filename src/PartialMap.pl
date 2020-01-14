@@ -437,13 +437,18 @@ if ($num_maps) {
 	    my $LspalnCmd = $spalnCmd;
 	    $LspalnCmd =~ s/\[prot\]/$Lprotfname/;
 	    $LspalnCmd =~ s/\[out\]/$Lspalnfname/;
-	    my $LAITGPref = PMParseSPALNOutput($LspalnCmd,$Lspalnfname,$revcomp,$offset,$Lprotfname);
-	    my %LAminoIndexToGenPos = %{$LAITGPref};
+	    my ($LAITGPref,$Lerr) = PMParseSPALNOutput($LspalnCmd,$Lspalnfname,$revcomp,$offset,$Lprotfname);
 	    
+	    next if (!$LAITGPref);
+	    my %LAminoIndexToGenPos = %{$LAITGPref};
+
+
 	    my $RspalnCmd = $spalnCmd;
 	    $RspalnCmd =~ s/\[prot\]/$Rprotfname/;
 	    $RspalnCmd =~ s/\[out\]/$Rspalnfname/;
-	    my $RAITGPref = PMParseSPALNOutput($RspalnCmd,$Rspalnfname,$revcomp,$offset,$Rprotfname);
+	    my ($RAITGPref,$Rerr) = PMParseSPALNOutput($RspalnCmd,$Rspalnfname,$revcomp,$offset,$Rprotfname);
+
+	    next if (!$RAITGPref);
 	    my %RAminoIndexToGenPos = %{$RAITGPref};
 
 
@@ -451,18 +456,22 @@ if ($num_maps) {
 	    my @LeftAminoKeys   = sort {$a <=> $b} keys %LAminoIndexToGenPos;
 	    my @RightAminoKeys  = sort {$a <=> $b} keys %RAminoIndexToGenPos;
 	    next if (scalar(@LeftAminoKeys) + scalar(@RightAminoKeys) == 0);
-	    
+
 	    if (scalar(@LeftAminoKeys) && scalar(@RightAminoKeys)) {
 
+		my $l_high_gen_pos = $LAminoIndexToGenPos{$LeftAminoKeys[scalar(@LeftAminoKeys)-1]};
+		my $r_low_gen_pos  = $RAminoIndexToGenPos{$RightAminoKeys[0]};
+
 		my $consistent = 1; # Let's just assume the best?
-		if ($revcomp) {
-		    $consistent = 0 if ($LeftAminoKeys[scalar(@LeftAminoKeys)-1] < $RightAminoKeys[0]);
-		} else {
-		    $consistent = 0 if ($LeftAminoKeys[scalar(@LeftAminoKeys)-1] > $RightAminoKeys[0]);
+		if ($revcomp) { 
+		    $consistent = 0 if ($l_high_gen_pos < $r_low_gen_pos); 
+		} else { 
+		    $consistent = 0 if ($l_high_gen_pos > $r_low_gen_pos); 
 		}
 		
 		# If the mappings aren't consistent, I guess we'll pick the longest one?
 		if (!$consistent) {
+		    die "  STILL?!\n";
 		    if (scalar(@LeftAminoKeys) > scalar(@RightAminoKeys)) {
 			%RAminoIndexToGenPos = ();
 			@RightAminoKeys = ();
@@ -502,7 +511,7 @@ if ($num_maps) {
 	    #
 
 	    $SeqNames[$seqid] =~ /^[^\|]+\|([^\|]+)\|/;
-	    my $iso = $2;
+	    my $iso = $1;
 
 	    my $protfname = $inmsafname;
 	    $protfname =~ s/\.afa$/\./;
@@ -662,9 +671,10 @@ if ($num_maps) {
 	    $spalnfname =~ s/prot\.fa/spaln\.out/;
 
 	    my $spalnCmd = $spaln.' -Q3 -O1 -S3 -ya3 "'.$dnafilename.'" "'.$protfname.'" 1>"'.$spalnfname.'" 2>/dev/null';
-	    my $AITGPref = PMParseSPALNOutput($spalnCmd,$spalnfname,$revcomp,$offset,$protfname);
-	    my %AminoIndexToGenPos = %{$AITGPref};
+	    my ($AITGPref,$spaln_err) = PMParseSPALNOutput($spalnCmd,$spalnfname,$revcomp,$offset,$protfname);
+	    next if (!$AITGPref);
 
+	    my %AminoIndexToGenPos = %{$AITGPref};
 	    next if (!scalar(keys %AminoIndexToGenPos));
 	    
 	    # UPDATE OUR MAPMSA
@@ -755,12 +765,15 @@ if ($num_maps) {
 	    # If this position has been imbued with a mapping... check it out!
 	    if ($MapMSA[$seq][$j]) {
 		my $new_pos = $MapMSA[$seq][$j];
-		if ($MapMSASquish[$j] =~ /\:$new_pos/) {
+		print "  $new_pos  ::>>  $MapMSASquish[$j]  [";
+		if ($MapMSASquish[$j] =~ /$new_pos\:/) {
 		    push(@ConsistentPos,$j+1);
 		    $consistencies++;
+		    print "x]\n";
 		} else {
 		    push(@InconsistentPos,$j+1);
 		    $inconsistencies++;
+		    print " ]\n";
 		}
 	    }
 
@@ -770,6 +783,8 @@ if ($num_maps) {
 	# I think it makes sense to hold onto the lists we've built, so I'll
 	# just set this to hang around for later debugging output.
 	if (1) {
+
+	    die "\n  $SeqNames[$seq]\n  >>>   consistencies: $consistencies\n  >>> inconsistencies: $inconsistencies\n\n";
 
 	    # Well, that was easy.  How'd we do? (percent range = [0..100])
 	    my $map_accuracy   = int(1000.0 * $consistencies / ($consistencies+$inconsistencies)) / 10.0;
@@ -1402,7 +1417,7 @@ sub PMParseSPALNOutput
     # If we've hit the end of the file, no point continuing
     if (eof($stdout)) {
 	close($stdout);
-	return(0,0,1); 
+	return(0,1);
     }
 
 
@@ -1453,7 +1468,7 @@ sub PMParseSPALNOutput
 		# (0,1) return).
 		#
 		close($stdout);
-		return(0,1,2);
+		return(0,2);
 		
 	    }
 
@@ -1484,7 +1499,7 @@ sub PMParseSPALNOutput
     # jump ship.
     if (eof($stdout)) {
 	close($stdout); 
-	return(0,0,3); 
+	return(0,3); 
 	#} elsif ($true_num_chars < $prot_len) {
 	#close($stdout);
 	#return(0,1,4); # <- This '1' might give us a second chance (pull in more sequence)
@@ -1501,7 +1516,7 @@ sub PMParseSPALNOutput
     # Still not totally stoked on seeing an eof
     if (eof($stdout)) {
 	close($stdout);
-	return(0,0,5);
+	return(0,5);
     }
 
 
@@ -1630,7 +1645,7 @@ sub PMParseSPALNOutput
 		$first_jump = 1;
 
 	    } else {
-		return(0,0,6);
+		return(0,6);
 	    }
 
 	}
@@ -2097,7 +2112,7 @@ sub PMParseSPALNOutput
 
     close($stdout);
 
-    return(\%AminoIndexToGenomePos);
+    return(\%AminoIndexToGenomePos,0);
 
     # Now that we've got our purty little hit, we write it on out and tell
     # 'em how happy that made us feel.

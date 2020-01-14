@@ -912,9 +912,9 @@ foreach my $hitfamname (keys %FamHitFiles) {
 	my $tmphitfname = $FamHitFiles{$hitfamname};
 	my $outhitfname = $tmphitfname;
 	$outhitfname =~ s/\.tmp$/\.out/;
-	if (-x $tmphitfname) { 
+	if (-e $tmphitfname) { 
 	    if (system("mv \"$tmphitfname\" \"$outhitfname\"")) {
-		die "\n  FUCK THIS SHIT\n\n";
+		die "\n  Failed to move temporary hitfile '$tmphitfname' to '$outhitfname'\n\n";
 	    }
 	}
     }

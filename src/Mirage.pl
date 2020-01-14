@@ -538,14 +538,16 @@ for ($i=0; $i<$numSpecies; $i++) {
     # Before we really get to work, make a public list of gene families that
     # need to get investigated, and roughly divvy-up the load.
     my @PartialMapFams = keys %QuilterMisses;
-    my $threadportion  = int(scalar(@PartialMapFams) / $numProcesses);
+    my $numPMprocesses = $numProcesses;
+    $numPMprocesses    = scalar(@PartialMapFams) if ($numPMprocesses > scalar(@PartialMapFams));
+    my $threadportion  = int(scalar(@PartialMapFams) / $numPMprocesses);
 
     
     # NOTE: We're going to need to parallelize here
     my $processes = 1;
     my $threadID  = 0;
     my $pid;
-    while ($processes < $numProcesses) {
+    while ($processes < $numPMprocesses) {
 	if ($pid = fork) {
 	    if (not defined $pid) { die "\n  ERROR: Fork failed (Mirage.pl:PartialMap)\n\n"; }
 	    $threadID = 0;
@@ -584,7 +586,7 @@ for ($i=0; $i<$numSpecies; $i++) {
 	    foreach my $near_hit_triple (split(/\&/,$QuilterNearHits{$fam})) {
 		$PMcmd = $PMcmd.' '.$near_hit_triple;
 	    }
-	    
+
 	} else {
 
 	    # NOTHING GOOD HERE
