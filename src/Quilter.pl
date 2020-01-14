@@ -2718,7 +2718,7 @@ sub BLATAssistedSPALN
     my $spalnfname    = $foldername.'Quilter.BAS.spaln.'.$threadID.'.in'; # The actual spaln output
     my $thread_hits   = $foldername.'Quilter.BAS.hits.'.$threadID.'.out';
     my $thread_misses = $foldername.'Quilter.BAS.misses.'.$threadID.'.out';
-    my $thread_nears  = $foldername.'Quilter.BAS.nears'.$threadID.'.out';
+    my $thread_nears  = $foldername.'Quilter.BAS.nears.'.$threadID.'.out';
     my $thread_tes    = $foldername.'Quilter.BAS.TEs.'.$threadID.'.out';
     my $thread_spaln  = $foldername.'Quilter.BAS.spaln.'.$threadID.'.out'; # Where we record info about spalnery
     open(my $ThreadHitFile,'>',$thread_hits)    || die "\n  ERROR:  Failed to open BLAT hit file '$thread_hits'\n\n";
@@ -3041,7 +3041,7 @@ sub BLATAssistedSPALN
 	    system("rm \"$thread_spaln\"");
 	}
 
-	$thread_nears = $foldername.'Quilter.BAS.nears'.$threadID.'.out';
+	$thread_nears = $foldername.'Quilter.BAS.nears.'.$threadID.'.out';
 	if (-e $thread_nears) {
 	    open($ThreadNearFile,'<',$thread_nears) || die "\n  ERROR:  Failed to open BLAT near-miss file '$thread_nears'\n\n";
 	    while (my $line = <$ThreadNearFile>) {
