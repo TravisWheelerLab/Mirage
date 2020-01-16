@@ -861,7 +861,7 @@ if ($num_maps) {
 	
 	# I think it makes sense to hold onto the lists we've built, so I'll
 	# just set this to hang around for later debugging output.
-	if (1) {
+	if (0) {
 
 	    # Well, that was easy.  How'd we do? (percent range = [0..100])
 	    my $map_accuracy   = int(1000.0 * $consistencies / ($consistencies+$inconsistencies)) / 10.0;
