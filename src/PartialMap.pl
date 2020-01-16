@@ -416,8 +416,7 @@ if ($num_maps) {
 	    open(my $Rprotf,'>',$Rprotfname);
 	    print $Rprotf "$Rstr\n";
 	    close($Rprotf);
-	    
-	    
+
 	    # OK, well what are you waiting for? Do you seriously thing Spaln is just going
 	    # to run itself? You dork, you gotta call those commands, what is this, your first
 	    # day of programming?
@@ -458,13 +457,14 @@ if ($num_maps) {
 
 	    next if (!$RAITGPref);
 	    my %RAminoIndexToGenPos = %{$RAITGPref};
-
+	    
 
 	    # First -- are these mappings consistent (assuming we did get successful mappings from both)?
 	    my @LeftAminoKeys   = sort {$a <=> $b} keys %LAminoIndexToGenPos;
 	    my @RightAminoKeys  = sort {$a <=> $b} keys %RAminoIndexToGenPos;
 	    next if (scalar(@LeftAminoKeys) + scalar(@RightAminoKeys) == 0);
 
+	    # Make sure the two sides are in agreement w.r.t. positioning
 	    if (scalar(@LeftAminoKeys) && scalar(@RightAminoKeys)) {
 
 		my $l_high_gen_pos = $LAminoIndexToGenPos{$LeftAminoKeys[scalar(@LeftAminoKeys)-1]};
@@ -577,6 +577,9 @@ if ($num_maps) {
 
     # Once we've hit this point, we're all done with the extracted DNA
     system("rm \"$dnafilename\"") if (-e $dnafilename);
+
+    # Quick sidebar -- are we rev'd the comp out?
+    if ($revcomp) { $chr = $chr.'[revcomp]'; }
 	
     # Alrighty, lads -- we find ourselves faced with 2 options.
     #
@@ -724,7 +727,10 @@ if ($num_maps) {
 	# failed to map.
 
 	# But, in any case, we simply *must* delete the DNA file
-	system("rm \"$dnafilename\"") if (-e $dnafilename);    
+	system("rm \"$dnafilename\"") if (-e $dnafilename);
+
+	# Maybe take a note
+	if ($revcomp) { $chr = $chr.'[revcomp]'; }
 
     }
 
@@ -768,6 +774,36 @@ if ($num_maps) {
     # '-' will be used to indicate any unmapped positions.
     my $partialhitstr = "------------------------ PARTIAL MAPPINGS -----------------------\n\n";
 
+
+    # Before we get to the definitive declarations of who is now mapped,
+    # let's check if there are any positions where only newly mapped seqs
+    # had mappings (to the same coordinate) so we can call those consistent
+    # mapping positions...
+    for (my $j=0; $j<$msa_len; $j++) {
+
+	# Is this MSA column represented as unmapped?
+	if (!$MapMSASquish[$j]) {
+
+	    # Check if we have consensus across newly mapped seqs...
+	    my $new_coord = 0;
+	    foreach my $seq (@NewlyMappedSeqs) {
+		if ($MSA[$seq][$j] && $MapMSA[$seq][$j]) {
+		    if (!$new_coord) {
+			$new_coord = $MapMSA[$seq][$j];
+		    } elsif ($new_coord != $MapMSA[$seq][$j]) {
+			$new_coord = -1; # Bummer
+		    }
+		}
+	    }
+
+	    # Did we lock in a coordinate?
+	    if ($new_coord > 0) {
+		$MapMSASquish[$j] = $new_coord.':NewlyMappedCoordinate';
+	    }
+	    
+	}
+    }
+
     
 
     # For each of the sequences that we were able to (at least partially) map back to
@@ -783,8 +819,9 @@ if ($num_maps) {
 	#
 	my @ConsistentPos;
 	my @InconsistentPos;
-	my $consistencies = 0;
+	my $consistencies   = 0;
 	my $inconsistencies = 0;
+	my $unmapped_chars  = 0;
 
 	# ALSO, since I guess I never got this count, for the sake of measuring
 	# success, let's attend to how much of each newly mapped sequence was included
@@ -795,8 +832,9 @@ if ($num_maps) {
 
 	    # If this position has a letter, I'll bet it's part of the sequence.
 	    # You can't pull the wool over my eyes!
-	    $seqlen++ if ($MSA[$seq][$j] =~ /[A-Za-z]/);
-
+	    next if ($MSA[$seq][$j] !~ /[A-Za-z]/);
+	    $seqlen++;
+	    
 	    # If this position has been imbued with a mapping... check it out!
 	    if ($MapMSA[$seq][$j]) {
 		my $new_pos = $MapMSA[$seq][$j];
@@ -808,8 +846,14 @@ if ($num_maps) {
 		} else {
 		    push(@InconsistentPos,$seqlen);
 		    $inconsistencies++;
-		   # print " ]\n";
+		    #print " ]\n";
 		}
+	    } else {
+		# If there's a character here but no mapping, we'll still call it
+		# an 'inconsistency' for the sake of correct annotation in the
+		# hitfile
+		push(@InconsistentPos,$seqlen);
+		$unmapped_chars++;
 	    }
 
 	}
@@ -821,7 +865,7 @@ if ($num_maps) {
 
 	    # Well, that was easy.  How'd we do? (percent range = [0..100])
 	    my $map_accuracy   = int(1000.0 * $consistencies / ($consistencies+$inconsistencies)) / 10.0;
-	    my $pct_seq_mapped = int(1000.0 * ($consistencies+$inconsistencies) / $seqlen) / 10.0;
+	    my $pct_seq_mapped = int(1000.0 * ($seqlen-$unmapped_chars) / $seqlen) / 10.0;
 	    
 	    # For NOW let's just print these statistics out, since we really haven't
 	    # done ANY flippin' verification...
@@ -1672,9 +1716,9 @@ sub PMParseSPALNOutput
 
 		$first_jump = $1;
 
-		# Special catch for BLAT parsing
-		if ($revcomp==3) { $current_pos  = ($start_pos+1)-$first_jump; }
-		else             { $current_pos += $first_jump;                }
+		# Special catch for BLAT parsing <--- MAYBE?!?!
+		if ($revcomp) { $current_pos  = ($start_pos+1)-$first_jump; }
+		else          { $current_pos += $first_jump;                }
 
 		$first_jump = 1;
 

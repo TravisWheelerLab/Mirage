@@ -89,7 +89,7 @@ if (-e $outputfolder) {
 }
 system("mkdir $outputfolder");
 
-my $tempdirname = $outputfolder.'/multimsa_temp';
+my $tempdirname = $outputfolder.'/multimsa_temp/';
 if (system("mkdir \"$tempdirname\"")) { die "\n  ERROR:  Failed to create temporary directory '$tempdirname'\n\n"; }
 
 open(my $infile,'<',$ARGV[0]) || die "\n  Failed to open input file '$ARGV[0]'\n\n";
@@ -747,13 +747,13 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	$IsoNames[$i] =~ s/\s//g;
 	if ($ExtraInfo[$i]) {
 	    if ($ARFNameField[$i]) {
-		print $outfile ">$GeneNames[$i]|$IsoNames[$i]|$Species[$i]|$IsoIDs[$i]|$ExtraInfo[$i]$ARFNameField[$i]|$GroupField[$i]\n";
+		print $outfile ">$GeneNames[$i]|$IsoNames[$i]|$Species[$i]|$ARFNameField[$i]|$IsoIDs[$i]|$ExtraInfo[$i]$GroupField[$i]\n";
 	    } else {
 		print $outfile ">$GeneNames[$i]|$IsoNames[$i]|$Species[$i]|$IsoIDs[$i]|$ExtraInfo[$i]$GroupField[$i]\n";
 	    }
 	} else {
 	    if ($ARFNameField[$i]) {
-		print $outfile ">$GeneNames[$i]|$IsoNames[$i]|$Species[$i]|$IsoIDs[$i]|$ARFNameField[$i]|$GroupField[$i]\n";
+		print $outfile ">$GeneNames[$i]|$IsoNames[$i]|$Species[$i]|$ARFNameField[$i]|$IsoIDs[$i]|$GroupField[$i]\n";
 	    } else {
 		print $outfile ">$GeneNames[$i]|$IsoNames[$i]|$Species[$i]|$IsoIDs[$i]|$GroupField[$i]\n";
 	    }
@@ -898,24 +898,26 @@ foreach my $fam (keys %FamBadHits) {
     foreach my $demappedseq (keys %DemappedSequences) { print $outhitf "$DemappedSequences{$demappedseq}"; }
     close($outhitf);
 
-    # Keep things simple and set a flag showing that this was, in fact,
-    # a family with some bad hit(s)
-    $FamBadHits{$fam} = 1;
-
+    $FamHitFiles{$fam} = 0;
+    
 }
 
 
 # For any families that didn't have nasty sleeper-agents (i.e., sequences that didn't map to the same chr)
 # just move the original hit files from '.tmp' to '.out'
-foreach my $hitfamname (keys %FamHitFiles) {
-    if (!$FamBadHits{$hitfamname}) {
-	my $tmphitfname = $FamHitFiles{$hitfamname};
+#
+# Note that FamHitFiles is defined outside of the parallel part of the script,
+# so we need to be careful that we're only considering the families that we've
+# personally sworn to protect.
+#
+for (my $fam_index=$startpoint; $fam_index<$endpoint; $fam_index++) {
+    my $fam = $AllGroupIDs[$fam_index];
+    my $tmphitfname = $FamHitFiles{$fam};
+    if (-e $tmphitfname) {
 	my $outhitfname = $tmphitfname;
 	$outhitfname =~ s/\.tmp$/\.out/;
-	if (-e $tmphitfname) { 
-	    if (system("mv \"$tmphitfname\" \"$outhitfname\"")) {
-		die "\n  Failed to move temporary hitfile '$tmphitfname' to '$outhitfname'\n\n";
-	    }
+	if (system("mv \"$tmphitfname\" \"$outhitfname\"")) {
+	    die "\n  ERROR:  Failed to move \"$tmphitfname\" to \"$outhitfname\"\n\n";
 	}
     }
 }
