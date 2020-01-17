@@ -201,6 +201,11 @@ if ($num_maps) {
 	    }
 
 	    # Is there a percent identity to think about here?
+	    #
+	    # Note that we don't worry about the length of the exon, because our method for
+	    # deciding how to split things apart takes lengths into account when evaluating
+	    # where to make the 'cut'
+	    #
 	    if ($num_matches || $num_mismatches) {
 		my $num_chars = $num_mismatches + $num_matches + 0.0;
 		my $pctID = ($num_matches + 0.0) / $num_chars;
@@ -229,7 +234,7 @@ if ($num_maps) {
 	my $current_state = $GoodOrBad[0];
 	my $state_run_len = 1;
 	my $state_chars   = $Content[0];
-	for (my $i=0; $i<scalar(@GoodOrBad); $i++) {
+	for (my $i=1; $i<scalar(@GoodOrBad); $i++) {
 	    if ($GoodOrBad[$i] eq $current_state) {
 		$state_run_len++;
 		$state_chars += $Content[$i];
@@ -337,14 +342,14 @@ if ($num_maps) {
 		
 		
 	    }
-
+	    
 	    # Find where in the MSA corresponds to the identified exon
 	    my $break_pos = -1;
 	    for (my $i=0; $i<$last_left_exon; $i++) { # Just counting up
 		# Advance to the next exon with content for this sequence
 		for (my $exon=$break_pos+1; $exon<$num_exons; $exon++) {
 		    if ($ExonPctsID[$j][$exon] ne '-') {
-			$break_pos = $j;
+			$break_pos = $exon; # was j?
 			last;
 		    }
 		}
@@ -354,7 +359,7 @@ if ($num_maps) {
 	    # end of the left-half of the sequence (vis-a-vis quality break).
 	    # Translate that into the position of the dividing '*' in the MSA.
 	    $break_pos = $ExonEnds[$break_pos] + 1;
-	    
+
 	    
 	    #
 	    # The next task will be to rip this sequence apart and see if we can
@@ -379,12 +384,16 @@ if ($num_maps) {
 	    # More importantly, why the HECK did I make 'j' the sequence index?
 	    #
 	    my $Lstr = '>Left-'.$gene.'-'.$iso."\n";
+	    my $Lstrlen = 0;
+	    my $Lnonstd = 0; # Does the left side use any nonstandard aminos? (JOU)
 	    my $newline = 60;
 	    my $Roffset = 0; # This will count what the index of the first Right seq char is
 	    for (my $i=0; $i<$break_pos; $i++) {
 		if ($MSA[$seqid][$i] =~ /[A-Za-z]/) {
 		    $Roffset++;
 		    $Lstr = $Lstr.$MSA[$seqid][$i];
+		    if (uc($MSA[$seqid][$i]) =~ /J|O|U/) { $Lnonstd++; }
+		    $Lstrlen++;
 		    $newline--;
 		    if (!$newline) {
 			$Lstr = $Lstr."\n";
@@ -400,10 +409,14 @@ if ($num_maps) {
 	    
 	    
 	    my $Rstr = '>Right-'.$gene.'-'.$iso."\n";
+	    my $Rstrlen = 0;
+	    my $Rnonstd = 0; # Does the right side use any nonstandard aminos? (JOU)
 	    $newline = 60;
 	    for (my $i=$break_pos; $i<$msa_len; $i++) {
 		if ($MSA[$seqid][$i] =~ /[A-Za-z]/) {
 		    $Rstr = $Rstr.$MSA[$seqid][$i];
+		    if (uc($MSA[$seqid][$i]) =~ /J|O|U/) { $Rnonstd++; }
+		    $Rstrlen++;
 		    $newline--;
 		    if (!$newline) {
 			$Rstr = $Rstr."\n";
@@ -417,47 +430,74 @@ if ($num_maps) {
 	    print $Rprotf "$Rstr\n";
 	    close($Rprotf);
 
-	    # OK, well what are you waiting for? Do you seriously thing Spaln is just going
-	    # to run itself? You dork, you gotta call those commands, what is this, your first
-	    # day of programming?
-	    my $Lspalnfname = $Lprotfname;
-	    $Lspalnfname =~ s/\-prot\.fa/\-spaln\.out/;
-	    
-	    my $Rspalnfname = $Rprotfname;
-	    $Rspalnfname =~ s/\-prot\.fa/\-spaln\.out/;
-	    
-	    my $spalnCmd = $spaln.' -Q3 -O1 -S3 -ya3 "'.$dnafilename.'" "[prot]" 1>"[out]" 2>/dev/null';
-	    
+		
 	    # Now we can run our two separate SPALNs and see if they give us *ANY* decent mapping.
 	    # This is largely just a copy of the now infamous 'ParseSPALNOutput' from Quilter, but with
 	    # some of the finer points shaved down, 'cuz that's the way I do it, baby.
 	    # The returned hashes map amino indices from the split sequences to positions in the genome.
 	    
-	    my $LspalnCmd = $spalnCmd;
-	    $LspalnCmd =~ s/\[prot\]/$Lprotfname/;
-	    $LspalnCmd =~ s/\[out\]/$Lspalnfname/;
-	    my ($LAITGPref,$Lerr) = PMParseSPALNOutput($LspalnCmd,$Lspalnfname,$revcomp,$offset,$Lprotfname);
+	    # Our SPALN command template
+	    my $spalnCmd = $spaln.' -Q3 -O1 -S3 -ya3 "'.$dnafilename.'" "[prot]" 1>"[out]" 2>/dev/null';
+		
+	    # We don't want SPALN to bail on us for having a really short sequence with
+	    # nonstandard aminos...
+	    my $LAITGPref;
+	    my %LAminoIndexToGenPos;
+	    if ($Lstrlen < 15 && $Lnonstd) {
+
+		# We're fine with this being empty -- just needs to not be '0'
+		$LAITGPref = \%LAminoIndexToGenPos;
+		
+	    } else {
+
+		# OK, well what are you waiting for? Do you seriously thing Spaln is just going
+		# to run itself? You dork, you gotta call those commands, what is this, your first
+		# day of programming?
+		my $Lspalnfname = $Lprotfname;
+		$Lspalnfname =~ s/\-prot\.fa/\-spaln\.out/;
+		
+		my $LspalnCmd = $spalnCmd;
+		$LspalnCmd =~ s/\[prot\]/$Lprotfname/;
+		$LspalnCmd =~ s/\[out\]/$Lspalnfname/;
+		my $Lerr;
+		($LAITGPref,$Lerr) = PMParseSPALNOutput($LspalnCmd,$Lspalnfname,$revcomp,$offset,$Lprotfname);
+		
+		# Delete those dumb ol' files
+		system("rm \"$Lspalnfname\"") if (-e $Lspalnfname);
+		system("rm \"$Lprotfname\"")  if (-e $Lprotfname);
+
+	    }
 	    
-	    # Delete those dumb ol' files
-	    system("rm \"$Lspalnfname\"") if (-e $Lspalnfname);
-	    system("rm \"$Lprotfname\"")  if (-e $Lprotfname);
-
 	    next if (!$LAITGPref);
-	    my %LAminoIndexToGenPos = %{$LAITGPref};
+	    %LAminoIndexToGenPos = %{$LAITGPref};
 
 
-	    my $RspalnCmd = $spalnCmd;
-	    $RspalnCmd =~ s/\[prot\]/$Rprotfname/;
-	    $RspalnCmd =~ s/\[out\]/$Rspalnfname/;
-	    my ($RAITGPref,$Rerr) = PMParseSPALNOutput($RspalnCmd,$Rspalnfname,$revcomp,$offset,$Rprotfname);
+	    # Same concern, but now on the right side!
+	    my $RAITGPref;
+	    my %RAminoIndexToGenPos;
+	    if ($Rstrlen < 15 && $Rnonstd) {
 
-	    # Delete those dumb ol' files
-	    system("rm \"$Rspalnfname\"") if (-e $Rspalnfname);
-	    system("rm \"$Rprotfname\"")  if (-e $Rprotfname);
+		$RAITGPref = \%RAminoIndexToGenPos;
+
+	    } else {
+	    
+		my $Rspalnfname = $Rprotfname;
+		$Rspalnfname =~ s/\-prot\.fa/\-spaln\.out/;
+		
+		my $RspalnCmd = $spalnCmd;
+		$RspalnCmd =~ s/\[prot\]/$Rprotfname/;
+		$RspalnCmd =~ s/\[out\]/$Rspalnfname/;
+		my $Rerr;
+		($RAITGPref,$Rerr) = PMParseSPALNOutput($RspalnCmd,$Rspalnfname,$revcomp,$offset,$Rprotfname);
+		
+		# Delete those dumb ol' files
+		system("rm \"$Rspalnfname\"") if (-e $Rspalnfname);
+		system("rm \"$Rprotfname\"")  if (-e $Rprotfname);
+		
+	    }
 
 	    next if (!$RAITGPref);
-	    my %RAminoIndexToGenPos = %{$RAITGPref};
-	    
+	    %RAminoIndexToGenPos = %{$RAITGPref};
 
 	    # First -- are these mappings consistent (assuming we did get successful mappings from both)?
 	    my @LeftAminoKeys   = sort {$a <=> $b} keys %LAminoIndexToGenPos;
