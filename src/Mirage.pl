@@ -1479,11 +1479,18 @@ sub GenerateSpeciesDBs
 	    my $species = lc($1);
 	    my $genefam = lc($2);
 
-	    $spec_gene_filename = $SpeciesDir{$species}.'/'.$genefam.'.fa';
-	    $SpeciesGeneFileNames{$species.';'.$genefam} = $spec_gene_filename;
-	    
-	    open($SpecGeneFile,'>>',$spec_gene_filename) || die "\n  ERROR:  Failed to open output species-gene database '$spec_gene_filename'\n\n";
-	    
+	    if (!$SpeciesDir{$species}) {
+
+		open($SpecGeneFile,'>>',$MinorSpeciesDBName) || die "\n  ERROR:  Failed to open output database for minor species ('$MinorSpeciesDBName')\n\n";
+
+	    } else {
+
+		$spec_gene_filename = $SpeciesDir{$species}.'/'.$genefam.'.fa';
+		$SpeciesGeneFileNames{$species.';'.$genefam} = $spec_gene_filename;
+		
+		open($SpecGeneFile,'>>',$spec_gene_filename) || die "\n  ERROR:  Failed to open output species-gene database '$spec_gene_filename' ($species)\n\n";
+	    }
+
 	    print $SpecGeneFile "$line\n";
 
 	} elsif ($spec_gene_filename) {
