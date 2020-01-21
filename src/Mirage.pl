@@ -27,6 +27,7 @@ sub CheckSourceFiles;
 sub ParseArgs;
 sub VerifiedClean;
 sub ParseSpeciesGuide;
+sub ConfirmSSI;
 sub GenerateSpeciesDBs;
 sub CoverMinorSpecies;
 sub AttachSeqToMSA;
@@ -1227,11 +1228,7 @@ sub ParseArgs
 
     # While we're here, we make sure there's a .ssi index for the
     # protein database
-    if (!(-e $proteindb.'.ssi')) {
-	if (system($eslsfetch." \-\-index $proteindb")) { 
-	    die "\n  Failed to create easel index for $proteindb\n\n"; 
-	}
-    }
+    ConfirmSSI($proteindb);
 
     return \%Options;
 }
@@ -1376,11 +1373,7 @@ sub ParseSpeciesGuide
 		}
 		
 		# Make sure the genome has a .ssi index
-		if (!(-e $Genomes[$i].'.ssi')) {
-		    if (system($eslsfetch." --index $Genomes[$i] 1>/dev/null")) { 
-			die "\n  Failed to create easel index for $Genomes[$i]\n\n"; 
-		    }
-		}
+		ConfirmSSI($Genomes[$i]);
 		
 		# Verify that the gtf exists (unless it's '-')
 		if ($GTFs[$i] ne '-' && !(-e $GTFs[$i])) {
@@ -1404,6 +1397,63 @@ sub ParseSpeciesGuide
     close($GuideFile);
 
     return (\@Species,\@GTFs,\@Genomes);
+}
+
+
+
+
+
+
+
+
+########################################################################
+#
+# Function Name: ConfirmSSI
+#
+# About:  This function takes a fasta-formatted database and either
+#         generates an SSI file (if one doesn't already exist) or 
+#         uses a bit of goofiness to test the accuracy of the existing
+#         one.  If the existing one is inaccurate, it's replaced.
+#
+sub ConfirmSSI
+{
+    my $dbname = shift;
+
+    # If there's no index, just make one already
+    if (!(-e "$dbname\.ssi")) {
+	if (system($eslsfetch." \-\-index $dbname 1>/dev/null")) {
+	    die "\n  ERROR:  Failed to create easel index for \"$dbname\"\n\n";
+	}
+	return;
+    }
+
+    # Aw jeez, looks like we're going to be double-checking the current
+    # index...
+ 
+    # Slightly change the name of the database and make the link
+    my $symlinkdb = $dbname;
+    $symlinkdb =~ s/\.[^\.]+$/\.MirageSymlink\.fa/;
+    my $symlinkcmd = "ln -s \"$dbname\" \"$symlinkdb\"";
+    if (system($symlinkcmd)) { die "\n  ERROR:  Symlink command '$symlinkcmd' failed\n\n"; }
+
+    # Build an ssi for the symlink
+    if (system($eslsfetch." \-\-index $symlinkdb 1>/dev/null")) {
+	die"\n  ERROR:  Failed to create easel index for \"$symlinkdb\"\n\n";
+    }
+
+    # Check for differences between the two databases
+    my $diffcmd = "diff \"$dbname\.ssi\" \"$symlinkdb\.ssi\" \|";
+    open(my $diff,$diffcmd) || die "\n  ERROR:  Failed to diff the SSIs for '$dbname' and '$symlinkdb'\n\n";
+    my $diffline = <$diff>;
+    close($diff);
+
+    # If we have a substantive difference, the existing SSI needs replacement!
+    if ($diffline =~ /\S/) { system("mv \"$symlinkdb\.ssi\" \"$dbname\.ssi\""); }
+    else                   { system("rm \"$symlinkdb\.ssi\"");                  }
+    system("rm \"$symlinkdb\"");
+
+    return;
+
 }
 
 
