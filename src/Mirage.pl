@@ -573,11 +573,11 @@ for ($i=0; $i<$numSpecies; $i++) {
 	my $fam_msa_fname = $MultiMSADir{$Species[$i]}.'/'.$fam.'.afa';
 	my $hitfilename   = $MultiMSADir{$Species[$i]}.'/'.$fam.'.hits.out';
 
-	my $PMcmd = 'perl '.$location.'PartialMap.pl '.$fam_msa_fname.' ';
+	my $PMcmd = 'perl '.$location.'PartialMap.pl "'.$fam_msa_fname.'" ';
 	if (-e $hitfilename) {
 
 	    # Let's keep it simple, smarty
-	    $PMcmd = $PMcmd.$hitfilename.' '.$SpeciesDBNames[$i].' '.$Genomes[$i];
+	    $PMcmd = $PMcmd.$hitfilename.' "'.$SpeciesDBNames[$i].'" "'.$Genomes[$i].'"';
 
 	} elsif ($QuilterNearHits{$fam}) { # Perhaps some 'NearHits' entries are more this family's speed?
 	    
@@ -1448,8 +1448,8 @@ sub ConfirmSSI
     close($diff);
 
     # If we have a substantive difference, the existing SSI needs replacement!
-    if ($diffline =~ /\S/) { system("mv \"$symlinkdb\.ssi\" \"$dbname\.ssi\""); }
-    else                   { system("rm \"$symlinkdb\.ssi\"");                  }
+    if ($diffline) { system("mv \"$symlinkdb\.ssi\" \"$dbname\.ssi\""); }
+    else           { system("rm \"$symlinkdb\.ssi\"");                  }
     system("rm \"$symlinkdb\"");
 
     return;

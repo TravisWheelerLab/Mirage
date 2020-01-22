@@ -103,6 +103,7 @@ for (my $i=0; $i<$num_seqs; $i++) {
 # deinitely want to know who the lucky lady / boylady is!
 my $chr;
 
+
 # Alrighty, lads.  Now we have the info. that we need to determine
 # which of the paths we're on.
 #
@@ -144,8 +145,12 @@ if ($num_maps) {
     }
 
     # We should be all set for extraction!
-    my $dnafilename = $inmsafname;
-    $dnafilename =~ s/\.afa/\.dna\.fa/;
+    $inmsafname =~ /^(\S+\/)([^\.]+\.)afa$/;
+    my $inmsabase = $1;
+    my $inmsaprot = $2;
+    $inmsaprot =~ s/\(|\)|\-/\_/g;
+    my $dnafilename = $inmsabase.$inmsaprot.'dna.fa';
+    
     my $sfetchCmd = $eslsfetch." -c $low_genome_pos\.\.$high_genome_pos \"$genome\" \"$chr\" > \"$dnafilename\"";
     if (system($sfetchCmd)) { die "\n  Failed to pull in DNA region ($sfetchCmd)\n\n"; }
 
@@ -369,14 +374,10 @@ if ($num_maps) {
 	    
 	    $SeqNames[$seqid] =~ /^[^\|]+\|([^\|]+)\|/;
 	    my $iso = $1;
+	    $iso =~ s/\(|\)|\-/\_/g;
 	    
-	    my $Lprotfname = $inmsafname;
-	    $Lprotfname =~ s/\.afa$/\./;
-	    $Lprotfname = $Lprotfname.$iso.'.left-prot.fa';
-	    
-	    my $Rprotfname = $inmsafname;
-	    $Rprotfname =~ s/\.afa$/\./;
-	    $Rprotfname = $Rprotfname.$iso.'.right-prot.fa';
+	    my $Lprotfname = $inmsabase.$inmsaprot.$iso.'.left-prot.fa';
+	    my $Rprotfname = $inmsabase.$inmsaprot.$iso.'.right-prot.fa';
 	    
 	    # Run along the sequence until we hit the breakpoint, constructing the
 	    # sequence that we'll write out to our file.
@@ -699,8 +700,12 @@ if ($num_maps) {
 	# Again, we're going to do this thing I just love doing and will never stop doing EVER
 	my $offset = $low_genome_pos-1;
 
-	my $dnafilename = $inmsafname;
-	$dnafilename =~ s/\.afa/\.dna\.fa/;
+	$inmsafname =~ /^(\S+\/)([^\.]+\.)afa$/;
+	my $inmsabase = $1;
+	my $inmsaprot = $2;
+	$inmsaprot =~ s/\(|\)|\-/\_/g;
+	my $dnafilename = $inmsabase.$inmsaprot.'dna.fa';
+
 	my $sfetchCmd = $eslsfetch." -c $low_genome_pos\.\.$high_genome_pos \"$genome\" \"$chr\" > \"$dnafilename\"";
 	if (system($sfetchCmd)) { die "\n  Failed to pull in DNA region ($sfetchCmd)\n\n"; }
 
@@ -714,10 +719,9 @@ if ($num_maps) {
 	    # we get the mapping things take a different turn.
 	    $SeqNames[$i] =~ /^[^\|]+\|([^\|]+)\|/;
 	    my $iso = $1;
-
-	    my $protfname = $inmsafname;
-	    $protfname =~ s/\.afa$/\./;
-	    $protfname = $protfname.$iso.'.prot.fa';
+	    $iso =~ s/\(|\)|\-/\_/g;
+	    
+	    my $protfname = $inmsabase.$inmsaprot.$iso.'.prot.fa';
 	    
 	    my $Pstr = '>'.$SeqNames[$i]."\n";
 	    my $newline = 60;
