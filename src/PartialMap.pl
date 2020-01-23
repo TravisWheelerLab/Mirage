@@ -568,10 +568,9 @@ if ($num_maps) {
 
 	    $SeqNames[$seqid] =~ /^[^\|]+\|([^\|]+)\|/;
 	    my $iso = $1;
+	    $iso =~ s/\(|\)|\-/\_/g;
 
-	    my $protfname = $inmsafname;
-	    $protfname =~ s/\.afa$/\./;
-	    $protfname = $protfname.$iso.'.prot.fa';
+	    my $protfname = $inmsabase.$inmsaprot.$iso.'.prot.fa';
 
 	    my $Pstr = '>'.$SeqNames[$seqid]."\n";
 	    my $newline = 60;

@@ -577,7 +577,7 @@ for ($i=0; $i<$numSpecies; $i++) {
 	if (-e $hitfilename) {
 
 	    # Let's keep it simple, smarty
-	    $PMcmd = $PMcmd.$hitfilename.' "'.$SpeciesDBNames[$i].'" "'.$Genomes[$i].'"';
+	    $PMcmd = $PMcmd.'"'.$hitfilename.'" "'.$SpeciesDBNames[$i].'" "'.$Genomes[$i].'"';
 
 	} elsif ($QuilterNearHits{$fam}) { # Perhaps some 'NearHits' entries are more this family's speed?
 	    
