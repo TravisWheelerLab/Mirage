@@ -1738,6 +1738,13 @@ sub PMParseSPALNOutput
 	    next;
 	}
 
+	# It's possible (see GN:Phxr5|PHXR5|mouse|P08399|PHXR5) that some
+	# protein sequences look more like bizarre DNA to Spaln than protein,
+	# in which case there will be no translation line before the DNA
+	# line.  Obvs, we're not playing with DNA, so bail.
+	# 19 is arbitrary.
+	if (not defined $trans_line) { return(0,19); }
+
 	my $nn_line = $line;
 
 	# EXCELLENT!  This is the next line of DNA characters

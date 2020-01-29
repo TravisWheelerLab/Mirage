@@ -539,70 +539,74 @@ for ($i=0; $i<$numSpecies; $i++) {
     # Before we really get to work, make a public list of gene families that
     # need to get investigated, and roughly divvy-up the load.
     my @PartialMapFams = keys %QuilterMisses;
-    my $numPMprocesses = $numProcesses;
-    $numPMprocesses    = scalar(@PartialMapFams) if ($numPMprocesses > scalar(@PartialMapFams));
-    my $threadportion  = int(scalar(@PartialMapFams) / $numPMprocesses);
-
+    if (scalar(@PartialMapFams)) {
     
-    # NOTE: We're going to need to parallelize here
-    my $processes = 1;
-    my $threadID  = 0;
-    my $pid;
-    while ($processes < $numPMprocesses) {
-	if ($pid = fork) {
-	    if (not defined $pid) { die "\n  ERROR: Fork failed (Mirage.pl:PartialMap)\n\n"; }
-	    $threadID = 0;
-	} else {
-	    $threadID = $processes;
-	    last;
-	}
-	$processes++;
-    }
-
-    
-    # Which families is this thread in charge of?
-    my $startfam = $threadportion * $threadID;
-    my $endfam   = $threadportion * ($threadID+1); # Tech., the first fam of the next thread
-    $endfam = scalar(@PartialMapFams) if ($endfam > scalar(@PartialMapFams));
-    
-    for (my $fam_id=$startfam; $fam_id<$endfam; $fam_id++) {
-
-	my $fam = $PartialMapFams[$fam_id];
-
-	# Does this sequence have a hitfile?
-	my $fam_msa_fname = $MultiMSADir{$Species[$i]}.'/'.$fam.'.afa';
-	my $hitfilename   = $MultiMSADir{$Species[$i]}.'/'.$fam.'.hits.out';
-
-	my $PMcmd = 'perl '.$location.'PartialMap.pl "'.$fam_msa_fname.'" ';
-	if (-e $hitfilename) {
-
-	    # Let's keep it simple, smarty
-	    $PMcmd = $PMcmd.'"'.$hitfilename.'" "'.$SpeciesDBNames[$i].'" "'.$Genomes[$i].'"';
-
-	} elsif ($QuilterNearHits{$fam}) { # Perhaps some 'NearHits' entries are more this family's speed?
-	    
-	    # We've already put our triples in quotes, so this should be safe for
-	    # the commandline...
-	    $PMcmd = $PMcmd.'- '.$SpeciesDBNames[$i].' '.$Genomes[$i];
-	    foreach my $near_hit_triple (split(/\&/,$QuilterNearHits{$fam})) {
-		$PMcmd = $PMcmd.' '.$near_hit_triple;
+	my $numPMprocesses = $numProcesses;
+	$numPMprocesses    = scalar(@PartialMapFams) if ($numPMprocesses > scalar(@PartialMapFams));
+	my $threadportion  = int(scalar(@PartialMapFams) / $numPMprocesses);
+	
+	
+	# NOTE: We're going to need to parallelize here
+	my $processes = 1;
+	my $threadID  = 0;
+	my $pid;
+	while ($processes < $numPMprocesses) {
+	    if ($pid = fork) {
+		if (not defined $pid) { die "\n  ERROR: Fork failed (Mirage.pl:PartialMap)\n\n"; }
+		$threadID = 0;
+	    } else {
+		$threadID = $processes;
+		last;
 	    }
-
-	} else {
-
-	    # NOTHING GOOD HERE
-	    next;
-
+	    $processes++;
 	}
-
-	# Run PartialMap.pl and see if we can make our nastiness fresh
-	if (system($PMcmd)) { die "\n  ERROR:  PartialMap.pl failed ($PMcmd)\n\n"; }
-
+	
+	
+	# Which families is this thread in charge of?
+	my $startfam = $threadportion * $threadID;
+	my $endfam   = $threadportion * ($threadID+1); # Tech., the first fam of the next thread
+	$endfam = scalar(@PartialMapFams) if ($endfam > scalar(@PartialMapFams));
+	
+	for (my $fam_id=$startfam; $fam_id<$endfam; $fam_id++) {
+	    
+	    my $fam = $PartialMapFams[$fam_id];
+	    
+	    # Does this sequence have a hitfile?
+	    my $fam_msa_fname = $MultiMSADir{$Species[$i]}.'/'.$fam.'.afa';
+	    my $hitfilename   = $MultiMSADir{$Species[$i]}.'/'.$fam.'.hits.out';
+	    
+	    my $PMcmd = 'perl '.$location.'PartialMap.pl "'.$fam_msa_fname.'" ';
+	    if (-e $hitfilename) {
+		
+		# Let's keep it simple, smarty
+		$PMcmd = $PMcmd.'"'.$hitfilename.'" "'.$SpeciesDBNames[$i].'" "'.$Genomes[$i].'"';
+		
+	    } elsif ($QuilterNearHits{$fam}) { # Perhaps some 'NearHits' entries are more this family's speed?
+		
+		# We've already put our triples in quotes, so this should be safe for
+		# the commandline...
+		$PMcmd = $PMcmd.'- '.$SpeciesDBNames[$i].' '.$Genomes[$i];
+		foreach my $near_hit_triple (split(/\&/,$QuilterNearHits{$fam})) {
+		    $PMcmd = $PMcmd.' '.$near_hit_triple;
+		}
+		
+	    } else {
+		
+		# NOTHING GOOD HERE
+		next;
+		
+	    }
+	    
+	    # Run PartialMap.pl and see if we can make our nastiness fresh
+	    if (system($PMcmd)) { die "\n  ERROR:  PartialMap.pl failed ($PMcmd)\n\n"; }
+	    
+	}
+	
+	# All done with those lil' snaccs
+	if ($threadID) { exit(0); }
+	while (wait() > -1) { }
+	
     }
-
-    # All done with those lil' snaccs
-    if ($threadID) { exit(0); }
-    while (wait() > -1) { }
 
 }
 
