@@ -102,6 +102,7 @@ for (my $i=0; $i<$num_seqs; $i++) {
 # If we ever find ourselves latching onto a special chromosome, we'll
 # deinitely want to know who the lucky lady / boylady is!
 my $chr;
+my $revcomp = 0;
 
 
 # Alrighty, lads.  Now we have the info. that we need to determine
@@ -125,6 +126,7 @@ if ($num_maps) {
     @MSASquish = @{$msasquish_ref};
     @MapMSASquish = @{$mapmsasquish_ref};
 
+
     # Because we're working with a specific sequence range, we can extract the specific region of the
     # genome that we're restricted to considering (we'll pull in an extra 100Kb for good measure, though)
     $chr = $map_chr;
@@ -136,7 +138,6 @@ if ($num_maps) {
     $high_genome_pos    = $ChrLens{$chr} if ($high_genome_pos > $ChrLens{$chr});
 
     # NOTE: We'll go ahead and flip things if we're in revcomp land
-    my $revcomp = 0;
     if ($map_chr =~ /\[revcomp\]/) {
 	$revcomp = 1;
 	my $temp_genome_pos = $low_genome_pos;
@@ -664,7 +665,6 @@ if ($num_maps) {
 	$chr = $top_chr;
 
 	# Now we can remove [revcomp] from chr if appropriate (for pulling purposes)
-	my $revcomp = 0;
 	if ($chr =~ /\[revcomp\]/) {
 	    $revcomp = 1;
 	    $chr =~ s/\[revcomp\]//;
@@ -811,6 +811,61 @@ exit(0) if (scalar(@NewlyMappedSeqs) == 0);
 # be looking for confirmation of mapped characters (do their NW-based positions
 # correspond to characters placed by mapping?) or else... something?
 
+
+# NOTE:  Because there is the *possibility* (mouse Ahnak2...) that an unmapped
+#        sequence longer than its mapped counterpart could "inject" tons of
+#        contextually inconsistent purported mapping positions, we'll need to
+#        do an initial run to establish the range a new mapping position would
+#        need to be between to be valid.
+
+# These are inclusive (use <= / >=)
+my @ValidUpper;
+my @ValidLower;
+# We'll do a forward pass filling in the lower values, and then a reverse pass
+# filling in the upper values.  We'll make these literally lower/upper, so we'll
+# need to be attentive to strand direction...
+if ($revcomp) {
+
+    my $last_pos = 10 ** 10;
+    for (my $j=0; $j<$msa_len; $j++) {
+	if ($MapMSASquish[$j] && $MapMSASquish[$j] ne '*') {
+	    $last_pos = PullSquishMax($MapMSASquish[$j]);
+	}
+	$ValidUpper[$j] = $last_pos;
+    }
+
+    $last_pos = 0;
+    for (my $j=$msa_len-1; $j>=0; $j--) {
+	if ($MapMSASquish[$j] && $MapMSASquish[$j] ne '*') {
+	    $last_pos = PullSquishMin($MapMSASquish[$j]);
+	}
+	$ValidLower[$j] = $last_pos;
+    }
+
+} else {
+
+    my $last_pos = 0;
+    for (my $j=0; $j<$msa_len; $j++) {
+	if ($MapMSASquish[$j] && $MapMSASquish[$j] ne '*') {
+	    $last_pos = PullSquishMin($MapMSASquish[$j]);
+	}
+	$ValidLower[$j] = $last_pos;
+    }
+
+    $last_pos = 10 ** 10;
+    for (my $j=$msa_len-1; $j>=0; $j--) {
+	if ($MapMSASquish[$j] && $MapMSASquish[$j] ne '*') {
+	    $last_pos = PullSquishMax($MapMSASquish[$j]);
+	}
+	$ValidUpper[$j] = $last_pos;
+    }
+
+}
+
+
+
+# Heck yeah! Time to see if our new mappings make sense with the established mappings
+
 if ($num_maps) {
 
     # We'll write out the partial mappings to the family's hits.out file.
@@ -832,7 +887,10 @@ if ($num_maps) {
 	    foreach my $seq (@NewlyMappedSeqs) {
 		if ($MSA[$seq][$j] && $MapMSA[$seq][$j]) {
 		    if (!$new_coord) {
-			$new_coord = $MapMSA[$seq][$j];
+			# Making sure we're not filling in gaps with garbo...
+			if ($MapMSA[$seq][$j] <= $ValidUpper[$j] && $MapMSA[$seq][$j] >= $ValidLower[$j]) {
+			    $new_coord = $MapMSA[$seq][$j];
+			}
 		    } elsif ($new_coord != $MapMSA[$seq][$j]) {
 			$new_coord = -1; # Bummer
 		    }
@@ -933,9 +991,6 @@ if ($num_maps) {
 	# alternative places to stick characters to ID consistencies,
 	# we'll need to identify which characters didn't map (as runs)
 	# and add that to the sequence information.
-	#
-	# Also, this is easy and I'm VERY caffeinated, so I'm blasting
-	# some MFing Excision and knocking this basic trash OUT.
 	if ($inconsistencies) {
 
 	    # AGAIN, keep in mind that these positions are already '+1'
@@ -1068,6 +1123,37 @@ if ($num_maps) {
 
 
 
+#########################################################################
+#
+#  Function Names: PullSquishMin/Max
+#
+#  About: These are just some simple extraction functions
+#
+sub PullSquishMin
+{
+    my $entry = shift;
+    $entry =~ /^(\d+)\:/;
+    my $min = $1;
+    foreach my $pos (split(/\,/,$entry)) {
+	$pos =~ /^(\d+)\:/;
+	my $candidate = $1;
+	$min = $candidate if ($candidate < $min);
+    }
+    return $min;
+}
+
+sub PullSquishMax
+{
+    my $entry = shift;
+    $entry =~ /^(\d+)\:/;
+    my $max = $1;
+    foreach my $pos (split(/\,/,$entry)) {
+	$pos =~ /^(\d+)\:/;
+	my $candidate = $1;
+	$max = $candidate if ($candidate < $max);
+    }
+    return $max;
+}
 
 
 
@@ -1460,7 +1546,7 @@ sub SquishMSAs
 
 #########################################################################
 #
-#  Function Name: ParseSPALNOutput
+#  Function Name: PMParseSPALNOutput
 #
 #  About: The name says it all.  Run a SPALN command and make sense of
 #         its wisdom.
