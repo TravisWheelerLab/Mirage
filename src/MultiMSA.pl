@@ -190,8 +190,8 @@ my $TotNumGroups = @AllGroupIDs;
 exit(0) if (!$TotNumGroups);
 if ($TotNumGroups < $CPUs) { $CPUs = $TotNumGroups; }
 my $portion;
-if ($CPUs) { $portion = $TotNumGroups / $CPUs; }
-else       { exit(0);                          } # decline gracefully
+if ($CPUs) { $portion = int($TotNumGroups / $CPUs); }
+else       { exit(0);                               } # decline gracefully
 
 
 # Split into the requested number of (default 2) processes

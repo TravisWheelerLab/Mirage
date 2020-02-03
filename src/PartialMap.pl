@@ -680,6 +680,11 @@ if ($num_maps) {
 		$NearHitRanges[$i] =~ /(\d+)\.\.(\d+)/;
 		my $range_start = $1;
 		my $range_end   = $2;
+
+		# DEBUGGING
+		#if (not defined $range_start || not defined $range_end) {
+		#die "\n  Invalid range!  ($NearHitRanges[$i])\n\n";
+		#}
 		
 		# If we're in revcomp land the 'start' index will be larger than the 'end' index
 		if ($range_start < $low_genome_pos ) { $low_genome_pos  = $range_start; }
@@ -1394,14 +1399,14 @@ sub BuildMapMSA
 	    my $i = 0;
 	    while ($SeqNames[$i] ne $seqname) {
 		$i++;
-		#debugging
-		if ($i >= $num_seqs) {
-		    print "\n  '$seqname' not in this list:\n";
-		    for ($i=0; $i<$num_seqs; $i++) {
-			print "   $SeqNames[$i]\n";
-		    }
-		    die "\n";
-		}
+		# DEBUGGING
+		#if ($i >= $num_seqs) {
+		#print "\n  '$seqname' not in this list:\n";
+		#for ($i=0; $i<$num_seqs; $i++) {
+		#print "   $SeqNames[$i]\n";
+		#}
+		#die "\n";
+		#}
 	    }
 
 	    $line = <$hitfile>; # Nobody ever cares about the method line :'(
