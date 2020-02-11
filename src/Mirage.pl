@@ -604,7 +604,7 @@ for ($i=0; $i<$numSpecies; $i++) {
 	    } else {
 		
 		# NOTHING GOOD HERE -- but we still want to record those misses!
-		open(my $FamMissFile,'<',$fam_pm_outfname);
+		open(my $FamMissFile,'>>',$fam_pm_outfname);
 		foreach my $missed_seq (split(/\&/,$QuilterMisses{$fam})) {
 		    print $FamMissFile "  $missed_seq\n  - Unmapped (Quilter miss)\n\n";
 		}
