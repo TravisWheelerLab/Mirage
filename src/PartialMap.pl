@@ -791,6 +791,12 @@ if ($num_maps) {
     #       doesn't seem to be any reason to think we can try something different with these
     #       sequences and suddenly find ourselves with a decent map.
     #
+
+    # We'll still record that these sequences are unmapped
+    foreach my $seq_id (@UnmappedSeqIDs) {
+	print "  $SeqNames[$seq_id]\n";
+	print "  - Unmapped (unable to identify viable PartialMap search region)\n\n";
+    }
     exit(0);
 
 }
@@ -798,8 +804,14 @@ if ($num_maps) {
 
 # If we didn't get anything out of updating our mappings, there's no more work
 # to do -- jump ship.
-exit(0) if (scalar(@NewlyMappedSeqs) == 0);
-
+if (scalar(@NewlyMappedSeqs) == 0) {
+    # We'll still record that these sequences are unmapped
+    foreach my $seq_id (@UnmappedSeqIDs) {
+	print "  $SeqNames[$seq_id]\n";
+	print "  - Unmapped (no viable PartialMap hit)\n\n";
+    }
+    exit(0);
+}
 
 
 #########################################################################################
@@ -1002,7 +1014,7 @@ if ($num_maps) {
 	    my @UnmappedRuns;
 	    my $start_incon_pos = $InconsistentPos[0];
 	    my $last_incon_pos  = $start_incon_pos;
-	    for (my $i=1; $i<$inconsistencies; $i++) {
+	    for (my $i=1; $i<scalar(@InconsistentPos); $i++) {
 		if ($InconsistentPos[$i] != $last_incon_pos+1) {
 		    if ($last_incon_pos == $start_incon_pos) { push(@UnmappedRuns,$start_incon_pos);                      }
 		    else                                     { push(@UnmappedRuns,$start_incon_pos.'..'.$last_incon_pos); }
@@ -1017,19 +1029,32 @@ if ($num_maps) {
 	    
 
 	    # Make the string and shove it into the sequence name
-	    my $unmapped_str = 'UNMAPPED:'.$UnmappedRuns[0];
+	    my $unmapped_str = $UnmappedRuns[0];
 	    for (my $i=1; $i<scalar(@UnmappedRuns); $i++) { 
 		$unmapped_str = $unmapped_str.','.$UnmappedRuns[$i]; 
 	    }
-	    
-	    my $seqname = $SeqNames[$seq];
-	    $seqname =~ /\|([^\|]+)\|[^\|]+$/;
-	    my $accession = $1;
 
-	    my $replacement_acc = $unmapped_str.'|'.$accession;
-	    $seqname =~ s/\|$accession\|/\|$replacement_acc\|/;
+	    # We'll also generate some information about the quality of 
+	    # this seq's partial mapping
+	    my $sum_chars  = $consistencies + $inconsistencies + $unmapped_chars;
+	    my $pct_mapped = int(1000.0 * $consistencies / $sum_chars) / 10.0;
 
-	    $SeqNames[$seq] = $seqname;
+	    # Print out our info about this sequence's partial mapping
+	    print "  $SeqNames[$seq]\n";
+	    print "  + Partial mapping identified\n";
+	    print "  - Unmapped character ranges    :  $unmapped_str\n";
+	    print "  - Percent of characters mapped :  $pct_mapped\%  ($consistencies / $sum_chars)\n";
+	    print "\n";
+
+	    # NOTE: Now that we print this information out, this is unnecessary
+	    # (but that's not going to stop me from keeping the code around!)
+	    #
+	    #my $seqname = $SeqNames[$seq];
+	    #$seqname =~ /\|([^\|]+)\|[^\|]+$/;
+	    #my $accession = $1;
+	    #my $replacement_acc = $unmapped_str.'|'.$accession;
+	    #$seqname =~ s/\|$accession\|/\|$replacement_acc\|/;
+	    #$SeqNames[$seq] = $seqname;
 
 	}
 
@@ -1088,6 +1113,11 @@ if ($num_maps) {
 	}
 	$big_out_str = $big_out_str."\n\n";
 
+	# Take note children!  Never end up like this terrible unmapped sequence!
+	# Stay in school and don't argue with your boss!
+	print "  $SeqNames[$seq]\n";
+	print "  - Unmapped (no viable PartialMap hit)\n\n";
+
     }
 
     # Next up, the newly (partially) mapped sequences -- note that they've been
@@ -1119,7 +1149,6 @@ if ($num_maps) {
     close($msafile);
 
 }
-
 
 
 

@@ -423,6 +423,10 @@ for ($i=0; $i<$numSpecies; $i++) {
 	close($MissFile);
     }
     
+    # We'll collect per-family miss information after attempting to identify partial
+    # mappings, so we can get rid of this file.
+    system("rm \"$MissFileName\"");
+    
     
     # You'll also need to know who had decent (but presumably not good enough)
     # Spaln mapping.  These will be recorded as both Misses and as their own thing
@@ -544,7 +548,10 @@ for ($i=0; $i<$numSpecies; $i++) {
 	my $numPMprocesses = $numProcesses;
 	$numPMprocesses    = scalar(@PartialMapFams) if ($numPMprocesses > scalar(@PartialMapFams));
 	my $threadportion  = int(scalar(@PartialMapFams) / $numPMprocesses);
-	
+
+	# Make an output directory to store all our fun lil mapping datums!
+	my $pm_dirname = $ResultsDir.'/MappingIssues/';
+	if (system("mkdir $pm_dirname")) { die "\n  Failed to create directory '$pm_dirname'\n\n"; }
 	
 	# NOTE: We're going to need to parallelize here
 	my $processes = 1;
@@ -571,6 +578,10 @@ for ($i=0; $i<$numSpecies; $i++) {
 	    
 	    my $fam = $PartialMapFams[$fam_id];
 	    
+	    # We'll store information about partial mappings (or outright misses...) 
+	    # in a family-specific output file.  We can keep this nice 'n' simple.
+	    my $fam_pm_outfname = $pm_dirname.$fam.'.misses.out';
+
 	    # Does this sequence have a hitfile?
 	    my $fam_msa_fname = $MultiMSADir{$Species[$i]}.'/'.$fam.'.afa';
 	    my $hitfilename   = $MultiMSADir{$Species[$i]}.'/'.$fam.'.hits.out';
@@ -592,10 +603,17 @@ for ($i=0; $i<$numSpecies; $i++) {
 		
 	    } else {
 		
-		# NOTHING GOOD HERE
+		# NOTHING GOOD HERE -- but we still want to record those misses!
+		open(my $FamMissFile,'<',$fam_pm_outfname);
+		foreach my $missed_seq (split(/\&/,$QuilterMisses{$fam})) {
+		    print $FamMissFile "  $missed_seq\n  - Unmapped (Quilter miss)\n\n";
+		}
+		close($FamMissFile);
 		next;
 		
 	    }
+
+	    $PMcmd = $PMcmd.' >> "'.$fam_pm_outfname.'"';
 	    
 	    # Run PartialMap.pl and see if we can make our nastiness fresh
 	    if (system($PMcmd)) { die "\n  ERROR:  PartialMap.pl failed ($PMcmd)\n\n"; }
