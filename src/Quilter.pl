@@ -848,6 +848,7 @@ if ($threadID) {
 }
 
 
+
 # No need for these files anymore.
 system("rm $nuclfilename") if (-e $nuclfilename);
 system("rm $spalnfilename") if (-e $spalnfilename);
@@ -2958,8 +2959,14 @@ sub BLATAssistedSPALN
 			$orig_chr =~ s/\[revcomp\]//;
 			$revcomp = 1;
 		    }
-		    my ($tightstart,$tightend) = PullTightSpalnRange($spalnfname,$orig_chr,$revcomp);
+		    my ($tightstart,$tightend,$change_dir) = PullTightSpalnRange($spalnfname,$orig_chr,$revcomp);
 
+		    # Did Spaln decide that a different direction would be more fun?
+		    if ($change_dir) {
+			if ($revcomp) { $reported_chr =~ s/\[revcomp\]//;           }
+			else          { $reported_chr =  $reported_chr.'[revcomp]'; }
+		    }
+		    
 		    # TOO EASY!
 		    print $ThreadNearFile "$seqname $reported_chr $tightstart\.\.$tightend\n";
 
@@ -3105,9 +3112,16 @@ sub ParseSPALNOutput
     my ($line,$hitstring);
 
     # DEBUGGING
-    #my $printspalnCmd = $spalnCmd;
-    #$printspalnCmd =~ s/\|$//;
-    #system($printspalnCmd);
+    #my $savespalncnt = 0;
+    #my $savespaln = $spalnfname;
+    #$savespaln =~ s/\"//g;
+    #while (-e ($savespaln.'.'.$savespalncnt)) {
+    #$savespalncnt++;
+    #}
+    #$savespaln = '"'.$savespaln.'.'.$savespalncnt.'"';
+    #my $savespalncmd = $spalnCmd;
+    #$savespalncmd =~ s/$spalnfname/$savespaln/;
+    #system($savespalncmd);
     # DEBUGGING
 
     
@@ -3799,6 +3813,9 @@ sub PullTightSpalnRange
 	}
     }
 
+    # We'll need to confirm that we're aligning in the expected direction...
+    my $saw_complement = 0;
+
     my $num_used_nucls = 0;
     my $total_skip_len = 0;
     while (my $line = <$inf>) {
@@ -3808,7 +3825,19 @@ sub PullTightSpalnRange
 	    $nucls =~ s/[^A-Z]//g;
 	    $num_used_nucls += length($nucls);
 	    last;
+	} elsif ($line =~ /\;C complement\(/) {
+	    $saw_complement = 1;
 	}
+    }
+
+    # Do we need to change the direction of this hit?
+    my $change_dir = 0;
+    if ($revcomp && !$saw_complement) {
+	$revcomp = 0;
+	$change_dir = 1;
+    } elsif (!$revcomp && $saw_complement) {
+	$revcomp = 1;
+	$change_dir = 1;
     }
 
     while (my $line = <$inf>) {
@@ -3818,6 +3847,7 @@ sub PullTightSpalnRange
 	    $num_used_nucls += length($nucls);
 	} elsif ($line =~ /\;\; skip (\d+) nt/) {
 	    $total_skip_len += $1;
+	    print "  + SKIP: $total_skip_len\n";
 	}
     }
 
@@ -3826,7 +3856,7 @@ sub PullTightSpalnRange
     my $last_pos = $first_pos;
     if ($revcomp) { $last_pos -= ($total_skip_len + $num_used_nucls); }
     else          { $last_pos += ($total_skip_len + $num_used_nucls); }
-    return($first_pos,$last_pos);
+    return($first_pos,$last_pos,$change_dir);
 
 }
 
