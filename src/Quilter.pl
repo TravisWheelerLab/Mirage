@@ -3847,7 +3847,6 @@ sub PullTightSpalnRange
 	    $num_used_nucls += length($nucls);
 	} elsif ($line =~ /\;\; skip (\d+) nt/) {
 	    $total_skip_len += $1;
-	    print "  + SKIP: $total_skip_len\n";
 	}
     }
 
