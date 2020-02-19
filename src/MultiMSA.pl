@@ -875,7 +875,14 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	    }
 	    
 	    $final_arf_str = $final_arf_str.$arf_end_coord;
+
+	    # We now have the full comma-separated coordinate list, now
+	    # we just need the 'ARF(s)' bit...
+	    @ARFRangeList = split(/\,/,$final_arf_str);
+	    if (scalar(@ARFRangeList) > 1) { $final_arf_str = 'ARFs:'.$final_arf_str; }
+	    else                           { $final_arf_str = 'ARF:'.$final_arf_str;  }
 	    $ARFNameField[$seq_id] = $final_arf_str;
+
 	}
     }
 
