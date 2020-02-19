@@ -276,6 +276,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
     my @DBEntries;
     my @PosStrings;
     my @ProteinSeqs;
+    my @ProteinLens;
     my @IsoIDs;
     my @ExtraInfo;
     my @GroupField; # Because there's the possibility of case varying
@@ -349,6 +350,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	# Store the protein
 	$Protein =~ s/\s//g;
 	$ProteinSeqs[$chr_hits] = $Protein;
+	$ProteinLens[$chr_hits] = length($Protein);
 	$chr_hits++;
 	
     }
@@ -426,6 +428,10 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	$ContentPositions[$seq_id] = 0;
     }
 
+    # If our last segment had ID'd a subset of our sequences as non-ARFs,
+    # we'll want that labeling to cary through into the next segment.
+    my $last_arf_seqs = 'X'; # Since 0 could be a valid last sequence to see an ARF in
+
     my $pos_index = 0;
     while ($pos_index < scalar(@PositionIndex)) {
 
@@ -451,7 +457,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 		$TempARFNameField[$seq_id][$seg_id] = 0;
 	    }
 	}
-	
+
 	foreach my $segment (@SegmentList) {
 
 	    my @SegmentParts = split(/\,/,$segment);
@@ -459,8 +465,13 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	    my $end_index    = $SegmentParts[1];
 	    my $num_frames   = $SegmentParts[2];
 
-	    # If there are multiple frames, we'll do a quick scan to find out which
-	    # frame is the most common and designate that the non-ARF.
+	    # If there are multiple frames, but none start/end the protein, we'll do a quick
+	    # check to see which frame is the most common and designate that the non-ARF.
+	    #
+	    # NOTE: This is our ad-hoc selection -- later on, we'll do a check to see if there
+	    # are any sequences that begin or end in a DCE region, and if so we'll call them the
+	    # ARF (since we suspect they're providing signal for NMD).
+	    #
 	    my $non_arf_frame = 0;
 	    my $non_arf_frame_size = scalar(split(/\,/,$MSA{$PositionIndex[$start_index]}));
 	    for (my $frame=1; $frame<$num_frames; $frame++) {
@@ -486,6 +497,8 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 		push(@MultiFrameStarts,$msa_len);
 	    }
 
+	    # UGH, this is a naming convention nightmare...
+	    my %SeqsToFrames;
 
 	    # I mean, pretty slick, right? (this is how we handle ARFs)
 	    for (my $frame=0; $frame<$num_frames; $frame++) {
@@ -517,6 +530,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 			my $chars  = $2;
 
 			$SeqsInFrame[$seq_id] = 1;
+			$SeqsToFrames{$seq_id} = $frame + 1; # Need '+1' to avoid missing frame zero usage...
 
 			# If there are multiple characters in this entry, we'll
 			# see if there's a more creative solution to this puzzle
@@ -590,21 +604,114 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 
 		}
 
-		# If we just wrapped up an ARF frame, then we'll record how much 
-		# each of the sequences in this frame moved.
-		if ($frame != $non_arf_frame) {
-		    for (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) {
-			if ($SeqsInFrame[$seq_id]) {
-			    # To avoid weirdness associated with SPALN sticking single amino acids in places,
-			    # we'll skip annotating single amino ARFs
-			    if ($ContentStarts[$seq_id] < $ContentPositions[$seq_id]) {
-				$TempARFNameField[$seq_id][$num_segs] = $ContentStarts[$seq_id].'..'.$ContentPositions[$seq_id];
+	    }
+
+	    # We want to prioritize designating exons that start/end proteins as
+	    # ARFs, so we'll first do a check to see whether there are multiple
+	    # reading frames and if one starts off the sequence.
+	    
+	    # If we just wrapped up an ARF frame, then we'll record how much 
+	    # each of the sequences in this frame moved.
+	    
+	    # NEW APPROACH
+	    if ($num_frames > 1) {
+
+		# If we encountered an ARF in the last segment, we'll want to
+		# ensure that a contiguous DCE uses a consistent labeling.
+		my $precleared = 0;
+		if ($last_arf_seqs !~ /X/) {
+
+		    # Turn this into a list, and see if there are any frames without
+		    # a member from this list...
+		    my @ClearFrames;
+		    for (my $frame=0; $frame<$num_frames; $frame++) { $ClearFrames[$frame] = 1; }
+		    foreach my $seq_id (split(/\,/,$last_arf_seqs)) {
+			if ($SeqsToFrames{$seq_id}) {
+			    $ClearFrames[$SeqsToFrames{$seq_id}-1] = 0;
+			}
+		    }
+
+		    # If our current non-ARF frame looks good, we're solid
+		    if ($ClearFrames[$non_arf_frame]) {
+			$precleared = 1;
+		    } else {
+			# Just pick one of the clear frames (if there is one!)
+			for (my $frame=0; $frame<$num_frames; $frame++) {
+			    if ($ClearFrames[$frame]) {
+				$non_arf_frame = $frame;
+				$precleared = 1;
+				last;
 			    }
 			}
 		    }
-		}
 
+		} 
+
+		# If we couldn't get a clear non-ARF from previous knowledge, we'll check
+		# to see which of these sequences look non-ARF-y
+		if (!$precleared) {
+
+		    # First, we'll organize sequences into these three categories
+		    my @TrueInteriors;
+		    my @CoversStartExon;
+		    my @CoversEndExon;
+		    
+		    foreach my $seq_id (keys %SeqsToFrames) {
+			# Recall that these are from '1..seq_len'
+			my $start_pos = $ContentStarts[$seq_id];
+			my $end_pos   = $ContentPositions[$seq_id];
+			if ($start_pos > 1 && $end_pos < $ProteinLens[$seq_id]) {
+			    push(@TrueInteriors,$seq_id);
+			} else {
+			    # We'll allow sequences to be both starting and ending, since
+			    # that's conceivable.
+			    if ($start_pos == 1) { push(@CoversStartExon,$seq_id); }
+			    if ($end_pos == $ProteinLens[$seq_id]) { push(@CoversEndExon,$seq_id); }
+			}
+		    }
+		    
+		    # If we don't have any DCEs that start or end their sequences, we defer back
+		    # to our silly 'non_arf_frame' designation.
+		    if (scalar(@CoversStartExon) + scalar(@CoversEndExon) > 0) {
+			
+			# Check if we have a frame that doesn't touch any starting / ending exons
+			my @ClearFrames;
+			for (my $frame=0; $frame<$num_frames; $frame++) { $ClearFrames[$frame] = 1; }
+			
+			foreach my $seq_id (@CoversStartExon) { $ClearFrames[$SeqsToFrames{$seq_id}-1] = 0; }
+			foreach my $seq_id (@CoversEndExon)   { $ClearFrames[$SeqsToFrames{$seq_id}-1] = 0; }
+			
+			# If our original non-ARF-frame is clear, stick with it.  Otherwise, pick any safe frame.
+			if ($ClearFrames[$non_arf_frame] == 0) {
+			    my $safe_non_arf = -1;
+			    for (my $frame=0; $frame<$num_frames; $frame++) {
+				if ($ClearFrames[$frame]) {
+				    $safe_non_arf = $frame;
+				}
+			    }
+			    if ($safe_non_arf != -1) { $non_arf_frame = $safe_non_arf; }
+			}
+			
+		    }
+		}
 	    }
+
+	    # This is always a good place to start forgetting the last segment
+	    $last_arf_seqs = 'X';
+	    
+	    # Now we can actually do our labeling!
+	    foreach my $seq_id (keys %SeqsToFrames) {
+		if ($SeqsToFrames{$seq_id}-1 != $non_arf_frame) {
+		    # To avoid weirdness associated with SPALN sticking single amino acids in places,
+		    # we'll skip annotating single amino ARFs
+		    if ($ContentStarts[$seq_id] < $ContentPositions[$seq_id]) {
+			$TempARFNameField[$seq_id][$num_segs] = $ContentStarts[$seq_id].'..'.$ContentPositions[$seq_id];
+			if ($last_arf_seqs =~ 'X') { $last_arf_seqs = $seq_id;                    }
+			else                       { $last_arf_seqs = $last_arf_seqs.','.$seq_id; }
+		    }
+		} 
+	    }
+
 
 	    # Cool! That wraps up that segment, but if we saw multiple reading frames
 	    # then we're going to need to take note of where the sequence ended.
@@ -736,6 +843,40 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	@FinalMSA = @{$FinalMSARef};
 	@Disagreements = @{$DisagreementsRef};
 	$final_len = $tmp_len;
+    }
+
+
+    # See if we can connect any ARFs together
+    #
+    # One thing to consider about this is that it would otherwise preserve clarity
+    # of exon boundaries... Probably still better in the long-run to concatenate these
+    # multi-exon ARFs, but just a thought.
+    #
+    for (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) {
+	if ($ARFNameField[$seq_id] =~ /\:(.*)$/) {
+
+	    my $arf_range_str = $1;
+	    my @ARFRangeList  = split(/\,/,$arf_range_str);
+	    $ARFRangeList[0] =~ /^(\d+)\.\.(\d+)$/;
+
+	    my $arf_start_coord = $1;
+	    my $arf_end_coord   = $2;
+	    my $final_arf_str   = $arf_start_coord.'..';
+
+	    for (my $arf_range=1; $arf_range<scalar(@ARFRangeList); $arf_range++) {
+		$ARFRangeList[$arf_range] =~ /^(\d+)\.\.(\d+)$/;
+		$arf_start_coord = $1;
+		my $next_arf_end_coord = $2;
+
+		if ($arf_start_coord != $arf_end_coord+1) {
+		    $final_arf_str = $final_arf_str.$arf_end_coord.','.$arf_start_coord.'..';
+		}
+		$arf_end_coord = $next_arf_end_coord;
+	    }
+	    
+	    $final_arf_str = $final_arf_str.$arf_end_coord;
+	    $ARFNameField[$seq_id] = $final_arf_str;
+	}
     }
 
 
