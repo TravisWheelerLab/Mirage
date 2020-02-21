@@ -550,8 +550,12 @@ for ($i=0; $i<$numSpecies; $i++) {
 	my $threadportion  = int(scalar(@PartialMapFams) / $numPMprocesses);
 
 	# Make an output directory to store all our fun lil mapping datums!
+	# Note that because this is inside the species-specific loop, it's
+	# possible a previous species already wanted to make this directory...
 	my $pm_dirname = $ResultsDir.'/MappingIssues/';
-	if (system("mkdir $pm_dirname")) { die "\n  Failed to create directory '$pm_dirname'\n\n"; }
+	if (!(-d $pm_dirname) && system("mkdir $pm_dirname")) { 
+	    die "\n  Failed to create directory '$pm_dirname'\n\n"; 
+	}
 	
 	# NOTE: We're going to need to parallelize here
 	my $processes = 1;
