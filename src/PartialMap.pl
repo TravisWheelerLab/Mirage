@@ -1004,6 +1004,31 @@ if ($num_maps) {
 	##############
 
 
+	# We'll want to have a string to concatenate onto this sequence
+	# family's hits.out file <-[which might not exist...]
+	#
+	# Let's also count how many positions had *some* (concordant or not)
+	# mapping...
+	#
+	my $raw_num_mapped = 0;
+	$partialhitstr = $partialhitstr."Isoform ID : $SeqNames[$seq]\n";
+	$partialhitstr = $partialhitstr."Method     : PartialMap\n";
+	$partialhitstr = $partialhitstr."Chromosome : $chr\n";
+	$partialhitstr = $partialhitstr."Match Pos.s: ";
+	for (my $j=0; $j<$msa_len; $j++) {
+	    if ($MSA[$seq][$j] =~ /[A-Za-z]/) {
+		if ($MapMSA[$seq][$j]) { 
+		    $partialhitstr = $partialhitstr.$MapMSA[$seq][$j]; 
+		    $raw_num_mapped++;
+		} else {
+		    $partialhitstr = $partialhitstr.'-';
+		}
+		$partialhitstr = $partialhitstr.',';
+	    }
+	}
+	$partialhitstr =~ s/\,$//; # We'll have one comma too many at the end of this endeavor
+	$partialhitstr = $partialhitstr."\n\n";
+
 	# Regardless of what additional re-tooling we do around finding
 	# alternative places to stick characters to ID consistencies,
 	# we'll need to identify which characters didn't map (as runs)
@@ -1037,13 +1062,15 @@ if ($num_maps) {
 	    # We'll also generate some information about the quality of 
 	    # this seq's partial mapping
 	    my $sum_chars  = $consistencies + $inconsistencies + $unmapped_chars;
-	    my $pct_mapped = int(1000.0 * $consistencies / $sum_chars) / 10.0;
+	    my $pct_mapped = int(1000.0 * $raw_num_mapped / $sum_chars) / 10.0;
+	    my $pct_agreed = int(1000.0 * $consistencies / $sum_chars) / 10.0;
 
 	    # Print out our info about this sequence's partial mapping
 	    print "  $SeqNames[$seq]\n";
 	    print "  + Partial mapping identified\n";
-	    print "  - Unmapped character ranges    :  $unmapped_str\n";
-	    print "  - Percent of characters mapped :  $pct_mapped\%  ($consistencies / $sum_chars)\n";
+	    print "  - Discordant character ranges   :  $unmapped_str\n";
+	    print "  - Percent of characters mapped  :  $pct_mapped\%  ($consistencies / $sum_chars)\n";
+	    print "  - Percent character concordance :  $pct_agreed\%  ($consistencies / $sum_chars)\n";
 	    print "\n";
 
 	    # NOTE: Now that we print this information out, this is unnecessary
@@ -1057,22 +1084,6 @@ if ($num_maps) {
 	    #$SeqNames[$seq] = $seqname;
 
 	}
-
-	# We'll also want to have a string to concatenate onto this sequence
-	# family's hits.out file <-[which might not exist...]
-	$partialhitstr = $partialhitstr."Isoform ID : $SeqNames[$seq]\n";
-	$partialhitstr = $partialhitstr."Method     : PartialMap\n";
-	$partialhitstr = $partialhitstr."Chromosome : $chr\n";
-	$partialhitstr = $partialhitstr."Match Pos.s: ";
-	for (my $j=0; $j<$msa_len; $j++) {
-	    if ($MSA[$seq][$j] =~ /[A-Za-z]/) {
-		if ($MapMSA[$seq][$j]) { $partialhitstr = $partialhitstr.$MapMSA[$seq][$j]; }
-		else                   { $partialhitstr = $partialhitstr.'-';               }
-		$partialhitstr = $partialhitstr.',';
-	    }
-	}
-	$partialhitstr =~ s/\,$//; # We'll have one comma too many at the end of this endeavor
-	$partialhitstr = $partialhitstr."\n\n";
 
     }
 
