@@ -1069,7 +1069,7 @@ if ($num_maps) {
 	    print "  $SeqNames[$seq]\n";
 	    print "  + Partial mapping identified\n";
 	    print "  - Discordant character ranges   :  $unmapped_str\n";
-	    print "  - Percent of characters mapped  :  $pct_mapped\%  ($consistencies / $sum_chars)\n";
+	    print "  - Percent of characters mapped  :  $pct_mapped\%  ($raw_num_mapped / $sum_chars)\n";
 	    print "  - Percent character concordance :  $pct_agreed\%  ($consistencies / $sum_chars)\n";
 	    print "\n";
 
