@@ -93,6 +93,43 @@ if ($numSeqs > 1) {
 }
 
 
+# For one final thing, we do a check to see if there's been some 'M'
+# misplacement.  This can occur as part of a MultiSeqNW error check that's
+# intended to 'cascade' through a series of characters, but can cause
+# the first 'M' to get shifted off to the left.
+#
+# We'll default to moving an initial 'M' followed by gap characters to the
+# right, since it would instantiate a bizarre micro-exon or gappy thing
+# otherwise <--- on the condition that there's already at least one 'M'
+#                at the new start position in the MSA
+#
+for (my $i=0; $i<$numSeqs; $i++) {
+
+    if (uc($FinalMSA[$i][0]) eq 'M' && $FinalMSA[$i][1] eq '-') {
+
+	my $j=2;
+	while ($FinalMSA[$i][$j] eq '-') {
+	    $j++;
+	}
+	$j--;
+
+	my $m_support = 0;
+	for (my $k=0; $k<$numSeqs; $k++) {
+	    if (uc($FinalMSA[$k][$j]) eq 'M') {
+		$m_support = 1;
+		last;
+	    }
+	}
+
+	if ($m_support) {
+	    $FinalMSA[$i][$j] = $FinalMSA[$i][0];
+	    $FinalMSA[$i][0]  = '-';
+	}
+
+    }
+}
+
+
 # Print out our final MSA
 open(my $outf,'>',$ARGV[1]);
 foreach $i (0..$numSeqs-1) {

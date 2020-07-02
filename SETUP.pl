@@ -25,8 +25,13 @@ while ($argcheck < scalar(@ARGV)) {
 }
 
 
+# If there's already a link to mirage2, we'll kill it, just in case
+# it doesn't look like it's safe to try miragery
+if (-e 'mirage2') { system("rm \"mirage2\""); }
+
+
 # The name of the spaln folder (at the top for ease of adjustment)
-my $spalnDir = 'inc/spaln2.2.2';
+my $spalnDir = 'inc/spaln2.3.3';
 my $easelDir = 'inc/easel';
 my $blatDir  = 'inc/blat';
 my $spalnTar = $spalnDir.'.tgz';
@@ -50,18 +55,18 @@ $startDir =~ s/\/$//;
 # Check that all files are where we need them
 my @srcFiles;
 push(@srcFiles,'src/makefile');
-push(@srcFiles,'src/Diagonals.c');
-push(@srcFiles,'src/Diagonals.h');
-push(@srcFiles,'src/FastMap.c');
-push(@srcFiles,'src/TransSW.c');
+push(@srcFiles,'src/BasicBio.c');
+push(@srcFiles,'src/BasicBio.h');
+push(@srcFiles,'src/BureaucracyMirage.pm');
+push(@srcFiles,'src/FastMap2.c');
+push(@srcFiles,'src/FinalMSA.pl');
+push(@srcFiles,'src/HitWeaver.c');
+push(@srcFiles,'src/Mirage2.pl');
 push(@srcFiles,'src/MultiSeqNW.c');
 push(@srcFiles,'src/MultiSeqNW.h');
-push(@srcFiles,'src/DiagonalSets.pm');
-push(@srcFiles,'src/Quilter.pl');
 push(@srcFiles,'src/MultiMSA.pl');
-push(@srcFiles,'src/FinalMSA.pl');
-push(@srcFiles,'src/Mirage.pl');
-push(@srcFiles,'src/run_mirage.sh');
+push(@srcFiles,'src/Quilter2.pl');
+push(@srcFiles,'src/run_mirage2.sh');
 foreach my $file (@srcFiles) {
     if (!(-e $file)) { die "\n  Failed to locate critical file '$file'\n\n"; }
 }
@@ -127,13 +132,13 @@ system("rm $easelTar") if (-e $easelTar);
 system("rm $blatTar")  if (-e $blatTar);
 
 # Create a symbolic link to the mirage-running shell script
-my $MirageLink = "ln -s src/run_mirage.sh mirage";
-if (system($MirageLink)) { die "\n  Failed to create symbolic link to src/run_mirage.sh\n\n"; }
+my $MirageLink = "ln -s src/run_mirage2.sh mirage2";
+if (system($MirageLink)) { die "\n  Failed to create symbolic link to src/run_mirage2.sh\n\n"; }
 
 # Now the only thing the user REALLY needs to do is make
 # sure that spaln is on their PATH.
 print "\n\n  Setup completed successfully!";
-print "\n\n  To complete installation add spaln and easel to your PATH\n";
+print "\n\n  To complete installation add mirage to your PATH\n";
 print "  (see README for assistance)\n\n";
 
 
