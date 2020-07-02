@@ -106,7 +106,7 @@ sub PrintUsage
     my $help_requested = shift;
     print "\n  USAGE:  ./Quilter2.pl [species-dir] [genome.fa] [.gtf] {OPT.s}\n";
     die "\n" if (!$help_requested);
-    die "\n";
+    die "\n"; # Eventually we'll give more info if help is requestied...
 }
 
 
@@ -124,7 +124,6 @@ sub ParseArgs
 	"help",
 	"v",
 	"time",
-	"help",
 	) || die "\n  ERROR:  Failed to parse Quilter2 commandline arguments\n\n";
 
     if ($Options{help}) { PrintUsage(1); }
@@ -631,7 +630,8 @@ sub UseFastMap
 
 		# We can easily build up a set of ranges of that we'll need to fill in,
 		# knowing where we have solid hits to the top chromosome.
-		my ($gap_starts_ref,$gap_ends_ref) = GetAminoHitGaps($max_amino_str);
+		my ($gap_starts_ref,$gap_ends_ref)
+		    = GetAminoHitGaps($max_amino_str,length($Seqs[$i]));
 		my @GapStarts = @{$gap_starts_ref};
 		my @GapEnds   = @{$gap_ends_ref};
 
@@ -645,15 +645,17 @@ sub UseFastMap
 		# exons.
 		#
 		$SeqHitStrs[$i] =
-		    AttemptSpalnFill();
+		    AttemptSpalnFill($HWInputNames[$i],$top_chr_fname,$max_exon_str,
+				     $max_hits_str,\@GapStarts,\@GapEnds,$Seqs[$i],
+				     $SeqNames[$i],$genome,$gene_fname);
 
 		# Alriiiight, let's see if we can make a monster!
 		# We'll either get 0 if we didn't get a full mapping, or else
 		# we'll get the hit string.
 		$SeqHitStrs[$i] =
-		    AttemptChimericHWMap($SpliceGraphs[$i],$HWInputNames[$i],
+		    AttemptChimericHWMap($HWInputNames[$i],$SpliceGraphs[$i],
 					 $top_chr_fname,$max_exon_str,\@GapStarts,
-					 @GapEnds,$Seqs[$i],$SeqNames[$i],$gene_fname);
+					 \@GapEnds,$Seqs[$i],$SeqNames[$i],$gene_fname);
 
 		# At this point, we either have a full hit to multiple chromosomes
 		# (TRANS SPLICING!) or we don't, as is the way of logic
@@ -676,9 +678,9 @@ sub UseFastMap
 		    print $BlatFile "\n";
 
 		    # Next up, write out our Sequence McNuggets
-		    for (my $gap_id=0; $gap_id<scalar(@AminoGapStarts)-1; $gap_id++) {
-			my $start_amino = $AminoGapStarts[$gap_id];
-			my $end_amino = $AminoGapEnds[$gap_id];
+		    for (my $gap_id=0; $gap_id<scalar(@GapStarts)-1; $gap_id++) {
+			my $start_amino = $GapStarts[$gap_id];
+			my $end_amino = $GapEnds[$gap_id];
 			my $part_name = $SeqNames[$i].'s'.$start_amino.'e'.$end_amino;
 			print $BlatFile ">$gene\|$SeqNames[$i]\n";
 			for (my $j=0; $j<=$end_amino-$start_amino; $j++) {
@@ -1223,12 +1225,157 @@ sub ExtractCanonHWMap
 
 ############################################################
 #
+#  Function: AttemptSpalnFill
+#
+sub AttemptSpalnFill
+{
+    my $hw_inf_str        = shift;
+    my $hw_outfname       = shift;
+    my $max_exon_list_str = shift;
+    my $max_hits_list_str = shift;
+    my $gap_starts_ref    = shift;
+    my $gap_ends_ref      = shift;
+    my $seq_str           = shift;
+    my $seq_id            = shift;
+    my $genome            = shift;
+    my $gene_fname        = shift;
+
+    my @GapStarts = @{$gap_starts_ref};
+    my @GapEnds   = @{$gap_ends_ref};
+    my $num_gaps  = scalar(@GapStarts);
+
+    my $seq_len = length($seq_str);
+    my @Seq = split(//,$seq_str);
+
+    # Figure out what chromosome we're dealing with
+    $hw_outfname =~ /\/([^\/]+)$/;
+    my $hitfname = $1;
+    $hitfname =~ /^[^\.]+\.([^\.]+)\./;
+    my $chr = $1;
+    my $revcomp = 0;
+    if ($chr =~ /\-revcomp$/) {
+	$chr =~ s/\-revcomp$//;
+	$revcomp = 1;
+    }
+
+    # We'll kick things off by opening up the HitWeaver output file and grabbing the
+    # nucleotide ranges corresponding to each of our favorite hits.
+    my $hwoutf = OpenInputFile($hw_outfname);
+    my @MaxHits = split(/\,/,$max_hits_list_str); # These are [0..num_hits-1]
+    my @MaxHitNuclRanges;
+    my $hit_num = 0;
+    my $exon_num = 0;
+    while (my $line = <$hwoutf>) {
+
+	if ($line =~ /\-\-\-\-\- Exons/) {
+	    if ($exon_num == $MaxHits[$hit_num]) {
+
+		# Scan to where the nucleotide range is hiding
+		$line = <$hwoutf>; # blank line
+		$line = <$hwoutf>; # exon id list
+		$line = <$hwoutf>; # amino range
+		$line = <$hwoutf>; # Nucleotide Range!
+		$line =~ s/\n|\r//g;
+		$line =~ /Nucleotide Range \: (\d+\.\.\d+)$/;
+
+		# Record that this hit had the given nucleotide range
+		push(@MaxHitNuclRanges,$1);
+
+		$hit_num++;
+		last if ($hit_num == scalar(@MaxHits));
+
+	    }
+	    $exon_num++;
+	}
+	
+    }
+    close($hwoutf);
+
+    # Now we can run through our list of gaps and determine where we'd
+    # want to look in the genome to try to fill them in
+    my @NuclSearchRanges;
+
+    # First, if we couldn't map the first aminos of the sequence, we'll
+    # pull in a fairly large search range.
+    if ($GapStarts[0] == 1) {
+	$MaxHitNuclRanges[0] =~ /^(\d+)\.\./;
+	my $range_end   = $1;
+	my $range_start;
+	if ($revcomp) { $range_start = Min($range_end+1000000,$ChrSizes{$chr}); }
+	else          { $range_start = Max($range_end-1000000,1);               }
+	push(@NuclSearchRanges,$range_start.'..'.$range_end);
+    }
+
+    # We'll handle all of the guaranteed internal gaps
+    for (my $i=0; $i<scalar(@MaxHits)-1; $i++) {
+	$MaxHitNuclRanges[$i] =~ /\.\.(\d+)$/;
+	my $range_start = $1;
+	$MaxHitNuclRanges[$i+1] =~ /^(\d+)\.\./;
+	my $range_end = $1;
+	push(@NuclSearchRanges,$range_start.'..'.$range_end);
+    }
+
+    # If the final gap extends to the end of the protein sequence, we'll need to
+    # handle it specially -- otherwise, we've got our ranges!
+    if ($GapEnds[$num_gaps-1]==$seq_len) {
+	$MaxHitNuclRanges[scalar(@MaxHits)-1] =~ /\.\.(\d+)$/;
+	my $range_start = $1;
+	my $range_end;
+	if ($revcomp) { $range_end = Max($range_start-1000000,0);               }
+	else          { $range_end = Min($range_start+1000000,$ChrSizes{$chr}); }
+	push(@NuclSearchRanges,$range_start.'..'.$range_end);
+    }
+
+    # Heckin' dang! Let's do some SPALNery!
+    #
+    # Our goal is just to find the specific ranges of unindexed exons in the gap
+    # areas that match up with the specific unmapped amino sequences.
+    #
+    # NOTE that we're fine with not fully filling in every gap -- any gap that we
+    # can fill in is a success!
+
+    # We're going to need to give Spaln some files, duh!
+    my $temp_fname = $gene_fname;
+    $temp_fname =~ s/\.fa$/\.spaln\.prot\.fa/;
+    my $nucl_fname = $temp_fname;
+    $nucl_fname =~ s/\.prot\.fa$/\.nucl\.fa/;
+
+    my @GapExonRanges;
+    for (my $i=0; $i<$num_gaps; $i++) {
+
+	open(my $tempf,'>',$temp_fname);
+	print $tempf ">$i\n";
+	for (my $j=$GapStarts[$i]-1; $j<$GapEnds[$i]; $j++) {
+	    print $tempf "$Seq[$j]";
+	}
+	print $tempf "\n\n";
+	close($tempf);
+	
+	my $nucl_range = $NuclSearchRanges[$i];
+	my $sfetch_cmd = $sfetch." -c $nucl_range \"$genome\" \"$chr\" > $nucl_fname";
+	RunSystemCommand($sfetch_cmd);
+
+	my $spaln_cmd = $spaln." -Q3 -O1 -S3 -ya3 \"$nucl_fname\" \"$temp_fname\"";
+	
+    }
+    
+    
+    
+}
+
+
+
+
+
+
+############################################################
+#
 #  Function: AttemptChimericHWMap
 #
 sub AttemptChimericHWMap
 {
-    my $orig_hw_outf_str  = shift;
     my $orig_hw_inf_str   = shift;
+    my $orig_hw_outf_str  = shift;
     my $canon_chr_fname   = shift;
     my $max_exon_list_str = shift;
     my $amino_starts_ref  = shift;
@@ -1722,8 +1869,9 @@ sub FindMaximalHWHitSet
 sub GetAminoHitGaps
 {
     my $amino_ranges_str = shift;
+    my $seq_len = shift;
 
-    my @AminoRanges = split(/\,/,$max_amino_str);
+    my @AminoRanges = split(/\,/,$amino_ranges_str);
     my $num_ranges  = scalar(@AminoRanges);
 
     my @GapStarts;
@@ -1751,7 +1899,7 @@ sub GetAminoHitGaps
     
     # If the last range doesn't end with the length of the protein
     # sequence, there's one more gap to consider!
-    if ($MaxAminoRanges[$num_ranges-1] !~ /\.\.$seq_len$/) {
+    if ($AminoRanges[$num_ranges-1] !~ /\.\.$seq_len$/) {
 	$AminoRanges[$num_ranges-1] =~ /\.\.(\d+)$/;
 	$GapStarts[$num_gaps] = $1+1;
 	$GapEnds[$num_gaps] = $seq_len;
