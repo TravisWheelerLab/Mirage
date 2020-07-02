@@ -1,7 +1,5 @@
 #!/usr/bin/env perl
 #
-# Setup.pl - Alex Nord - 2016 
-#
 # ABOUT: This script is used to set up the directory for running 
 #        mirage.pl.  It verifies that all required programs are
 #        accessible and correctly compiled.  After running SETUP.pl,
