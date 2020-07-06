@@ -21,16 +21,25 @@ sub ParseGTF;
 sub UseFastMap;
 sub ParseFastMapOutput;
 sub GenSpliceGraph;
+sub GetSpliceStrengths;
 sub CheckForFullMaps;
 sub ExtractCanonHWMap;
+sub AttemptSpalnFill;
 sub AttemptChimericHWMap;
 sub ExtractHWInputExons;
 sub ExtractChimericHWMap;
 sub FindMaximalHWHitSet;
+sub GetAminoHitGaps;
 sub RecordMaximalHits;
 sub RunBlatOnFileSet;
+sub GenBlatMaps;
 
+
+
+# Help?
 if (@ARGV < 3) { PrintUsage(0); }
+
+
 
 # As you'd expect, we'll parse the commandline arguments right up top
 my $opts_ref = ParseArgs();
@@ -53,6 +62,11 @@ $srcdir =~ s/Quilter2.pl$//;
 my $sfetch = $srcdir.'../inc/easel/miniapps/esl-sfetch';
 my $spaln  = $srcdir.'../inc/spaln2.3.3/src/spaln';
 
+# Spaln requires certain environment variables to be set, so why don'tcha set 'em?
+$spaln =~ /^(.*)spaln$/;
+$ENV{'ALN_TAB'} = $1.'../table';
+$ENV{'ALN_DBS'} = $1.'../seqdb';
+
 # How many CPUs do we intend to use?
 my $ThreadGuide = OpenInputFile($seq_dirname.'Thread-Guide');
 my $num_cpus = <$ThreadGuide>;
@@ -65,18 +79,32 @@ $num_cpus = $1;
 my $chrsizes_ref = ParseChromSizes($genome);
 my %ChrSizes = %{$chrsizes_ref};
 
-# If we're skipping straight to BLAT (no gtf) then... let's!
-# Otherwise, do the first round of real tough-guy work!
+
+# If we're using a GTF for our first round of searching, hop to it!
+# Otherwise, jump straight to building up one big file for BLAT search.
+my $blat_naming;
+my @BlatFileNames;
 if ($gtfname ne '-') {
 
     UseGTF($seq_dirname,$ali_dirname,$genome,$gtfname,$num_cpus,\%Opts);
+
+    # Each process MIGHT have left us with a blat file if it had
+    # any unfinishable business, so we'll want to aggregate those
+    for (my $i=0; $i<$num_cpus; $i++) {
+	my $blatfname = $seq_dirname.$i.'.blat.fa';
+	next if (!(-e $blatfname));
+	push(@BlatFileNames,$blatfname);
+    }
+
+    # We're running our BLAT search using the sequence names as the way
+    # to derive gene family membership, and you're powerless to stop it.
+    $blat_naming = 'seqname';
 
 } else {
 
     # We'll need to put all of the files that we want to use in our
     # BLAT search into a list, because that's what I've decided we
     # need to do.
-    my @BlatFileNames;
     my $SeqDir = OpenDirectory($seq_dirname);
     while (my $fname = readdir($SeqDir)) {
 	next if ($fname !~ /\.fa$/);
@@ -86,13 +114,37 @@ if ($gtfname ne '-') {
 
     # We're running our BLAT search using file names as the way to derive
     # the gene families that sequences belong to, and we're doing it now!
-    my ($blat_outfname,$blat_nameguide_ref,$num_blat_genes)
-	= RunBlatOnFileSet('filename',@BlatFileNames,$genome);
-    my %BlatNameGuide = %{$blat_nameguide_ref};
+    $blat_naming = 'filename';
 
 }
 
+
+# If we have any sequences to run BLAT on, we'd better get to it!
+if (scalar(@BlatFileNames)) {
+    
+    my ($blat_outfname,$blat_nameguide_ref,$blat_genes_ref)
+	= RunBlatOnFileSet(@BlatFileNames,$genome,$blat_naming);
+    my %BlatNameGuide = %{$blat_nameguide_ref};
+    my %BlatGenes = %{$blat_genes_ref};
+
+    # Now we've run BLAT -- time to make sense of all the cool things it's
+    # telling us!
+    GenBlatMaps($blat_outfname,\%BlatNameGuide,\%BlatGenes,$num_cpus);
+
+    # Cleanup on line 135! << CRITICAL: KEEP THIS LINE NUMBER CORRECT, FOR JOKE
+    RunSystemCommand("rm \"$blat_outfname\"");
+
+}
+
+
+
+
 1;
+
+
+###################
+#  END OF SCRIPT  #
+###################
 
 
 
@@ -237,27 +289,7 @@ sub UseGTF
     if ($threadID) { exit(0); }
     while (wait() != -1) {}
 
-    die;
-
-    # Great stuff, team!  Now, how's about we pull all the blat files together
-    # and get real blatty up in this?
-    my @BlatFileNames;
-    for (my $i=0; $i<$num_cpus; $i++) {
-
-	# It isn't guaranteed that this file will exist, in which case we
-	# have nothing to do
-	$blatfname = $seq_dirname.$threadID.'.blat.fa';
-	next if (!(-e $blatfname));
-
-	# Add it to the pile!
-	push(@BlatFileNames,$blatfname);
-
-    }
-
-    # It's the dlark knlight! BLATMAN!
-    my ($blat_outfname,$blat_nameguide_ref,$num_blat_genes)
-	= RunBlatOnFileSet('seqname',\@BlatFileNames,$genome);
-    my %BlatNameGuide = %{$blat_nameguide_ref};
+    # GTF used!
     
 }
 
@@ -686,7 +718,7 @@ sub UseFastMap
 			my $start_amino = $GapStarts[$gap_id];
 			my $end_amino = $GapEnds[$gap_id];
 			my $part_name = $SeqNames[$i].'s'.$start_amino.'e'.$end_amino;
-			print $BlatFile ">$gene\|$SeqNames[$i]\n";
+			print $BlatFile ">$gene\|$part_name\n";
 			for (my $j=0; $j<=$end_amino-$start_amino; $j++) {
 			    print $BlatFile "$Seq[$j+$start_amino]";
 			    print $BlatFile "\n" if (($j+1) % 60 == 0);
@@ -1529,7 +1561,15 @@ sub AttemptSpalnFill
 	GenSpliceGraph($final_exon_str,$seq_str,$seq_id,$chr,$revcomp,$gene_fname);
 
     # Did we get a full mapping?
-    return CheckForFullMaps($hw_outfname,$seq_len);
+    my $hit_str = CheckForFullMaps($hw_outfname,$seq_len);
+
+    # If we did get a full mapping, give credit to SPALN for filling in the gaps
+    if ($hit_str) {
+	$hit_str =~ s/Map Method \: FastMap2/Map Method \: FastMap2\+Spaln/;
+    }
+
+    # DONE
+    return $hit_str;
 
 }
 
@@ -2158,9 +2198,9 @@ sub RecordMaximalHits
 sub RunBlatOnFileSet
 {
 
-    my $gene_name_loc = shift; # 'seqname' or 'filename'
     my $seqfiles_ref  = shift;
     my $genome        = shift;
+    my $gene_name_fmt = shift; # 'seqname' or 'filename'
 
     my @SeqFileNames = @{$seqfiles_ref};
     
@@ -2189,7 +2229,7 @@ sub RunBlatOnFileSet
 	my ($gene,$seqname);
 	
 	# If we're getting the gene name from the filename, it's regex time!
-	if ($gene_name_loc eq 'filename') {
+	if ($gene_name_fmt eq 'filename') {
 	    $fname =~ /\/([^\/]+)\.fa/;
 	    $gene  = $1;
 	}
@@ -2204,23 +2244,18 @@ sub RunBlatOnFileSet
 	    if ($line =~ /^\>(.+)$/) {
 		
 		$seqname = $1;
-		if ($gene_name_loc eq 'seqname') {
+		if ($gene_name_fmt eq 'seqname') {
 		    $seqname =~ /^([^\|]+)\|([^\|]+)$/;
 		    $gene    = $1;
 		    $seqname = $2;
 		}
+
 		$num_blat_seqs++;
 		print $CumBlatFile ">$num_blat_seqs\n";
 
 		# Who are you, again?
-		$BlatNameGuide{$num_blat_seqs} = $seqname;
-		
-		# If this is the first time we've seen a member of this gene family,
-		# take note
-		if (!$BlatGenes{$gene}) {
-		    $BlatGenes{$gene} = 1;
-		    $num_blat_genes++;
-		}
+		$BlatNameGuide{$num_blat_seqs} = $seqname.'&'.$gene;
+		$BlatGenes{$gene} = 1;
 
 	    } else {
 
@@ -2262,10 +2297,191 @@ sub RunBlatOnFileSet
     RunSystemCommand("rm \"$cum_blat_fname\"");
     
     # We'll return the BLAT outfile, the name guide and the number of families BLAT'd
-    return($blat_outfname,\%BlatNameGuide,$num_blat_genes);
+    return($blat_outfname,\%BlatNameGuide,\%BlatGenes);
 
 }
 
+
+
+
+
+
+
+
+############################################################
+#
+#  Function: GenBlatMaps
+#
+sub GenBlatMaps
+{
+    my $blat_outfname      = shift;
+    my $blat_nameguide_ref = shift;
+    my $blat_genes_ref     = shift;
+    my $num_cpus           = shift;
+
+    my %BlatNameGuide = %{$blat_nameguide_ref};
+    my %BlatGenes = %{$blat_genes_ref};
+
+    # If we have fewer genes than cpus we'll reduce our threading accordingly
+    my @BlatGeneList = keys %BlatGenes;
+    my $num_blat_genes = scalar(@BlatGeneList);
+    $num_cpus = Max($num_cpus,$num_blat_genes);
+
+    # Spin off all our happy friends!
+    my $threadID = SpawnProcesses($num_cpus);
+
+    # Which range of gene name indices is this thread tasked with?
+    my $gene_index_start =  $threadID    * ($num_blat_genes / $num_cpus);
+    my $gene_index_end   = ($threadID+1) * ($num_blat_genes / $num_cpus);
+    if ($threadID == $num_cpus-1) { $gene_index_end = $num_blat_genes; }
+
+    # Make a hash of genes that this thread is in charge of for quick reference
+    my %ThreadGenes;
+    for (my $i=$gene_index_start; $i<$gene_index_end; $i++) {
+	$ThreadGenes{$BlatGeneList[$i]} = 1;
+    }
+
+    # Run through the BLAT output file and pull in all the lines pertaining to
+    # your sequences, little thread!
+    my $blatf = OpenInputFile($blat_outfname);
+    my %BlatData;
+    while (my $line = <$blatf>) {
+
+	$line =~ s/\n|\r//g;
+	if ($line =~ /^(\S+)/) {
+
+	    # Grab the original naming info for this sequence
+	    my $seq_num = $1;
+	    $BlatNameGuide{$seq_num} =~ /^([^\&]+)\&([^\&]+)$/;
+	    my $seqname = $1;
+	    my $gene = $2;
+
+	    # If this isn't one of ours, leave it for a different friend to play with
+	    next if (!$ThreadGenes{$gene});
+	    
+	    # If we have partial information from HitWeaver (derived from GTF)
+	    # then our search might only pertain to certain parts of the actual
+	    # protein sequence -- check if this is the case!
+	    my $partial = '-';
+	    if ($seqname =~ /^(\d+)(s\d+e\d+)$/) {
+		my $seqname = $1.'-partial'; # Just for quick recognition...
+		$partial    = $2;
+	    }
+
+	    # We no longer need the indirection of the numeric naming for BLAT
+	    $line =~ s/^\S+//;
+
+	    # Record this hit
+	    my $data = $seqname.' '.$partial.' '.$line;
+	    if ($BlatData{$gene}) { $BlatData{$gene} = $BlatData{$gene}.'&'.$data; }
+	    else                  { $BlatData{$gene} = $data;                      }
+
+	}
+    }
+    close($blatf);
+
+    # We now have all of our BLAT output organized by gene family.
+    #
+    # Now we'll break each family into its individual sequences and see if we can get
+    # some full mappings.
+    #
+    # NOTE that if there are any partials for a sequence we'll treat them as a wholly
+    # different sequence
+    foreach my $gene (keys %BlatData) {
+
+	my %BlatBySeq;
+	foreach my $datum (split(/\&/,$BlatData{$gene})) {
+	    $datum =~ /^(\S+) (.+)$/;
+	    my $seqname = $1;
+	    my $hitdata = $1;
+	    if ($BlatBySeq{$seqname}) {
+		$BlatBySeq{$seqname} = $BlatBySeq{$seqname}.'&'.$hitdata;
+	    } else {
+		$BlatBySeq{$seqname} = $hitdata;
+	    }
+	}
+
+	# Read in this gene's sequences. We'll store to a hash because we don't expect
+	# to go through the sequences in the same order they were written.
+	my %Seqs;
+	my $inf = OpenInputFile($seq_dirname.$gene.'.fa');
+	my $seqname;
+	while (my $line = <$inf>) {
+
+	    $line =~ s/\n|\r//g;
+	    next if (!$line);
+
+	    if ($line =~ /\>(\S+)/) {
+		$seqname = $1;
+	    } else {
+		$line = uc($line);
+		if ($Seqs{$seqname}) { $Seqs{$seqname} = $Seqs{$seqname}.$line; }
+		else                 { $Seqs{$seqname} = $line;                 }
+	    }
+	    
+	}
+	close($inf);
+
+	# Now we can go sequence-by-sequence (again, treating partials specially)
+	# looking for a full mapping.
+	# We'll want to see partials before treating the full sequence, so we'll
+	# flip the sort order of the sequence names.
+	my @SeqNames = sort {$b <=> $a} keys %BlatBySeq;
+	my @FullMaps;
+	my $num_full_maps = 0;
+	for (my $i=0; $i<scalar(@SeqNames); $i++) {
+
+	    # Get the sequence name and pull its BLAT data
+	    my $seqname  = $SeqNames[$i];
+	    my @BlatHits = split(/\&/,$BlatBySeq{$seqname});
+	    
+	    if ($seqname =~ /\-partial$/) {
+
+		# Revert to the original sequence name
+		$seqname =~ s/\-partial$//;
+
+		# Has BLAT given us the power to fill in the gaps in this sequence?
+		my $seq = $Seqs{$seqname};
+		$FullMaps[$i] = AttemptBlatFill($seqname,$seq,\@BlatHits);
+		
+	    } else {
+
+		# Dive right on in with Spaln!
+		my $seq = $Seqs{$seqname};
+		$FullMaps[$i] = BlatToSpalnSearch($seqname,$seq,\@BlatHits);
+
+	    }
+
+	    # Did we get one?
+	    $num_full_maps++ if ($FullMaps[$i]);
+
+	}
+
+	# Well well welly well...
+	# Do we have any full maps to add to our '.quilter.out' file?
+	next if (!$num_full_maps);
+	
+	# WELL WELL WELLY WELL
+	# LET'S GET ADDING
+
+	# We don't know if there's already an output file for this gene family, so
+	# we'll use the appending output option
+	my $outfname = $seq_dirname.$gene.'.quilter.out';
+	open(my $outf,'>>',$outfname) || die "\n  ERROR:  Failed to open output file '$outfname'\n\n";
+	for (my $i=0; $i<scalar(@SeqNames); $i++) {
+	    # TO DO -- NOTE THAT WE'LL NEED TO BE CAREFUL FOR PARTIAL HANDLING!!!
+	}
+	close($outf);
+
+    }
+
+    # Friend time has come to its conclusion -- everyone goes home except the master
+    if ($threadID) { exit(0); }
+    while (wait() != -1) {}
+
+    # I think... we're done?!?!?!?
+    
+}
 
 
 
