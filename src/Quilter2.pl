@@ -51,6 +51,7 @@ my $gtfname = $ARGV[2];
 my $srcdir = $0;
 $srcdir =~ s/Quilter2.pl$//;
 my $sfetch = $srcdir.'../inc/easel/miniapps/esl-sfetch';
+my $spaln  = $srcdir.'../inc/spaln2.3.3/src/spaln';
 
 # How many CPUs do we intend to use?
 my $ThreadGuide = OpenInputFile($seq_dirname.'Thread-Guide');
@@ -493,7 +494,8 @@ sub UseFastMap
 	#   3. nucl  end   position
 	#   4. exon number
 	#   5. reading frame (0-2)
-	#   6. nucleotide sequence (w/ 17 lowercase buffer nucls on each side)
+	#   6. score (BLOSUM 62, half-bit)
+	#   7. nucleotide sequence (w/ 17 lowercase buffer nucls on each side)
 	#
 	# Moreover, they've been run through Perl's sort, so we should be in
 	# order of starting position in the amino acid sequence.
@@ -645,20 +647,22 @@ sub UseFastMap
 		# exons.
 		#
 		$SeqHitStrs[$i] =
-		    AttemptSpalnFill($HWInputNames[$i],$top_chr_fname,$max_exon_str,
-				     $max_hits_str,\@GapStarts,\@GapEnds,$Seqs[$i],
-				     $SeqNames[$i],$genome,$gene_fname);
+		    AttemptSpalnFill($top_chr_fname,$max_hits_str,\@GapStarts,\@GapEnds,
+				     $Seqs[$i],$SeqNames[$i],$genome,$gene_fname);
 
-		# Alriiiight, let's see if we can make a monster!
-		# We'll either get 0 if we didn't get a full mapping, or else
-		# we'll get the hit string.
-		$SeqHitStrs[$i] =
-		    AttemptChimericHWMap($HWInputNames[$i],$SpliceGraphs[$i],
-					 $top_chr_fname,$max_exon_str,\@GapStarts,
-					 \@GapEnds,$Seqs[$i],$SeqNames[$i],$gene_fname);
-
-		# At this point, we either have a full hit to multiple chromosomes
-		# (TRANS SPLICING!) or we don't, as is the way of logic
+		# At this point, if we still don't have a full mapping, it seems like
+		# something nonstandard could be going on, so we'll quickly check if
+		# the full set of hits (across chromosomes) could be useful...
+		if (!$SeqHitStrs[$i]) {
+		    $SeqHitStrs[$i] =
+			AttemptChimericHWMap($HWInputNames[$i],$SpliceGraphs[$i],
+					     $top_chr_fname,$max_exon_str,\@GapStarts,
+					     \@GapEnds,$Seqs[$i],$SeqNames[$i],
+					     $gene_fname);
+		}
+		
+		# At this point, we either have a full hit or we don't, as is the way
+		# of logic.
 		#
 		# If we don't have a full mapping, we'll do some prep work for BLAT.
 		# In addition to writing out the full sequence, we'll also put out
@@ -1229,9 +1233,7 @@ sub ExtractCanonHWMap
 #
 sub AttemptSpalnFill
 {
-    my $hw_inf_str        = shift;
     my $hw_outfname       = shift;
-    my $max_exon_list_str = shift;
     my $max_hits_list_str = shift;
     my $gap_starts_ref    = shift;
     my $gap_ends_ref      = shift;
@@ -1326,6 +1328,7 @@ sub AttemptSpalnFill
 	push(@NuclSearchRanges,$range_start.'..'.$range_end);
     }
 
+    
     # Heckin' dang! Let's do some SPALNery!
     #
     # Our goal is just to find the specific ranges of unindexed exons in the gap
@@ -1334,13 +1337,14 @@ sub AttemptSpalnFill
     # NOTE that we're fine with not fully filling in every gap -- any gap that we
     # can fill in is a success!
 
+    
     # We're going to need to give Spaln some files, duh!
     my $temp_fname = $gene_fname;
     $temp_fname =~ s/\.fa$/\.spaln\.prot\.fa/;
     my $nucl_fname = $temp_fname;
     $nucl_fname =~ s/\.prot\.fa$/\.nucl\.fa/;
 
-    my @GapExonRanges;
+    my @GapHits;
     for (my $i=0; $i<$num_gaps; $i++) {
 
 	open(my $tempf,'>',$temp_fname);
@@ -1356,11 +1360,177 @@ sub AttemptSpalnFill
 	RunSystemCommand($sfetch_cmd);
 
 	my $spaln_cmd = $spaln." -Q3 -O1 -S3 -ya3 \"$nucl_fname\" \"$temp_fname\"";
+	my $SpalnOut  = OpenSystemCommand($spaln_cmd);
+
+	# Note that while the intuition is that a gap is a single wily
+	# exon, it's possible for there to be multiple exons (enough to
+	# require multiple 'join' lines), so we use an array to capture
+	# each presumptive range
+	my $coordlist_str = '';
+	while (!eof($SpalnOut)) {
+
+	    my $line = <$SpalnOut>;
+	    while ($line =~ /\;C (\S+)/) {
+
+		my $line_coords = $1;
+
+		# We might need to do some cleanup of this line, if it's
+		# the first or last of the list.
+		$line_coords =~ s/^join\(//;
+		$line_coords =~ s/\)$//;
+
+		$coordlist_str = $coordlist_str.$line_coords;
+
+		$line = <$SpalnOut>;
+
+	    }
+
+	    last if ($coordlist_str);
+	    
+	}
+	close($SpalnOut);
+
+	# If we didn't get any hints from Spaln, move onto the next range
+	next if (!$coordlist_str);
+
+	# OOOOhhOhoHohoh! Looks like we might have a coding region!
+	# Time to see if FastMap can help us out with the specifics...
+	my $mapcmd = $srcdir."FastMap2 \"$temp_fname\" 1 \"$nucl_fname\"";
+	foreach my $coord_pair (split(/\,/,$coordlist_str)) {
+	    $coord_pair =~ /^(\d+)\.\.(\d+)$/;
+	    $mapcmd = $mapcmd.' '.$1.' '.$2;
+	}
+	my $hitref  = ParseFastMapOutput($mapcmd,1);
+	my @SeqHits = @{$hitref};
+	next if (!$SeqHits[0]);
+
+	# As above, so now! We have hits stored in an &-separated list, with
+	# individual hit data fields separated by |s, and ordered as such:
+	#
+	#   0. amino start position
+	#   1. amino end   position
+	#   2. nucl  start position
+	#   3. nucl  end   position
+	#   4. exon number
+	#   5. reading frame (0-2)
+	#   6. score (BLOSUM 62, half-bit)
+	#   7. nucleotide sequence (w/ 17 lowercase buffer nucls on each side)
+	#
+	
+	# We'll need to adjust the coordinates for both the aminos and nucleotides.
+	$nucl_range =~ /(\d+)\.\./;
+	my $gap_nucl_start = $1;
+	    
+	foreach my $hit (split(/\&/,$SeqHits[0])) {
+
+	    my @HitData = split(/\|/,$hit);
+
+	    $HitData[0] += $GapStarts[$i] - 1;
+	    $HitData[1] += $GapStarts[$i] - 1;
+
+	    if ($revcomp) {
+		$HitData[2] = $gap_nucl_start - $HitData[2] + 1;
+		$HitData[3] = $gap_nucl_start - $HitData[3] + 1;
+	    } else {
+		$HitData[2] += $gap_nucl_start - 1;
+		$HitData[3] += $gap_nucl_start - 1;
+	    }
+
+	    # Record the updated hit!
+	    $hit = $HitData[0].'|'.$HitData[1].'|'.$HitData[2].'|'.$HitData[3];
+	    $hit = $hit.'|'.$HitData[4].'|'.$HitData[5].'|'.$HitData[6].'|'.$HitData[7];
+	    push(@GapHits,$hit);
+	    
+	}
 	
     }
+
+    # A bit of cleanup and futility checking
+    RunSystemCommand("rm \"$temp_fname\"") if (-e $temp_fname);
+    RunSystemCommand("rm \"$nucl_fname\"") if (-e $nucl_fname);
+    return 0 if (!scalar(@GapHits));
     
-    
-    
+
+    # Uber chill, bro!  Looks like we've got (hopefully) a list of
+    # nucleotide coordinates corresponding to the presumptive exons
+    # that we were able to get out of running SPALN.
+    #
+    # Next up, we'll pull in the original FastMap2 hits and add them
+    # to GapHits.  This will give us a full input to push off to
+    # HitWeaver, which will hopefully give us a full-sequence mapping...
+
+
+    # Open up the original HitWeaver input file
+    my $hw_infname = $hw_outfname;
+    $hw_infname =~ s/out$/in/;
+    my $hwinf = OpenInputFile($hw_infname);
+
+    while (my $line = <$hwinf>) {
+
+	# Is this the start of a new exon?
+	if ($line =~ /Hit Score   \: (\S+)/) {
+
+	    my $hit_score = $1 + 0.0;
+
+	    $line = <$hwinf>; # Amino range
+	    $line =~ /Amino Range \: (\d+)\.\.(\d+)/;
+	    my $hit_amino_start = $1;
+	    my $hit_amino_end   = $2;
+	    
+	    $line = <$hwinf>; # Nucl  range
+	    $line =~ /Nucl Range  \: (\d+)\.\.(\d+)/;
+	    my $hit_nucl_start = $1;
+	    my $hit_nucl_end   = $2;
+	    
+	    $line = <$hwinf>; # Nucleotide Seq.
+	    $line =~ /Nucleotides \: (\S+)/;
+	    my $hit_nucl_str = $1;
+
+	    # We don't store the 3' / 5' SS strength vals -- these will get
+	    # recomputed momentarily.  Also, note that we use '-' for the exon
+	    # and reading frame info.
+	    my $hit = $hit_amino_start.'|'.$hit_amino_end.'|'.$hit_nucl_start;
+	    $hit    = $hit.'|'.$hit_nucl_end.'|-|-|'.$hit_score.'|'.$hit_nucl_str;
+	    push(@GapHits,$hit);
+	    
+	}
+	
+    }
+
+    close($hwinf);
+
+    # Sort those stinky hits!
+    my %StartAminoToHits;
+    foreach my $hit (@GapHits) {
+	$hit =~ /^(\d+)\|/;
+	my $start_amino = $1;
+	if ($StartAminoToHits{$start_amino}) {
+	    $StartAminoToHits{$start_amino} = $StartAminoToHits{$start_amino}.'&'.$hit;
+	} else {
+	    $StartAminoToHits{$start_amino} = $hit;
+	}
+    }
+    my $final_exon_str = '';
+    foreach my $hit_amino_start (sort {$a <=> $b} keys %StartAminoToHits) {
+	foreach my $hit (split(/\&/,$StartAminoToHits{$hit_amino_start})) {
+	    $final_exon_str = $final_exon_str.'&'.$hit;
+	}
+    }
+    $final_exon_str =~ s/^\&//;
+
+    # At this point, we can assume that we'll at least recover the existing output
+    # data (if not grow it), so we clear the prior files (mainly so we can reuse
+    # the file names...)
+    RunSystemCommand("rm \"$hw_infname\"");
+    RunSystemCommand("rm \"$hw_outfname\"");
+
+    # Push off to HitWeaver!
+    ($hw_infname,$hw_outfname) =
+	GenSpliceGraph($final_exon_str,$seq_str,$seq_id,$chr,$revcomp,$gene_fname);
+
+    # Did we get a full mapping?
+    return CheckForFullMaps($hw_outfname,$seq_len);
+
 }
 
 
