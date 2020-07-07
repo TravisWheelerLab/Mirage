@@ -123,7 +123,7 @@ if ($gtfname ne '-') {
 if (scalar(@BlatFileNames)) {
     
     my ($blat_outfname,$blat_nameguide_ref,$blat_genes_ref)
-	= RunBlatOnFileSet(@BlatFileNames,$genome,$blat_naming);
+	= RunBlatOnFileSet(\@BlatFileNames,$genome,$blat_naming);
     my %BlatNameGuide = %{$blat_nameguide_ref};
     my %BlatGenes = %{$blat_genes_ref};
 
@@ -730,9 +730,16 @@ sub UseFastMap
 		    # We'll want to hold onto our maximal hits in a special file
 		    # (or, if not special, at least one that won't be destroyed)
 		    # so let's go ahead and make that.
-		    my $max_hits_fname = $top_chr_fname;
-		    $max_hits_fname =~ s/\.weaver\.out$/\-partial\.weaver\.out/;
-		    RecordMaximalHits($top_chr_fname,$max_hits_fname,$max_hits_str);
+		    #my $max_hits_fname = $top_chr_fname;
+		    #$max_hits_fname =~ s/\.weaver\.out$/\-partial\.weaver\.out/;
+		    #RecordMaximalHits($top_chr_fname,$max_hits_fname,$max_hits_str);
+		    #
+		    # ACTUALLY, let's only hold onto the sequences we'd feed into
+		    # HitWeaver -- this could be optimized, but I'm pretty sure we'd
+		    # see diminishing returns...
+		    my $top_hwinfname = $top_chr_fname;
+		    $top_hwinfname =~ s/\.out$/\.in/;
+		    SaveTopHWInputs($top_hwinfname);
 		    
 		}
 
@@ -788,7 +795,7 @@ sub UseFastMap
     }
 
     # Clear out the files -- if you need to save them, return
-    #return; # DEBUGGING
+    return; # DEBUGGING
     for (my $i=0; $i<$num_seqs; $i++) {
 	foreach my $fname (split(/\;/,$SpliceGraphs[$i])) {
 	    RunSystemCommand("rm \"$fname\"") if ($fname);
@@ -978,30 +985,13 @@ sub GenSpliceGraph
     print $WeaverFile "Seq Len  : $seq_len\n";
     print $WeaverFile "Sequence : $seqstr\n";
 
-
     # For each hit, we'll generate a (naive) representation of the
     # splice signal strength at each position along its associated
     # nucleotide sequence.  The score indicates the strength of
     # the position as the first or last nucleotide of the INTRON.
     foreach my $hit (@Hits) {
-
-	# Extract the nucleotide sequence for this hit
-	my @HitData = split(/\|/,$hit);
-	my $nucl_str = uc($HitData[7]);
-
-	# Compute the strengths of the splice sites
-	my ($three_prime_str,$five_prime_str) = GetSpliceStrengths($nucl_str);
-
-	# Now that we have that additional whiff of data in the mix,
-	# let's get writing!
 	print $WeaverFile "\n";
-	print $WeaverFile "Hit Score   : $HitData[6]\n";
-	print $WeaverFile "Amino Range : $HitData[0]\.\.$HitData[1]\n";
-	print $WeaverFile "Nucl Range  : $HitData[2]\.\.$HitData[3]\n";
-	print $WeaverFile "Nucleotides : $nucl_str\n";
-	print $WeaverFile "3' SS Str.  : $three_prime_str\n";
-	print $WeaverFile "5' SS Str.  : $five_prime_str\n";
-	
+	PrintHitToWeaverInf($hit,$WeaverFile);
     }
 
 
@@ -1033,6 +1023,44 @@ sub GenSpliceGraph
     }
     
 }
+
+
+
+
+
+############################################################
+#
+#
+#
+sub PrintHitToWeaverInf
+{
+    my $hit = shift;
+    my $WeaverFile = shift;
+    
+    # Extract the nucleotide sequence for this hit
+    my @HitData = split(/\|/,$hit);
+    my $nucl_str = uc($HitData[7]);
+    
+    # Compute the strengths of the splice sites
+    my ($three_prime_str,$five_prime_str) = GetSpliceStrengths($nucl_str);
+
+    # One last thing -- make sure we have clear float formatting for the score
+    if ($HitData[6] !~ /\.\d+$/) {
+	if ($HitData[6] !~ /\./) { $HitData[6] = $HitData[6].'.'; }
+	$HitData[6] = $HitData[6].'0';
+    }
+    
+    # Now that we have that additional whiff of data in the mix,
+    # let's get writing!
+    print $WeaverFile "Hit Score   : $HitData[6]\n";
+    print $WeaverFile "Amino Range : $HitData[0]\.\.$HitData[1]\n";
+    print $WeaverFile "Nucl Range  : $HitData[2]\.\.$HitData[3]\n";
+    print $WeaverFile "Nucleotides : $nucl_str\n";
+    print $WeaverFile "3' SS Str.  : $three_prime_str\n";
+    print $WeaverFile "5' SS Str.  : $five_prime_str\n";
+	
+}
+
 
 
 
@@ -1921,6 +1949,11 @@ sub ExtractChimericHWMap
     $hitstr = $hitstr."Chromosome : CHIMERIC!\n";
     $hitstr = $hitstr."Num Exons  : $num_exons\n";
 
+    # Because we use this function when filling gaps with BLAT, it's possible
+    # that we actually don't have a chimeric hit here, so we'll track whether
+    # multiple chromosomes are actually used...
+    my %ChrTracker;
+
     # Walk along, exon-by-exon, building up the official mapping!
     my $exon_num = 0;
     my $scan = 0;
@@ -1936,6 +1969,7 @@ sub ExtractChimericHWMap
 	    $chr =~ s/\-revcomp$/\[revcomp\]/;
 	    $strand = -1;
 	}
+	$ChrTracker{$chr} = 1;
     
 	$hitstr = $hitstr."* Aminos $AminoRanges[$exon_num], $chr:$NuclRanges[$exon_num]\n";
 
@@ -1963,6 +1997,13 @@ sub ExtractChimericHWMap
 	# That's that for that exon (that)
 	$exon_num++;
 
+    }
+
+    # If we only had one chromosome, this ain't no chimera!
+    my @Chrs = keys %ChrTracker;
+    if (scalar(@Chrs) == 1) {
+	my $chr = $Chrs[0];
+	$hitstr =~ s/Chromosome \: CHIMERIC\!/Chromosome \: $chr/;
     }
 
     print "$hitstr\n";
@@ -2118,6 +2159,63 @@ sub GetAminoHitGaps
 
     return(\@GapStarts,\@GapEnds);
     
+}
+
+
+
+
+
+############################################################
+#
+#  Function: SaveTopHWInputs
+#
+sub SaveTopHWInputs
+{
+    my $hw_infname = shift;
+
+    # Get the name without any of the directory path stuff
+    $hw_infname =~ /\/([^\/]+)$/;
+    my $fname = $1;
+
+    # Break the name up into its components
+    $fname =~ /^(\S+)\-(\d+)\.([^\.]+)\.weaver\.in/;
+    my $gene  = $1;
+    my $seqid = $2;
+    my $chr   = $3;
+
+    # We'll change over to the representation I prefer
+    if ($chr =~ /\-revcomp/) {
+	$chr =~ s/\-revcomp//;
+	$chr = $chr.'[revcomp]';
+    }
+
+    # What are we going to call the file we're storing these inputs in?
+    my $save_name = $seq_dirname.$seqid.'.partial.tmp';
+
+    # Open up the save file and write out the name of the canonical chromosome
+    my $SaveFile = OpenOutputFile($save_name);
+    print $SaveFile "Chromosome: $chr\n\n";
+
+    # Next, open up the original file and copy over all of the important stuff
+    my $inf = OpenInputFile($hw_infname);
+    while (my $line = <$inf>) {
+	if ($line =~ /^Hit Score/) {
+	    print $SaveFile "$line"; # Hit Score
+	    $line = <$inf>;
+	    print $SaveFile "$line"; # Amino Range
+	    $line = <$inf>;
+	    print $SaveFile "$line"; # Nucl Range
+	    $line = <$inf>;
+	    print $SaveFile "$line"; # Nucleotides
+	    print $SaveFile "\n";
+	}
+    }
+    close($inf);
+    
+    close($SaveFile);
+
+    # Too easy!
+
 }
 
 
@@ -2462,7 +2560,7 @@ sub GenBlatMaps
 	next if (!$num_full_maps);
 	
 	# WELL WELL WELLY WELL
-	# LET'S GET ADDING
+	# LET'S GET APPENDING
 
 	# We don't know if there's already an output file for this gene family, so
 	# we'll use the appending output option
@@ -2480,6 +2578,521 @@ sub GenBlatMaps
     while (wait() != -1) {}
 
     # I think... we're done?!?!?!?
+    
+}
+
+
+
+
+
+
+############################################################
+#
+#  Function: AttemptBlatFill
+#
+sub AttemptBlatFill
+{
+    my $seqname = shift;
+    my $seq_str = shift;
+    my $blathits_ref = shift;
+
+    my @BlatHits = @{$blathits_ref};
+
+    # Find the file with the stored HitWeaver inputs to this gene's canon chromosome
+    my $hwinfname = $seq_dirname.$seqname.'.partial.tmp';
+
+    # Open it up and pull in the original hits, along with the chromosome info
+    my $OrigHWInf = OpenInputFile($hwinfname);
+
+    my $orig_chr = <$OrigHWInf>;
+    $orig_chr =~ s/\n|\r//g;
+    $orig_chr =~ s/^Chromosome\: //;
+    $orig_chr =~ s/\[revcomp\]/\-revcomp/;
+
+    my @OrigHits;
+    while (my $line = <$OrigHWInf>) {
+
+	if ($line =~ /Hit Score/) {
+
+	    $line =~ /Hit Score   \: (\S+)/;
+	    my $hitscore = $1;
+
+	    $line = <$OrigHWInf>;
+	    $line =~ /Amino Range \: (\d+)\.\.(\d+)/;
+	    my $amino_start = $1;
+	    my $amino_end   = $2;
+	    
+	    $line = <$OrigHWInf>;
+	    $line =~ /Nucl Range  \: (\d+)\.\.(\d+)/;
+	    my $nucl_start = $1;
+	    my $nucl_end   = $2;
+	    
+	    $line = <$OrigHWInf>;
+	    $line =~ /Nucleotides \: (\S+)/;
+	    my $nucl_str = $1;
+
+	    my $hitstr = $amino_start.'|'.$amino_end.'|'.$nucl_start.'|'.$nucl_end;
+	    $hitstr    = $hitstr.'|-|-|'.$hit_score.'|'.$nucl_str;
+	    push(@OrigHits,$hitstr);
+	    
+	}
+	
+    }
+    close($OrigHWInf);
+
+    # We'll clear this file out, since it's not going to be used for anything else
+    RunSystemCommand("rm \"$hwinfname\"");
+
+    # Next up, we'll parse each of the lines from our BLAT hit, and assume that it
+    # nailed the ranges exactly right...
+    my %ExtractedHits;
+    foreach my $blathit (@BlatHits) {
+
+	# Recall that we've added details about the nature of our partial hit to
+	# the front of the hit.
+	$blathit =~ /^\S+\s+(\S+)\s+(.*)$/;
+	my $partial_info = $1;
+	my $blat_outline = $2;
+	my ($blat_chr,$blat_amino_start,$blat_amino_end,$blat_nucl_start,$blat_nucl_end,$blat_score)
+	    = ParseBlatLine($blat_outline);
+	
+	# We'll check to make sure there don't appear to be any gaps
+	if ((1+abs($blat_nucl_end-$blat_nucl_start))/3 != 1+$blat_amino_end-$blat_amino_start) {
+	    next;
+	}
+
+	# We may have a mismatch here or there, but no gaps! Pull in the sequence
+	# (with an additional 17 buffer nucleotides) and we'll be solid!
+	my $sfetch_range;
+	if ($blat_nucl_start > $blat_nucl_end) {
+	    my $sfetch_range_start = $blat_nucl_start + 17;
+	    my $sfetch_range_end   = $blat_nucl_end   - 17;
+	    $sfetch_range = $sfetch_range_start.'..'.$sfetch_range_end;
+	} else {
+	    my $sfetch_range_start = $blat_nucl_start - 17;
+	    my $sfetch_range_end   = $blat_nucl_end   + 17;
+	    $sfetch_range = $sfetch_range_start.'..'.$sfetch_range_end;
+	}
+
+	my $sfetchcmd = $sfetch." -c $sfetch_range \"$genome\" \"$blat_chr\"";
+	my $inf = OpenSystemCommand($sfetchcmd);
+	my $line = <$inf>; # Eat the '>' line
+	my $blat_nucl_str = '';
+	while (my $line = <$inf>) {
+	    $line =~ s/\n|\r//g;
+	    $blat_nucl_str = $blat_nucl_str.uc($line);
+	}
+	close($inf);
+
+	# Now we're past the point of using the chromosome for actual data extraction,
+	# so we can change the name to be more human-informative.
+	# NOTE that we'll be passing this off to ExtractChimericHWMap, which
+	# anticipates '-revcomp' rather than '[revcomp]'
+	$blat_chr = $blat_chr.'-revcomp' if ($blat_nucl_start > $blat_nucl_end);
+
+	my $hitstr = $blat_amino_start.'|'.$blat_amino_end.'|'.$blat_nucl_start;
+	$hitstr    = $hitstr.'|'.$blat_nucl_end.'|-|-|'.$blat_score.'|'.$blat_nucl_str;
+	$hitstr    = $hitstr.'|'.$blat_chr;
+
+	if ($ExtractedHits{$blat_amino_start}) {
+	    $ExtractedHits{$blat_amino_start} = $ExtractedHits{$blat_amino_start}.'&'.$hitstr;
+	} else {
+	    $ExtractedHits{$blat_amino_start} = $hitstr;
+	}
+	
+    }
+
+
+    # We're nearing a position where we can weave some hits!  We'll just need to
+    # merge our original hits and BLAT-based hits so that they're organized by
+    # start amino acid position
+    my @BlatStarts = sort {$1 <=> $2} keys %ExtractedHits;
+    return 0 if (scalar(@BlatStarts) == 0);
+
+    my $orig_exon_pos = 0;
+    my $blat_list_pos = 0;
+    my @ChrsByExon; # Keeping with the nomenclature of 'ExtractChimericHWMap'
+    my @FullHitList;
+    while ($orig_exon_pos < scalar(@OrigHits) && $blat_list_pos < scalar(@BlatStarts)){
+	if ($OrigHits[$orig_exon_pos] <= $BlatStarts[$blat_list_pos]) {
+	    push(@FullHitList,$OrigHits[$orig_exon_pos]);
+	    push(@ChrsByExon,$orig_chr);
+	    $orig_exon_pos++;
+	} else {
+	    foreach my $blathit (split(/\&/,$ExtractedHits{$BlatStarts[$blat_list_pos]})) {
+		# Pull this hit's chromosome
+		$blathit =~ /^(\S+)\|([^\|]+)$/;
+		my $blat_data = $1;
+		my $blat_chr  = $2;
+		push(@FullHitList,$blat_data);
+		push(@ChrsByExon,$blat_chr);
+	    }
+	    $blat_list_pos++;
+	}
+    }
+    while ($orig_exon_pos < scalar(@OrigHits)) {
+	push(@FullHitList,$OrigHits[$orig_exon_pos]);
+	push(@ChrsByExon,$orig_chr);
+	$orig_exon_pos++;
+    }
+    while ($blat_list_pos < scalar(@BlatStarts)){
+	foreach my $blathit (split(/\&/,$ExtractedHits{$BlatStarts[$blat_list_pos]})) {
+	    # Pull this hit's chromosome
+	    $blathit =~ /^(\S+)\|([^\|]+)$/;
+	    my $blat_data = $1;
+	    my $blat_chr  = $2;
+	    push(@FullHitList,$blat_data);
+	    push(@ChrsByExon,$blat_chr);
+	}
+	$blat_list_pos++;
+    }
+
+    # Now we can convert our hits into HitWeaver input! We'll reuse the filename
+    # that stored the original hits.
+    my $num_exons  = scalar(@FullHitList);
+    my $seq_len    = length($seq_str);
+    my $WeaverFile = OpenOutputFile($hwinfname);
+    print $WeaverFile "Num Hits : $num_exons\n";
+    print $WeaverFile "Seq Len  : $seq_len\n";
+    print $WeaverFile "Sequence : $seq_str\n";
+    foreach my $hit (@FullHitList) {
+	print $WeaverFile "\n";
+	PrintHitToWeaverInf($hit,$WeaverFile);
+    }
+    close($WeaverFile);
+
+    # Come up with a hip name for the output file
+    my $hwoutfname = $hwinfname;
+    $hwoutfname =~ s/\.tmp$/\.out/;
+
+    # NOTE: Even though it's possible that our BLAT results will only have found
+    #       hits to a single chromosome, we'll use the chimeric search to cover all
+    #       possible bizzare splicing patterns.
+    my $weaver_cmd = $srcdir."HitWeaver --allow-inconsistency \"$hwinfname\" > \"$hwoutfname\"";
+    RunSystemCommand($weaver_cmd);
+
+    # Begone, input file!
+    RunSystemCommand("rm \"$hwinfname\"");
+
+    # Did we get anything at all?
+    if (!(-s $hwoutfname)) {
+	RunSystemCommand("rm \"$hwoutfname\"") if (-e $hwoutfname);
+	return 0;
+    }
+
+    # You know the way this goes
+    my $full_map = CheckForFullMaps($hwoutfname,$seq_len);
+    if ($full_map) {
+	$full_map = ExtractChimericHWMap($hwoutfname,\@ChrsByExon,$seq_len,$seqname);
+	# Credit to BLAT!
+	$full_map =~ s/FastMap2/BLAT\+FastMap2/;
+    }
+    
+    # That's all!
+    RunSystemCommand("rm \"$hwoutfname\"");
+    return $full_map;
+    
+}
+
+
+
+
+
+
+############################################################
+#
+#  Function: BlatToSpalnSearch
+#
+sub BlatToSpalnSearch
+{
+    my $seqname = shift;
+    my $seq_str = shift;
+    my $blathits_ref = shift;
+
+    # We'll start off by building up a hash of hits, broken apart by chromosome
+    my @BlatHits = @{$blathits_ref};
+    my %BlatHitsByChr;
+    for (my $i=0; $i<scalar(@BlatHits); $i++) {
+
+	# We'll end up clearing out the first pieces of data in the blat hits,
+	# since we know there aren't partial hits in this list.
+	$BlatHits[$i] =~ /^\S\s+\-\s+(.*)$/;
+	my $blat_outline = $1;
+	my ($blat_chr,$blat_amino_start,$blat_amino_end,$blat_nucl_start,$blat_nucl_end,$blat_score)
+	    = ParseBlatLine($blat_outline);
+
+	# We'll want to know if this is the reverse complement
+	my $revcomp = 0;
+	$revcomp = 1 if ($blat_nucl_start > $blat_nucl_end);
+
+	# Hash it!
+	my $chr = $blat_chr.'-'.$revcomp;
+	my $hit = $blat_amino_start.'|'.$blat_amino_end.'|'.$blat_nucl_start;
+	$hit    = $hit.'|'.$blat_nucl_end.'|'.$blat_score;
+	if ($BlatHitsByChr{$chr}) {
+	    $BlatHitsByChr{$chr} = $BlatHitsByChr{$chr}.'&'.$hit;
+	} else {
+	    $BlatHitsByChr{$chr} = $hit;
+	}
+	
+    }
+
+    # Now we can go through each of the chromosomes and see how high-quality of a
+    # mapping we can get out of Spaln
+    foreach my $blat_chr (keys %BlatHitsByChr) {
+
+	$blat_chr =~ /^(\S+)\-(\d)$/;
+	my $chr = $1;
+	my $revcomp = $2;
+
+	my @HitList = split(/\&/,$BlatHitsByChr{$blat_chr});
+	SpalnSearchChr($seqname,$seq_str,$chr,$revcomp,\@HitList);
+
+    }
+    
+}
+
+
+
+
+
+
+
+
+############################################################
+#
+#  Function: SpalnSearchChr
+#
+sub SpalnSearchChr
+{
+    
+    my $seqname = shift;
+    my $seq_str = shift;
+    my $chr     = shift;
+    my $revcomp = shift;
+    my $blathits_ref = shift;
+
+    my @BlatHits = @{$blathits_ref};
+
+    # TO DO: Describe what I'm doing and why I'm doing it, because this may look
+    #        unnecessarily complicated...
+
+    # Start off by computing the per-position BLAT coverage
+    my @Seq = split(//,$seq_str);
+    my $seq_len = length($seq_str);
+    my @BlatCoverage;
+    my @CoverageID; # Who's claiming this sequence segment?
+    for (my $i=0; $i<$seq_len; $i++) {
+	$BlatCoverage[$i] = 0;
+	$CoverageID[$i]   = -1;
+    }
+
+    for (my $i=0; $i<scalar(@BlatHits); $i++) {
+	my @HitData = split(/\|/,$BlatHits[$i]);
+	for (my $j=$HitData[0]-1; $j<$HitData[1]; $j++) {
+	    $BlatCoverage[$j]++;
+	    $CoverageID[$j]=$i;
+	}
+    }
+
+    # We'll mark gap-adjacent positions and overlap positions in a way that provides
+    # a clean ontology.
+    my @GapAdjacency;
+    my $num_gaps = 0;
+    for (my $i=0; $i<$seq_len; $i++) {
+
+	# Are we preceding a gap?
+	if ($BlatCoverage[$i] == 0) {
+
+	    # We're seeing a new gap!
+	    $num_gaps++;
+
+	    # Hey! You were adjacent the whole time!
+	    $GapAdjacency[$i-1] = $num_gaps if ($i); 
+
+	    # Who else is adjacent to this gap run? (or a member)
+	    $GapAdjacency[$i++] = $num_gaps;
+	    while ($i<$seq_len && $BlatCoverage[$i]==0) {
+		$GapAdjacency[$i++] = $num_gaps;
+	    }
+	    
+	    # I see you being adjacent over there!
+	    $GapAdjacency[$i] = $num_gaps if ($i<$seq_len);
+	    
+	} else {
+	    $GapAdjacency[$i] = 0;
+	}
+	
+    }
+
+    my @Overlaps;
+    my $num_overlaps = 0;
+    for (my $i=0; $i<$seq_len; $i++) {
+
+	# Are we in an overlapping region?
+	if ($BlatCoverage[$i] > 1) {
+	    # New overlap!
+	    $num_overlaps++;
+	    while ($i<$seq_len && $BlatCoverage[$i] > 1) {
+		$Overlaps[$i++] = $num_overlaps;
+	    }
+	}
+
+	# Note that we'll have overstepped by one if we were just in an overlap
+	# region, so we don't use an 'else'
+	$Overlaps[$i] = 0;
+	    
+    }
+
+    # Because we could have gaps and overlaps right next to one another,
+    # we'll do a bit of final ontologizing by simply making groups where
+    # there are runs of unclear coverage.
+    my @HitGrouping;
+    my @HitGroupStarts; # inclusive
+    my @HitGroupEnds;   # exclusive
+    my $num_hit_groups = 0;
+    for (my $i=0; $i<$seq_len; $i++) {
+	if ($GapAdjacency[$i] || $Overlaps[$i]) {
+	    $num_hit_groups++;
+	    push(@HitGroupStarts,$i);
+	    while ($i<$seq_len && ($GapAdjacency[$i] || $Overlaps[$i])) {
+		$HitGrouping[$i++] = $num_hit_groups;
+	    }
+	    push(@HitGroupEnds,$i);
+	}
+	$HitGrouping[$i] = 0;
+    }
+
+    # Next up, we'll figure out the full span of chromosomal sequence that
+    # is implicated in groups of hits.  If the range is large (>5Mb) then
+    # do some work to split them into more manageable sequence chunks.
+    my @GroupNuclRanges;
+    for (my $i=0; $i<$num_hit_groups; $i++) {
+
+	my $group_start = $HitGroupStarts[$i];
+	my $group_end   = $HitGroupEnds[$i];
+
+	# Which blat hits are implicated in this group?
+	# NOTE that even if there's a gap starting or ending the sequence, we're
+	# guaranteed to touch at least one hit, so we don't need to worry about
+	# getting too funky.
+	my @GroupedHits;
+	my $group_min_nucl = $ChrSizes{$chr};
+	my $group_max_nucl = 0;
+	for (my $j=0; $j<scalar(@BlatHits); $j++) {
+	    my @HitData = split(/\|/,$BlatHits[$j]);
+	    # Check the first and final positions to see if we're in this group
+	    if ($HitGrouping[$HitData[0]-1]==$i || $HitGrouping[$HitData[1]-1]==$i) {
+		push(@GroupedHits,$j);
+		if ($revcomp) {
+		    $group_min_nucl = Min($HitGrouping[$HitData[3]],$group_min_nucl);
+		    $group_max_nucl = Max($HitGrouping[$HitData[2]],$group_max_nucl);
+		} else {
+		    $group_min_nucl = Min($HitGrouping[$HitData[2]],$group_min_nucl);
+		    $group_max_nucl = Max($HitGrouping[$HitData[3]],$group_max_nucl);
+		}
+	    }
+	}
+
+	# Is this a manageable range? (5Mb)
+	if ($group_max_nucl - $group_min_nucl < 5000000) {
+	    # Nice!
+	    if ($revcomp) {
+		$GroupNuclRanges[$i] = $group_max_nucl.'..'.$group_min_nucl;
+	    } else {
+		$GroupNuclRanges[$i] = $group_min_nucl.'..'.$group_max_nucl;
+	    }
+	    next;
+	}
+
+	# HMMMMMMMM
+
+	# Now we're going to try to divide this big range into pieces that sum
+	# to 5Mb but don't extend excessively into garbo land...
+	
+	# TO DO (I want to move forward to get a sense for how things come together)
+	
+    }
+
+
+    # WOOF, this is some madness, eh?
+    #
+    # Next up, we'll run through the whole sequence and build a string representing
+    # the collection of ranges that provide coverage suggested-ish by BLAT
+    #
+    # NOTE that these are still going to be tight-ish ranges -- we'll worry about
+    # extending out a bit in the next step...
+    
+    my $range_set_str = '';
+    for (my $i=0; $i<$seq_len; $i++) { # This might be better as a 'while' loop... 
+
+	# Are we pulling from a group?
+	if ($HitGrouping[$i]) {
+
+	    # Since we already did all that tough work, this is pretty light lifting!
+	    $range_set_str = $range_set_str.','.$GroupNuclRanges[$HitGrouping[$i]-1];
+	    $i = $HitGroupEnds[$HitGrouping[$i]-1]-1;
+
+	} else {
+
+	    # Find the hit who covers this position.  It should be an amino start,
+	    # because of logic.
+	    #
+	    # Sadly, these aren't sorted, so for now I'm just going to risk a full
+	    # scan (it's SCANdalous).
+	    #
+	    # (SCANdalous!)
+	    #
+	    my $j=0;
+	    while ($j<scalar(@BlatHits)) {
+		my @HitData = split(/\|/,$BlatHits[$j]);
+		if ($HitData[0] == $i) {
+		    $range_set_str = $range_set_str.','.$HitData[2].'..'.$HitData[3];
+		    $i = $HitData[1]-1;
+		    last;
+		}
+	    }
+	    
+	}
+	
+    }
+
+    # Don't need a leading comma
+    $range_set_str =~ s/^\,//;
+
+    # GOOD STUFF!
+    #
+    # Now we just need to convert our tight bounds into slightly looser bounds,
+    # pull in some sequence, 
+    
+}
+
+
+
+
+
+
+
+
+############################################################
+#
+#  Function: ParseBlatLine
+#
+sub ParseBlatLine
+{
+    my $line = shift;
+    my @Data = split(/\s+/,$line);
+
+    # NOTE: This assumes that we've pulled the sequence name off the front!
+    my $chr         = $Data[0];
+    # 1,2,3,4 aren't useful for me
+    my $amino_start = $Data[5];
+    my $amino_end   = $Data[6];
+    my $nucl_start  = $Data[7];
+    my $nucl_end    = $Data[8];
+    my $score       = $Data[10];
+
+    return($chr,$amino_start,$amino_end,$nucl_start,$nucl_end,$score);
     
 }
 
