@@ -2837,6 +2837,18 @@ sub BlatToSpalnSearch
 	
     }
 
+    # We'll go ahead and make a file with the protein sequence
+    my $prot_fname = $seq_dirname.$seqname.'-'.$chr.'.blat2spaln.prot.in';
+    my $ProtFile = OpenOutputFile($prot_fname);
+    print $ProtFile ">$seqname\n";
+    my @Seq = split(//,$seq_str);
+    for (my $i=0; $i<scalar(@Seq); $i++) {
+	print $ProtFile "$Seq[$i]";
+	print $ProtFile "\n" if (($i+1) % 60 == 0);
+    }
+    print $ProtFile "\n";
+    close($ProtFile);
+
     # Now we can go through each of the chromosomes and see how high-quality of a
     # mapping we can get out of Spaln
     foreach my $blat_chr (keys %BlatHitsByChr) {
@@ -2846,9 +2858,12 @@ sub BlatToSpalnSearch
 	my $revcomp = $2;
 
 	my @HitList = split(/\&/,$BlatHitsByChr{$blat_chr});
-	SpalnSearchChr($seqname,$seq_str,$chr,$revcomp,\@HitList);
+	SpalnSearchChr($seqname,\@Seq,$chr,$revcomp,\@HitList,$prot_fname);
 
     }
+
+    # No more searching for you, mister/miss!
+    RunSystemCommand("rm \"$prot_fname\"");
     
 }
 
@@ -2867,19 +2882,21 @@ sub SpalnSearchChr
 {
     
     my $seqname = shift;
-    my $seq_str = shift;
+    my $seq_ref = shift;
     my $chr     = shift;
     my $revcomp = shift;
     my $blathits_ref = shift;
+    my $prot_fname = shift;
 
+    my @Seq = @{$seq_ref};
     my @BlatHits = @{$blathits_ref};
 
-    # TO DO: Describe what I'm doing and why I'm doing it, because this may look
-    #        unnecessarily complicated...
+    # NOTE: This is somewhat overcomplicated-looking, but I think it's the right
+    #       approach to pulling in nucleotides for our Spaln search.  Basically,
+    #       we try to get 
 
     # Start off by computing the per-position BLAT coverage
-    my @Seq = split(//,$seq_str);
-    my $seq_len = length($seq_str);
+    my $seq_len = scalar(@Seq);
     my @BlatCoverage;
     my @CoverageID; # Who's claiming this sequence segment?
     for (my $i=0; $i<$seq_len; $i++) {
@@ -2977,41 +2994,25 @@ sub SpalnSearchChr
 	# guaranteed to touch at least one hit, so we don't need to worry about
 	# getting too funky.
 	my @GroupedHits;
-	my $group_min_nucl = $ChrSizes{$chr};
-	my $group_max_nucl = 0;
+	my @GroupNuclStarts;
+	my @GroupNuclEnds;
 	for (my $j=0; $j<scalar(@BlatHits); $j++) {
 	    my @HitData = split(/\|/,$BlatHits[$j]);
 	    # Check the first and final positions to see if we're in this group
 	    if ($HitGrouping[$HitData[0]-1]==$i || $HitGrouping[$HitData[1]-1]==$i) {
 		push(@GroupedHits,$j);
-		if ($revcomp) {
-		    $group_min_nucl = Min($HitGrouping[$HitData[3]],$group_min_nucl);
-		    $group_max_nucl = Max($HitGrouping[$HitData[2]],$group_max_nucl);
-		} else {
-		    $group_min_nucl = Min($HitGrouping[$HitData[2]],$group_min_nucl);
-		    $group_max_nucl = Max($HitGrouping[$HitData[3]],$group_max_nucl);
-		}
+		push(@GroupNuclStarts,$HitData[2]);
+		push(@GroupNuclEnds,$HitData[3]);
 	    }
 	}
-
-	# Is this a manageable range? (5Mb)
-	if ($group_max_nucl - $group_min_nucl < 5000000) {
-	    # Nice!
-	    if ($revcomp) {
-		$GroupNuclRanges[$i] = $group_max_nucl.'..'.$group_min_nucl;
-	    } else {
-		$GroupNuclRanges[$i] = $group_min_nucl.'..'.$group_max_nucl;
-	    }
-	    next;
-	}
-
-	# HMMMMMMMM
-
-	# Now we're going to try to divide this big range into pieces that sum
-	# to 5Mb but don't extend excessively into garbo land...
 	
-	# TO DO (I want to move forward to get a sense for how things come together)
-	
+	# What we're going to end up doing here is a series of clusterings until
+	# the span of each set of grouped hits is less than a preset distance
+	my $max_span = 5000000; # 5 Mb	
+	my $group_ranges_str
+	    = GroupRanges(\@GroupedNuclStarts,\@GroupedNuclEnds,$max_span,$revcomp);
+	push(@GroupNuclRanges,$group_ranges_str); # These come out pre-sorted!
+
     }
 
 
@@ -3060,13 +3061,280 @@ sub SpalnSearchChr
     # Don't need a leading comma
     $range_set_str =~ s/^\,//;
 
-    # GOOD STUFF!
+    # Next up, we'll convert our set of tight-ish ranges into slightly wider ranges,
+    # especially on the ends if they're gapped...
+    my @RangeStarts;
+    my @RangeEnds;
+    foreach my $range (split(/\,/,$range_set_str)) {
+	$range =~ /^(\d+)\.\.(\d+)$/;
+	push(@RangeStarts,$1);
+	push(@RangeEnds,$2);
+    }
+    my $num_ranges = scalar(@RangeStarts);
+
+    # First off, if either end is gapped, pull in 1Mb
+    # We'll worry about exceeding the chromosome bounds LATER
+    if ($BlatCoverage[0] == 0) {
+	if ($revcomp) { $RangeStarts[0] += 1000000; }
+	else          { $RangeStarts[0] -= 1000000; }
+    }
+    if ($BlatCoverage[$seq_len-1] == 0) {
+	if ($revcomp) { $RangeEnds[$num_ranges-1] -= 1000000; }
+	else          { $RangeEnds[$num_ranges-1] += 1000000; }
+    }
+
+    # Nice!  Now we'll just give each bound an extra 10Kb
+    if ($revcomp) {
+	for (my $i=0; $i<$num_ranges; $i++) {
+	    $RangeStarts[$i] += 10000;
+	    $RangeEnds[$i]   -= 10000;
+	}
+    } else {
+	for (my $i=0; $i<$num_ranges; $i++) {
+	    $RangeStarts[$i] -= 10000;
+	    $RangeEnds[$i]   += 10000;
+	}
+    }
+
+    # Our last little bit of prep work is to merge any ranges that overlap
+    # (and then make sure we're in the safety zone)
+    if ($revcomp) {
+
+	my @FinalRangeStarts;
+	my @FinalRangeEnds;
+
+	push(@FinalRangeStarts,$RangeStarts[0]);
+	push(@FinalRangeEnds,$RangeEnds[0]);
+	my $final_num_ranges = 1;
+	for (my $i=1; $i<$num_ranges; $i++) {
+	    if ($RangeStarts[$i] > $FinalRangeEnds[$final_num_ranges-1]) {
+		$FinalRangeEnds[$final_num_ranges-1] = $RangeEnds[$i];
+	    } else {
+		push(@FinalRangeStarts,$RangeStarts[$i]);
+		push(@FinalRangeEnds,$RangeEnds[$i]);
+		$final_num_ranges++;
+	    }
+	}
+
+	for (my $i=0; $i<$final_num_ranges; $i++) {
+	    $RangeStarts[$i] = $FinalRangeStarts[$i];
+	    $RangeEnds[$i]   = $FinalRangeEnds[$i];
+	}
+	$num_ranges = $final_num_ranges;
+
+	$RangeStarts[0] = Min($ChrSizes{$chr},$RangeStarts[0]);
+	$RangeEnds[1]   = Max(1,$RangeEnds[0]);
+	
+    } else {
+
+	my @FinalRangeStarts;
+	my @FinalRangeEnds;
+
+	push(@FinalRangeStarts,$RangeStarts[0]);
+	push(@FinalRangeEnds,$RangeEnds[0]);
+
+	my $final_num_ranges = 1;
+	for (my $i=1; $i<$num_ranges; $i++) {
+	    if ($RangeStarts[$i] < $FinalRangeEnds[$final_num_ranges-1]) {
+		$FinalRangeEnds[$final_num_ranges-1] = $RangeEnds[$i];
+	    } else {
+		push(@FinalRangeStarts,$RangeStarts[$i]);
+		push(@FinalRangeEnds,$RangeEnds[$i]);
+		$final_num_ranges++;
+	    }
+	}
+
+	for (my $i=0; $i<$final_num_ranges; $i++) {
+	    $RangeStarts[$i] = $FinalRangeStarts[$i];
+	    $RangeEnds[$i]   = $FinalRangeEnds[$i];
+	}
+	$num_ranges = $final_num_ranges;
+
+	$RangeStarts[0] = Max(1,$RangeStarts[0]);
+	$RangeEnds[$num_ranges] = Min($ChrSizes{$chr},$RangeEnds[$num_ranges]);
+	
+    }
+
+    # We'll need to track where jump positions are in our Frankensteinian seq.
+    # The format will be 'reported-pos':'actual-nucl-pos' so we scan until
+    # 'reported-pos' is higher than the index we have, and then add the difference
+    # to 'actual-nucl-pos'
     #
-    # Now we just need to convert our tight bounds into slightly looser bounds,
-    # pull in some sequence, 
+    # Also, note that if there's some out-of-order splicery indicated, this will
+    # still take us to the right place!
+    #
+    my @JumpList;
+    my $reported_pos = 1;
+    for (my $i=0; $i<$num_ranges; $i++) {
+	my $jump_info = $reported_pos.':'.$RangeStarts[$i];
+	push(@JumpList,$jump_info);
+	$reported_pos += abs($RangeEnds[$i]-$RangeStarts[$i])+1;
+    }
+
+    
+
+    # Wowee!  Time to pull in a bunch of nucleotides, concatenate them into one
+    # great big sequence, and do a Spaln search!
+    my $nucl_fname = $prot_fname;
+    $nucl_fname =~ s/\.prot\.in/\.nucl\.in/;
+    my $NuclFile = OpenOutputFile($nucl_fname);
+
+    # Just for fun, let's know how wide an area we're (patchily) covering
+    my $span = $RangeStarts[0].'..'.$RangeEnds[$num_ranges-1];
+    print $NuclFile ">$seqname\:$chr\:$span\n";
+
+    for (my $i=0; $i<$num_ranges; $i++) {
+
+	my $range = $RangeStarts[$i].'..'.$RangeEnds[$i];
+	my $sfetchcmd = $sfetch." -c $range \"$genome\" \"$chr\"";
+	my $inf = OpenSystemCommand($sfetchcmd);
+	my $line = <$inf>; # eat header
+	while ($line = <$inf>) {
+	    $line =~ s/\n|\r//g;
+	    next if (!$line);
+	    print $NuclFile "$line\n";
+	}
+	close($inf);
+	
+    }
+
+    # Ready, cap'n!
+    close($NuclFile);
+
+    # Assemble the Spaln command!
+    my $spaln_fname = $prot_fname;
+    $spaln_fname =~ s/\.prot\.in/\.spaln\.out/;
+    my $spaln_cmd = $spaln." -Q3 -O1 -S3 -ya3 \"$nucl_fname\" \"$prot_fname\" 1>\"$spaln_fname\" 2>/dev/null";
+    RunSystemCommand($spaln_cmd);
+
+    # UGH, I wish I could quit you, Spaln parsing
+    
+    
+    # Get that nucleotide file OUTTA HERE!
+    RunSystemCommand("rm \"$nucl_fname\"");
+
+    # Get that spaln output file THE HECK OUTTA HERE!
+    RunSystemCommand("rm \"$spaln_fname\"") if (-e $spaln_fname);
     
 }
 
+
+
+
+
+
+
+
+############################################################
+#
+#  Function: GroupRanges
+#
+sub GroupRanges
+{
+    my $starts_ref = shift;
+    my $ends_ref   = shift;
+    my $max_span   = shift;
+    my $revcomp    = shift;
+
+    my @Starts     = @{$starts_ref};
+    my @Ends       = @{$ends_ref};
+    my $num_ranges = scalar(@Starts);
+
+    # Special case: single range gets returned
+    if ($num_ranges == 1) {
+	return $Starts[0].'..'.$Ends[0];
+    }
+
+    # Find (1.) the total span of the range, and (2.) the pair of sequences
+    # with the greatest distance between them.
+    my $span = 0;
+    my $left_leader  = -1;
+    my $right_leader = -1;
+    my $top_gap_size = 0;
+    for (my $i=0; $i<$num_ranges; $i++) {
+	for (my $j=0; $j<$num_ranges; $j++) {
+	    if (( $revcomp && $Ends[$i] > $Starts[$j]) ||
+		(!$revcomp && $Ends[$i] < $Starts[$j])) {
+
+		$span = Max($span,abs($Starts[$i]-$Ends[$j]));
+		my $gap_size = abs($Ends[$i]-$Starts[$j]);
+		if ($top_gap_size < $gap_size) {
+		    $top_gap_size = $gap_size;
+		    $left_leader  = $i;
+		    $right_leader = $j;
+		}
+
+	    }
+	}
+    }
+
+    # There's a *very* special case where overlap would lead us to not pick up
+    # any hits, in which case we just figure out what the min and max are, and
+    # return those.
+    if ($top_gap_size == 0) {
+	my $min = 2 ** 35;
+	my $max = 0;
+	for (my $i=0; $i<$num_ranges; $i++) {
+	    $min = Min($min,$Starts[$i]);
+	    $max = Max($max,$Ends[$i]);
+	}
+	if ($revcomp) { return $max.'..'.$min; }
+	else          { return $min.'..'.$max; }
+    }
+
+    # If the span is below our maximum, we're good!
+    if ($span < $max_span) {
+	return $Starts[$left_leader].'..'.$Ends[$right_leader];
+    }
+
+    # Nope, recursion time!  Group sequences according to who they're closest to.
+    # Note that this is a little fast 'n' loose, but given the span is as large as
+    # it is, we aren't worried about (what I assume would be) minor roughness
+    my @LeftStarts;
+    my @LeftEnds;
+    my @RightStarts;
+    my @RightEnds;
+    for (my $i=0; $i<$num_ranges; $i++) {
+	my $left_dist = abs($Starts[$i] - $Starts[$left_leader]);
+	my $right_dist = abs($Starts[$i] - $Starts[$right_leader]);
+	if ($left_dist < $right_dist) {
+	    push(@LeftStarts,$Starts[$i]);
+	    push(@LeftEnds,$Ends[$i]);
+	} else {
+	    push(@RightStarts,$Starts[$i]);
+	    push(@RightEnds,$Ends[$i]);
+	}
+    }
+
+    # RECURSE
+    my $left_ranges_str  = GroupRanges(\@LeftStarts,\@LeftEnds,$max_span,$revcomp);
+    my $right_ranges_str = GroupRanges(\@RightStarts,\@RightEnds,$max_span,$revcomp);
+
+    # The very last thing we'll do is give a bit of an extended buffer to each side,
+    # by employing the *worst* variable names you've ever seen!
+    $left_ranges_str =~ /^(\S+)\.\.(\d+)$/;
+    my $left_left  = $1;
+    my $left_right = $2;
+    $right_ranges_str =~ /^(\d+)\.\.(\S+)$/;
+    my $right_left  = $1;
+    my $right_right = $2;
+
+    # Given that the current max span is 5Mb, I'll allow 500Kb -- and pretend this is
+    # more generally a reasonable computation.
+    if ($revcomp) {
+	$left_right -= int($max_span/10);
+	$right_left += int($max_span/10);
+    } else {
+	$left_right += int($max_span/10);
+	$right_left -= int($max_span/10);
+    }
+    $left_ranges_str  = $left_left.'..'.$left_right;
+    $right_ranges_str = $right_left.'..'.$right_right;
+
+    # And away you go!
+    return $left_ranges_str.','.$right_ranges_str;
+    
+}
 
 
 
