@@ -2615,7 +2615,7 @@ sub AttemptBlatFill
 	if ($line =~ /Hit Score/) {
 
 	    $line =~ /Hit Score   \: (\S+)/;
-	    my $hitscore = $1;
+	    my $hit_score = $1;
 
 	    $line = <$OrigHWInf>;
 	    $line =~ /Amino Range \: (\d+)\.\.(\d+)/;
@@ -2838,7 +2838,7 @@ sub BlatToSpalnSearch
     }
 
     # We'll go ahead and make a file with the protein sequence
-    my $prot_fname = $seq_dirname.$seqname.'-'.$chr.'.blat2spaln.prot.in';
+    my $prot_fname = $seq_dirname.$seqname.'.blat2spaln.prot.in';
     my $ProtFile = OpenOutputFile($prot_fname);
     print $ProtFile ">$seqname\n";
     my @Seq = split(//,$seq_str);
@@ -2851,6 +2851,8 @@ sub BlatToSpalnSearch
 
     # Now we can go through each of the chromosomes and see how high-quality of a
     # mapping we can get out of Spaln
+    my @HitsByChr;
+    my @ChrList;
     foreach my $blat_chr (keys %BlatHitsByChr) {
 
 	$blat_chr =~ /^(\S+)\-(\d)$/;
@@ -2858,12 +2860,27 @@ sub BlatToSpalnSearch
 	my $revcomp = $2;
 
 	my @HitList = split(/\&/,$BlatHitsByChr{$blat_chr});
-	SpalnSearchChr($seqname,\@Seq,$chr,$revcomp,\@HitList,$prot_fname);
+	my $hitstr = SpalnSearchChr($seqname,\@Seq,$chr,$revcomp,\@HitList,$prot_fname);
+
+	# Did we get a little ol' snack?
+	next if (!$hitstr);
+
+	# Note that these hits are fully formatted (so they all start with the whole
+	# "sequence id," "map method," "chromosome," and "num exons" dump).
+	push(@HitsByChr,$hitstr);
+	push(@ChrList,$blat_chr);
 
     }
 
     # No more searching for you, mister/miss!
     RunSystemCommand("rm \"$prot_fname\"");
+
+    
+    # RADICAL!!!
+
+    # Now, we'll take all of the per-chromosome hits and see if we can get a nice
+    # clean full-sequence mapping through some combination (or, preferably, one)
+    # of the hit sets.
     
 }
 
@@ -3010,7 +3027,7 @@ sub SpalnSearchChr
 	# the span of each set of grouped hits is less than a preset distance
 	my $max_span = 5000000; # 5 Mb	
 	my $group_ranges_str
-	    = GroupRanges(\@GroupedNuclStarts,\@GroupedNuclEnds,$max_span,$revcomp);
+	    = GroupRanges(\@GroupNuclStarts,\@GroupNuclEnds,$max_span,$revcomp);
 	push(@GroupNuclRanges,$group_ranges_str); # These come out pre-sorted!
 
     }
@@ -3211,17 +3228,66 @@ sub SpalnSearchChr
     RunSystemCommand("rm \"$nucl_fname\"");
 
     # Don't tell me we did all that for NOTHING?!
-    return if (!(-e $spaln_fname));
+    return 0 if (!(-e $spaln_fname));
     
     # UGH, I wish I could quit you, Spaln parsing
     # Note that we'll open the file here, just so it's easier to return
     # if we run into parsing errors.
     my $SpalnFile = OpenInputFile($spaln_fname);
-    ParseSpalnOutput($SpalnFile,\@Seq);
+    my ($spaln_nucl_ranges_ref,$spaln_amino_ranges_ref,$spaln_centers_ref,$spaln_pct_id)
+	= ParseSpalnOutput($SpalnFile,\@Seq);
     close($SpalnFile);
 
     # Get that spaln output file THE HECK OUTTA HERE!
     RunSystemCommand("rm \"$spaln_fname\"") if (-e $spaln_fname);
+
+    # If we didn't have a good return on investment, we're done-zo!
+    return 0 if ($spaln_pct_id < 90.0);
+
+    # All of our nucleotide coordinates need to be adjusted...
+    my @UnadjNuclRanges = @{$spaln_nucl_ranges_ref};
+    my @UnadjCenters = @{$spaln_centers_ref};
+
+    my @NuclRanges;
+    my @AminoRanges = @{$spaln_amino_ranges_ref};
+    my @CodonCenters;
+    my $num_exons = 0;
+    while ($num_exons < scalar(@UnadjNuclRanges)) {
+
+	$UnadjNuclRanges[$num_exons] =~ /^(\d+)\.\.(\d+)$/;
+	my $range_start = $1;
+	my $range_end   = $2;
+
+	$range_start = AdjustNuclCoord($range_start,\@JumpList,$revcomp);
+	$range_end   = AdjustNuclCoord($range_end,\@JumpList,$revcomp);
+	$NuclRanges[$num_exons] = $range_start.'..'.$range_end;
+
+	my $codon_center_str = '';
+	foreach my $coord (split(/\,/,$UnadjCenters[$num_exons])) {
+	    my $codon_center = AdjustNuclCoord($coord,\@JumpList,$revcomp);
+	    $codon_center_str = $codon_center_str.','.$codon_center;
+	}
+	$codon_center_str =~ s/^\,//;
+	$CodonCenters[$num_exons] = $codon_center_str;
+
+	$num_exons++;
+    }
+
+    # Finally, let your hair down!
+    $chr = $chr.'[revcomp]' if ($revcomp);
+
+    # Build up the hit string for this chromosome
+    my $hitstr = "Sequence ID: $seqname\n";
+    $hitstr    = $hitstr."Map Method : BLAT+Spaln\n";
+    $hitstr    = $hitstr."Chromosome : $chr\n";
+    $hitstr    = $hitstr."Num Exons  : $num_exons\n";
+    for (my $i=0; $i<$num_exons; $i++) {
+	$hitstr = $hitstr."* Aminos $AminoRanges[$i], $chr:$NuclRanges[$i]\n";
+	$hitstr = $hitstr."$CodonCenters[$i]\n";
+    }
+
+    # That's it, dude!
+    return $hitstr;
     
 }
 
@@ -3351,6 +3417,47 @@ sub GroupRanges
 
 ############################################################
 #
+#  Function: AdjustNuclCoord
+#
+sub AdjustNuclCoord
+{
+    my $coord    = shift;
+    my $jump_ref = shift;
+    my $revcomp  = shift;
+
+    # We'll need to be a little sneaky to figure out which position is the last
+    # *before* our guide's value is too high...
+    my @Jumps = @{$jump_ref};
+    my $index = scalar(@Jumps)-1;
+    for (my $i=1; $i<scalar(@Jumps); $i++) {
+	$Jumps[$i] =~ /^(\d+)\:/;
+	my $relative_pos = $1;
+	if ($relative_pos > $coord) {
+	    $index = $i-1;
+	    last;
+	}
+    }
+
+    $Jumps[$index] =~ /^(\d+)\:(\d+)$/;
+    my $relative_pos = $1;
+    my $absolute_pos = $2;
+
+    # We've found our closest jump point -- but we need to get particular about things!
+    if ($revcomp) { $absolute_pos -= $coord - $relative_pos; }
+    else          { $absolute_pos += $coord - $relative_pos; }
+
+    return $absolute_pos;
+    
+}
+
+
+
+
+
+
+
+############################################################
+#
 #  Function: ParseBlatLine
 #
 sub ParseBlatLine
@@ -3395,7 +3502,7 @@ sub ParseSpalnOutput
     while ($line = <$SpalnFile>) {
 	last if ($line =~ /^ALIGNMENT/);
     }
-    return if (eof($SpalnFile));
+    return (0,0,0,0) if (eof($SpalnFile));
 
     # We'll read each region into a triple of sequences.
     # NOTE that these could contain multiple "exons," so I'm just calling them groups
@@ -3421,13 +3528,13 @@ sub ParseSpalnOutput
 	# The final line also replaces where the translated seq line would be,
 	# so this is a good time to check if we're at the end of the road.
 	$line = <$SpalnFile>;
-	if ($next_trans_line =~ /^\;\; skip/ || eof($SpalnFile)) {
+	if ($line =~ /^\;\; skip/ || eof($SpalnFile)) {
 	    push(@GroupTransSeqs,$group_trans_str);
 	    push(@GroupNuclSeqs,$group_nucl_str);
 	    push(@GroupProtSeqs,$group_prot_str);
 	    $num_groups++;
 	    last if (eof($SpalnFile));
-	    $next_trans_line =~ /^\;\; skip (\d+)/;
+	    $line =~ /^\;\; skip (\d+)/;
 	    $recent_skip = $1;
 	    next;
 	}
@@ -3462,6 +3569,8 @@ sub ParseSpalnOutput
 	    }
 	    $nucl_pos = $GroupNuclStarts[$num_groups];
 
+	    # We won't contest the protein position, just in case there's a legit
+	    # skip
 	    $prot_line =~ /^\s+(\d+)/;
 	    $GroupProtStarts[$num_groups] = $1;
 
@@ -3497,6 +3606,81 @@ sub ParseSpalnOutput
 	}
 
     }
+
+    # Now that we've pulled in all of the Spaln output, we'll run through
+    # each of the segments and extract exons (in the style of our actual
+    # output format)
+    my @ExonNuclRanges;
+    my @ExonAminoRanges;
+    my @CodonCenters;
+    my $num_matches    = 0;
+    my $num_mismatches = 0;
+    for (my $i=0; $i<$num_groups; $i++) {
+
+	my @Trans = split(//,$GroupTransSeqs[$i]);
+	my @Nucl  = split(//,$GroupNuclSeqs[$i]);
+	my @Prot  = split(//,$GroupProtSeqs[$i]);
+
+	my $nucl_pos = $GroupNuclStarts[$i];
+	my $prot_pos = $GroupProtStarts[$i];
+
+	# Scan through the nucleotide sequence, looking for points where
+	# we switch between upper and lower case characters (exons / introns)
+	my $scan = 0;	
+	while ($scan < scalar(@Nucl)) {
+
+	    while ($scan < scalar(@Nucl) && $Nucl[$scan] eq lc($Nucl[$scan])) {
+		$nucl_pos++ if ($Nucl[$scan] =~ /[a-z]/);
+		$scan++;
+	    }
+
+	    last if ($scan == scalar(@Nucl));
+
+	    my $exon_nucl_start  = $nucl_pos;
+	    my $exon_prot_start  = $prot_pos;
+	    my $codon_center_str = '';
+
+	    while ($scan < scalar(@Nucl) && $Nucl[$scan] eq uc($Nucl[$scan])) {
+		if ($Prot[$scan] =~ /[A-Z]/) {
+		    # Do we have a match?
+		    if ($Prot[$scan] eq $Trans[$scan] || ($Prot[$scan] eq 'S' && $Trans[$scan] eq 'J')) {
+			$num_matches++;
+		    } else {
+			$num_mismatches++;
+		    }
+		    $codon_center_str = $codon_center_str.','.$nucl_pos;
+		    $prot_pos++;
+		}
+		$nucl_pos++ if ($Nucl[$scan] =~ /[A-Z]/);
+		$scan++;
+	    }
+
+	    my $exon_nucl_end = $nucl_pos-1;
+	    my $exon_prot_end = $prot_pos-1;
+
+	    # We'll end up with a highly undesirable leading comma, bringing shame upon
+	    # our family name if left uncontested
+	    $codon_center_str =~ s/^\,//;
+
+	    # Turn our positions into ranges and push 'em onto the list
+	    my $exon_nucl_range = $exon_nucl_start.'..'.$exon_nucl_end;
+	    my $exon_prot_range = $exon_prot_start.'..'.$exon_prot_end;
+	    push(@ExonNuclRanges,$exon_nucl_range);
+	    push(@ExonAminoRanges,$exon_prot_range);
+	    push(@CodonCenters,$codon_center_str);
+
+	}
+
+    }
+
+    # If we don't have *any* matches, something's gone very wrong
+    return(0,0,0,0) if ($num_matches == 0);
+
+    # For curious minds, what was our percent identity?
+    my $pct_id = int(1000.0 * $num_matches / ($num_matches + $num_mismatches)) / 10.0;
+
+    # I think that's all we need to do for now... Hot dog!
+    return(\@ExonNuclRanges,\@ExonAminoRanges,\@CodonCenters,$pct_id);
 
 }
 
