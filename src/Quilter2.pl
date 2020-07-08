@@ -21,6 +21,7 @@ sub ParseGTF;
 sub UseFastMap;
 sub ParseFastMapOutput;
 sub GenSpliceGraph;
+sub PrintHitToWeaverInf;
 sub GetSpliceStrengths;
 sub CheckForFullMaps;
 sub ExtractCanonHWMap;
@@ -29,10 +30,19 @@ sub AttemptChimericHWMap;
 sub ExtractHWInputExons;
 sub ExtractChimericHWMap;
 sub FindMaximalHWHitSet;
+sub SaveTopHWInputs;
 sub GetAminoHitGaps;
 sub RecordMaximalHits;
 sub RunBlatOnFileSet;
 sub GenBlatMaps;
+sub AttemptBlatFill;
+sub BlatToSpalnSearch;
+sub SpalnSearchChr;
+sub GroupRanges;
+sub AdjustNuclCoord;
+sub ParseBlatLine;
+sub ParseSpalnOutput;
+sub FinalFileCheck;
 
 
 
@@ -136,6 +146,11 @@ if (scalar(@BlatFileNames)) {
 
 }
 
+
+# We'll depart on a final endeavor to make sure our ".quilter.out" files are
+# well-organized (i.e., communicate canonical chromosome and have the sequences
+# sorted)
+FinalFileCheck($seq_dirname,$num_cpus);
 
 
 
@@ -1946,7 +1961,7 @@ sub ExtractChimericHWMap
     # Time to start constructing a hit string!
     my $hitstr = "Sequence ID: $seq_id\n";
     $hitstr = $hitstr."Map Method : FastMap2\n";
-    $hitstr = $hitstr."Chromosome : CHIMERIC!\n";
+    $hitstr = $hitstr."Chromosome : Chimeric\n";
     $hitstr = $hitstr."Num Exons  : $num_exons\n";
 
     # Because we use this function when filling gaps with BLAT, it's possible
@@ -2003,7 +2018,7 @@ sub ExtractChimericHWMap
     my @Chrs = keys %ChrTracker;
     if (scalar(@Chrs) == 1) {
 	my $chr = $Chrs[0];
-	$hitstr =~ s/Chromosome \: CHIMERIC\!/Chromosome \: $chr/;
+	$hitstr =~ s/Chromosome \: Chimeric/Chromosome \: $chr/;
     }
 
     print "$hitstr\n";
@@ -2423,7 +2438,7 @@ sub GenBlatMaps
     # If we have fewer genes than cpus we'll reduce our threading accordingly
     my @BlatGeneList = keys %BlatGenes;
     my $num_blat_genes = scalar(@BlatGeneList);
-    $num_cpus = Max($num_cpus,$num_blat_genes);
+    $num_cpus = Min($num_cpus,$num_blat_genes);
 
     # Spin off all our happy friends!
     my $threadID = SpawnProcesses($num_cpus);
@@ -2541,6 +2556,15 @@ sub GenBlatMaps
 		# Has BLAT given us the power to fill in the gaps in this sequence?
 		my $seq = $Seqs{$seqname};
 		$FullMaps[$i] = AttemptBlatFill($seqname,$seq,\@BlatHits);
+
+		# NOTE
+		# NOTE
+		# NOTEY
+		# NOTEY
+	        # NOTE: For now, if we fill a partial, we'll just go ahead and skip
+		#       the non-partial work... BUT THIS MIGHT BE SOMETHING TO CHANGE
+		$FullMaps[++$i] = 0 if ($FullMaps[$i]);
+		$num_full_maps++; # This won't increment otherwise
 		
 	    } else {
 
@@ -2565,9 +2589,12 @@ sub GenBlatMaps
 	# We don't know if there's already an output file for this gene family, so
 	# we'll use the appending output option
 	my $outfname = $seq_dirname.$gene.'.quilter.out';
-	open(my $outf,'>>',$outfname) || die "\n  ERROR:  Failed to open output file '$outfname'\n\n";
+	open(my $outf,'>>',$outfname)
+	    || die "\n  ERROR:  Failed to open output file '$outfname'\n\n";
 	for (my $i=0; $i<scalar(@SeqNames); $i++) {
-	    # TO DO -- NOTE THAT WE'LL NEED TO BE CAREFUL FOR PARTIAL HANDLING!!!
+	    if ($FullMaps[$i]) {
+		print $outf "$FullMaps[$i]\n";
+	    }
 	}
 	close($outf);
 
@@ -2852,7 +2879,11 @@ sub BlatToSpalnSearch
     # Now we can go through each of the chromosomes and see how high-quality of a
     # mapping we can get out of Spaln
     my @HitsByChr;
+    my @HitPctsID;
     my @ChrList;
+    my @FullHitIndices;
+    my $tot_exons = 0;
+    my $num_hits = 0;
     foreach my $blat_chr (keys %BlatHitsByChr) {
 
 	$blat_chr =~ /^(\S+)\-(\d)$/;
@@ -2860,27 +2891,109 @@ sub BlatToSpalnSearch
 	my $revcomp = $2;
 
 	my @HitList = split(/\&/,$BlatHitsByChr{$blat_chr});
-	my $hitstr = SpalnSearchChr($seqname,\@Seq,$chr,$revcomp,\@HitList,$prot_fname);
+	my ($hitstr,$pct_id)
+	    = SpalnSearchChr($seqname,\@Seq,$chr,$revcomp,\@HitList,$prot_fname);
 
 	# Did we get a little ol' snack?
 	next if (!$hitstr);
 
 	# Note that these hits are fully formatted (so they all start with the whole
 	# "sequence id," "map method," "chromosome," and "num exons" dump).
+	$num_hits++;
 	push(@HitsByChr,$hitstr);
+	push(@HitPctsID,$pct_id);
 	push(@ChrList,$blat_chr);
+
+	# Quick question for ya: Does this hit give us full coverage?
+
+	# Pull out the data and gather all of the amino ranges
+	my @HitLines = split(/\n/,$hitstr);
+	$HitLines[3] =~ /Num Exons  \: (\d+)/;
+	my $num_exons = $1;
+	my @ExonAminos;
+	for (my $i=4; $i<4+($num_exons*2); $i+=2) {
+	    $HitLines[$i] =~ /Aminos (\d+\.\.\d+)\,/;
+	    push(@ExonAminos,$1);
+	}
+
+	# Increment the total number of exons across all hits
+	$tot_exons += $num_exons;
+
+	# We can initially check if the first exon starts the protein and the final
+	# exon ends the protein
+	my $seq_len = scalar(@Seq);
+	if ($ExonAminos[0] =~ /^1\.\./ && $ExonAminos[$num_exons-1] =~ /\.\.$seq_len$/) {
+	    # Run through and see if we have continuity...
+	    my $continuity = 1;
+	    for (my $i=1; $i<$num_exons; $i++) {
+		$ExonAminos[$i-1] = /\.\.(\d+)$/;
+		my $last_end = $1;
+		$ExonAminos[$i]   = /^(\d+)\.\./;
+		my $this_start = $1;
+		if ($last_end != $this_start-1) {
+		    $continuity = 0;
+		    last;
+		}
+	    }
+
+	    # If we have continuity, this is a full hit!
+	    push(@FullHitIndices,$num_hits) if ($continuity);
+	    
+	}
+	
 
     }
 
     # No more searching for you, mister/miss!
     RunSystemCommand("rm \"$prot_fname\"");
 
-    
-    # RADICAL!!!
+    # If we didn't get anything worth reporting, we'll just have to cry all night
+    return 0 if ($num_hits == 0);
 
-    # Now, we'll take all of the per-chromosome hits and see if we can get a nice
-    # clean full-sequence mapping through some combination (or, preferably, one)
-    # of the hit sets.
+    
+    # TOTALLY TUBULAR!
+    #
+    # If we have one full-length mapping, we can just pass it up the chain.
+    #
+    # If we have multiple full-length mappings, pass up the one with the
+    # highest percent-identity.
+    #
+    # If we haven't identified a solid full-sequence mapping, we'll mark the 
+    # chromosome as 'Incomplete' and dump all of our exons as a giant mess.
+    #
+    if (scalar(@FullHitIndices)) {
+
+	# Find the highest percent-identity hit
+	my $top_hit_id = $FullHitIndices[0];
+	my $top_pct_id = $HitPctsID[$top_hit_id];
+	for (my $i=1; $i<scalar(@FullHitIndices); $i++) {
+	    my $hit_id = $FullHitIndices[$i];
+	    my $pct_id = $HitPctsID[$i];
+	    if ($pct_id > $top_pct_id) {
+		$top_hit_id = $hit_id;
+		$top_pct_id = $pct_id;
+	    }
+	}
+
+	# WINNER!
+	return $HitsByChr[$top_hit_id];
+	
+    } else {
+
+	# FRANKENSTEIN!
+	my $final_hit = "Sequence ID: $seqname\n";
+	$final_hit = $final_hit."Map Method : BLAT\+Spaln\n";
+	$final_hit = $final_hit."Chromosome : Incomplete\n";
+	$final_hit = $final_hit."Num Exons  : $tot_exons\n";
+	for (my $i=0; $i<$num_hits; $i++) {
+	    my @HitLines = split(/\n/,$HitsByChr[$i]);
+	    for (my $j=4; $j<scalar(@HitLines); $j++) {
+		$final_hit = $final_hit.$HitLines[$j]."\n";
+	    }
+	}
+	return $final_hit;
+
+    }
     
 }
 
@@ -3228,7 +3341,7 @@ sub SpalnSearchChr
     RunSystemCommand("rm \"$nucl_fname\"");
 
     # Don't tell me we did all that for NOTHING?!
-    return 0 if (!(-e $spaln_fname));
+    return (0,0) if (!(-e $spaln_fname));
     
     # UGH, I wish I could quit you, Spaln parsing
     # Note that we'll open the file here, just so it's easier to return
@@ -3242,7 +3355,7 @@ sub SpalnSearchChr
     RunSystemCommand("rm \"$spaln_fname\"") if (-e $spaln_fname);
 
     # If we didn't have a good return on investment, we're done-zo!
-    return 0 if ($spaln_pct_id < 90.0);
+    return (0,0) if ($spaln_pct_id < 90.0);
 
     # All of our nucleotide coordinates need to be adjusted...
     my @UnadjNuclRanges = @{$spaln_nucl_ranges_ref};
@@ -3287,7 +3400,7 @@ sub SpalnSearchChr
     }
 
     # That's it, dude!
-    return $hitstr;
+    return ($hitstr,$spaln_pct_id);
     
 }
 
@@ -3683,6 +3796,172 @@ sub ParseSpalnOutput
     return(\@ExonNuclRanges,\@ExonAminoRanges,\@CodonCenters,$pct_id);
 
 }
+
+
+
+
+
+
+############################################################
+#
+#  Function: FinalFileCheck
+#
+sub FinalFileCheck
+{
+    my $dirname  = shift;
+    my $num_cpus = shift;
+
+    # This shouldn't be necessary, but we'll just make sure everything looks reasonable
+    $dirname = ConfirmDirectory($dirname);
+    
+    # Make a list of all of the '.quilter.out' files
+    my @OutFileList;
+    my $Dir = OpenDirectory($dirname);
+    while (my $fname = readdir($Dir)) {
+	push(@OutFileList,$dirname.$fname) if ($fname =~ /\.quilter\.out$/);
+    }
+    closedir($Dir);
+
+    # We'll generate a bunch of processes to make things go down sooooo smooth
+    $num_cpus = Min($num_cpus,scalar(@OutFileList));
+    my $threadID = SpawnProcesses($num_cpus);
+
+    # Off to the file mines with you!
+    my $start_file_index =  $threadID    * (scalar(@OutFileList)/$num_cpus);
+    my $end_file_index   = ($threadID+1) * (scalar(@OutFileList)/$num_cpus);
+    $end_file_index = scalar(@OutFileList) if ($threadID == $num_cpus-1);
+
+    for (my $i=$start_file_index; $i<$end_file_index; $i++) {
+
+	my $fname = $OutFileList[$i];
+
+	# We'll hash each of the sequences according to the seq name (which is
+	# assumed to still be a numeric code at this point)
+	my %HitsBySeq;
+	my %Chrs;
+	my $inf = OpenInputFile($fname);
+	while (my $line = <$inf>) {
+
+	    if ($line =~ /Sequence ID\: (\S+)/) {
+
+		my $seqname = $1;
+		my $fullhit = $line;
+
+		$line = <$inf>; # Map Method
+		$fullhit = $fullhit.$line;
+
+		$line = <$inf>; # Chromosome
+		$fullhit = $fullhit.$line;
+		$line =~ /Chromosome \: (\S+)/;
+		my $chr = $1;
+		if ($Chrs{$chr}) { $Chrs{$chr}++; }
+		else             { $Chrs{$chr}=1; }
+
+		$line = <$inf>; # Number of Exons
+		$fullhit = $fullhit.$line;
+		$line =~ /Num Exons  \: (\d+)/;
+		my $num_exons = $1;
+
+		while ($num_exons) {
+		    $line = <$inf>; # Exon overview
+		    $fullhit = $fullhit.$line;
+		    $line = <$inf>; # Codon centers
+		    $fullhit = $fullhit.$line;
+		    $num_exons--;
+		}
+
+		# Store it!
+		$HitsBySeq{$seqname} = $fullhit;
+	    }
+	    
+	}
+
+	close($inf);
+
+	# We now have all of the hits that we were able to pull -- let's see
+	# which chromosome appears to be canonical.
+	# We'll ignore 'Incomplete' and 'Chimeric' mappings, for obvious reasons
+	my $top_chr = 'Undetermined';
+	my $top_chr_count = 0;
+	foreach my $chr (keys %Chrs) {
+	    if ($chr ne 'Incomplete' && $chr ne 'Chimeric'
+		&& $Chrs{$chr} > $top_chr_count) {
+		$top_chr = $chr;
+		$top_chr_count = $Chrs{$chr};
+	    }
+	}
+
+	# We'll also pull in the full list of sequence names for this family
+	# so we can record which sequences weren't mapped.
+	#
+	# We'll note sequences that mapped to noncanonical chromosomes or
+	# mapped chimerically as unmapped, though with a distinction.
+	$fname =~ s/\.quilter\.out/\.fa/;
+	$inf = OpenInputFile($fname);
+	while (my $line = <$inf>) {
+	    if ($line =~ /\>(\S+)/) {
+		my $seqname = $1;
+		if (!$HitsBySeq{$seqname}) {
+		    my $miss_str = "Sequence ID: $seqname\nMap Method : Unmapped\n";
+		    $HitsBySeq{$seqname} = $miss_str;
+		}
+	    }
+	}
+	close($inf);
+
+	# Now we'll write out our full output along with all of the 'miss' information
+	# to the final files for these families.
+	# We'll use the ugly opening code for the hitfile because we're overwriting.
+	my $hitfname = $fname;
+	$hitfname =~ s/\.fa$/\.quilter\.out/;
+	open(my $hitf,'>',$hitfname) || die "\n  ERROR: Failed to open final output file '$hitfname'\n\n";
+
+	# What's the canonical chromosome for this family?
+	print $hitf "Canonical Chromosome: $top_chr\n\n";
+
+	my $missfname = $hitfname;
+	$missfname =~ s/\.quilter\./\.misses\./;
+	my $missf = OpenOutputFile($missfname);
+
+	foreach my $seqname (sort {$1 <=> $2} keys %HitsBySeq) {
+
+	    # Hit acquired! (or not... but why ruin the moment like that, dude?)
+	    print $hitf "$HitsBySeq{$seqname}\n";
+
+	    # If there's any sense by which this sequence is unmapped, record it
+	    if ($HitsBySeq{$seqname} =~ /Map Method \: Unmapped/) {
+		print $missf "Unmapped   : $seqname\n";
+	    } else {
+		$HitsBySeq{$seqname} =~ /Chromosome \: (\S+)/;
+		my $chr = $1;
+		if ($chr eq 'Incomplete' || $chr eq 'Chimeric') {
+		    while (length($chr) < 11) {
+			$chr = $chr.' ';
+		    }
+		    print $missf "$chr: $seqname\n";
+		}
+	    }
+
+	}
+	
+	close($hitf);
+	close($missf);
+
+	# If we're hashtag blessed enough to not have had any misses for this gene,
+	# no need for a miss file!
+	if (!(-s $missfname)) {
+	    RunSystemCommand("rm \"$missfname\"") if (-e $missfname);
+	}
+	
+    }
+    
+    # Take a breather -- you've earned it!
+    if ($threadID) { exit(0); }
+    while (wait() != -1) {}
+    
+}
+
+
 
 
 

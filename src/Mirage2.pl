@@ -159,8 +159,17 @@ foreach my $species (@Species) {
 my ($originalseqnames_ref) = GenerateSpeciesDBs($ProteinDB,$num_cpus,\%SpeciesSeqDir);
 my @OriginalSeqNames = @{$originalseqnames_ref};
 
-# ERROR ERROR ERROR
-# -- I'm just forcing things to run -- this is dangerous
+# DEBUGGING
+# I'm going to print off all the original sequence names to a file so
+# if things go wrong during testing I can look up the particular sequences
+# and zero in on them.
+my $debug_f = OpenOutputFile($ResultsDir.'seq-name-guide');
+for (my $i=0; $i<scalar(@OriginalSeqNames); $i++) {
+    print $debug_f "$i: $OriginalSeqNames[$i]\n";
+}
+close($debug_f);
+# DEBUGGING
+
 my $MinorSpeciesDBName;
 my @SpeciesDBNames;
 
