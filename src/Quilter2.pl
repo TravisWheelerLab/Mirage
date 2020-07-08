@@ -3207,11 +3207,18 @@ sub SpalnSearchChr
     my $spaln_cmd = $spaln." -Q3 -O1 -S3 -ya3 \"$nucl_fname\" \"$prot_fname\" 1>\"$spaln_fname\" 2>/dev/null";
     RunSystemCommand($spaln_cmd);
 
-    # UGH, I wish I could quit you, Spaln parsing
-    
-    
     # Get that nucleotide file OUTTA HERE!
     RunSystemCommand("rm \"$nucl_fname\"");
+
+    # Don't tell me we did all that for NOTHING?!
+    return if (!(-e $spaln_fname));
+    
+    # UGH, I wish I could quit you, Spaln parsing
+    # Note that we'll open the file here, just so it's easier to return
+    # if we run into parsing errors.
+    my $SpalnFile = OpenInputFile($spaln_fname);
+    ParseSpalnOutput($SpalnFile,\@Seq);
+    close($SpalnFile);
 
     # Get that spaln output file THE HECK OUTTA HERE!
     RunSystemCommand("rm \"$spaln_fname\"") if (-e $spaln_fname);
@@ -3363,6 +3370,136 @@ sub ParseBlatLine
     return($chr,$amino_start,$amino_end,$nucl_start,$nucl_end,$score);
     
 }
+
+
+
+
+
+
+############################################################
+#
+#  Function: ParseSpalnOutput
+#
+sub ParseSpalnOutput
+{
+
+    my $SpalnFile = shift;
+    my $seq_ref   = shift;
+
+    my @Seq = @{$seq_ref};
+
+    # Alright, let's work our way through this inevitable disaster.
+
+    # First off, let's get to the start of the alignment
+    my $line;
+    while ($line = <$SpalnFile>) {
+	last if ($line =~ /^ALIGNMENT/);
+    }
+    return if (eof($SpalnFile));
+
+    # We'll read each region into a triple of sequences.
+    # NOTE that these could contain multiple "exons," so I'm just calling them groups
+    my @GroupTransSeqs;
+    my @GroupNuclSeqs;
+    my @GroupProtSeqs;
+    my $group_trans_str;
+    my $group_nucl_str;
+    my $group_prot_str;
+    my @GroupNuclStarts;
+    my @GroupProtStarts;
+    my $num_groups = 0;
+
+    # We'll do some checking for inconsisntent skip distances, in
+    my $nucl_pos    =  0; # Only advances by counting
+    my $recent_skip = -1; # Did we just 'skip'?
+    while ($line = <$SpalnFile>) {
+
+	# Each content line is preceded by an empty line
+	$line = <$SpalnFile>;
+
+	# This could be a skip... stay frosty!
+	# The final line also replaces where the translated seq line would be,
+	# so this is a good time to check if we're at the end of the road.
+	$line = <$SpalnFile>;
+	if ($next_trans_line =~ /^\;\; skip/ || eof($SpalnFile)) {
+	    push(@GroupTransSeqs,$group_trans_str);
+	    push(@GroupNuclSeqs,$group_nucl_str);
+	    push(@GroupProtSeqs,$group_prot_str);
+	    $num_groups++;
+	    last if (eof($SpalnFile));
+	    $next_trans_line =~ /^\;\; skip (\d+)/;
+	    $recent_skip = $1;
+	    next;
+	}
+
+	# Phew, no skip -- get ready to record some data!
+	my $trans_line = $line;
+	my $nucl_line  = <$SpalnFile>;
+	last if (eof($SpalnFile));
+	my $prot_line  = <$SpalnFile>;
+	last if (eof($SpalnFile));
+
+	# If we just skipped, we'll want to make sure that our position
+	# makes sense.
+	if ($recent_skip) {
+
+	    # Does the nucleotide index agree with the skip distance?
+	    # The only time we'll take its word over our skip counting
+	    # during a disagreement is if the skip is 60 nt's, in which
+	    # case we'll assume that the skip was unnecessary.
+	    $nucl_line =~ /^\s+(\d+)/;
+	    my $line_nucl_pos = $1;
+
+	    # A catch for the first "skip"
+	    if ($recent_skip == -1) {
+		$GroupNuclStarts[$num_groups] = $line_nucl_pos;
+	    } elsif ($nucl_pos + $recent_skip != $line_nucl_pos) {
+		if ($recent_skip == 60 && $line_nucl_pos == $nucl_pos) {
+		    $GroupNuclStarts[$num_groups] = $nucl_pos;
+		} else {
+		    $GroupNuclStarts[$num_groups] = $nucl_pos + $recent_skip;
+		}
+	    }
+	    $nucl_pos = $GroupNuclStarts[$num_groups];
+
+	    $prot_line =~ /^\s+(\d+)/;
+	    $GroupProtStarts[$num_groups] = $1;
+
+	    # Reset the group sequence strings
+	    $group_trans_str = '';
+	    $group_nucl_str  = '';
+	    $group_prot_str  = '';
+
+	    # Do you want to do all this special work all over again?!
+	    # I sure don't!
+	    $recent_skip = 0;
+
+	}
+
+	my @Trans = split(//,$trans_line);
+	my @Nucl  = split(//,$nucl_line);
+	my @Prot  = split(//,$prot_line);
+
+	# Scan until we're at the nucleotide-y stuff
+	my $scan = 0;
+	while ($Nucl[$scan] =~ /\s/) { $scan++; }
+	while ($Nucl[$scan] =~ /\d/) { $scan++; }
+	while ($Nucl[$scan] =~ /\s/) { $scan++; }
+	
+	while ($Nucl[$scan] ne '|') {
+	    if ($Nucl[$scan] !~ /\s/) {
+		$group_trans_str = $group_trans_str.$Trans[$scan];
+		$group_nucl_str  = $group_nucl_str.$Nucl[$scan];
+		$group_prot_str  = $group_prot_str.$Prot[$scan];
+		$nucl_pos++ if ($Nucl[$scan] =~ /[A-Za-z]/);
+	    }
+	    $scan++;
+	}
+
+    }
+
+}
+
 
 
 
