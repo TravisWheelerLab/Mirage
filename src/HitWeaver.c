@@ -745,8 +745,8 @@ void OrganizeEdgeList (HW_NODE * N) {
   for (i=0; i<N->num_outgoing; i++) TempNodes[i] = N->Outgoing[i];
   for (i=0; i<N->num_outgoing; i++) N->Outgoing[i] = TempNodes[Index[i]];
 
-  for (i=0; i<N->num_incoming; i++) TempInts[i] = N->OutgoingID[i];
-  for (i=0; i<N->num_incoming; i++) N->OutgoingID[i] = TempInts[Index[i]];
+  for (i=0; i<N->num_outgoing; i++) TempInts[i] = N->OutgoingID[i];
+  for (i=0; i<N->num_outgoing; i++) N->OutgoingID[i] = TempInts[Index[i]];
 
   for (i=0; i<N->num_outgoing; i++) TempInts[i] = N->ReciprocalInIndex[i];
   for (i=0; i<N->num_outgoing; i++) N->ReciprocalInIndex[i] = TempInts[Index[i]];
@@ -756,7 +756,6 @@ void OrganizeEdgeList (HW_NODE * N) {
 
   for (i=0; i<N->num_outgoing; i++) TempFloats[i] = N->OutEdgeScore[i];
   for (i=0; i<N->num_outgoing; i++) N->OutEdgeScore[i] = TempFloats[Index[i]];
-
 
   // We'll need to correct the 'ReciprocalInIndex' values for the
   // nodes receiving our outgoing edges...
