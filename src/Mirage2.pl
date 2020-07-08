@@ -178,8 +178,9 @@ my %MultiMSADir;
 my %GroupsBySpecies;
 for ($i=0; $i<$numSpecies; $i++) {
 
-    # TIME TRIAL! WE'RE ONLY INTERESTED IN HUMAN!
+    # DEBUGGING
     next if ($Species[$i] ne 'human');
+    # DEBUGGING
 
     # Start a timer for Quilter
     $IntervalStart = [Time::HiRes::gettimeofday()];
@@ -196,19 +197,12 @@ for ($i=0; $i<$numSpecies; $i++) {
     # KEY 3: GTF index (special case: - for "Just use BLAT")
     $QuilterCmd = $QuilterCmd.' '.$GTFs[$i];
 	
-    # Tell Quilter how many CPUs we want it to work with
-    # UPDATE: This is now part of the 'Thread-Guide'
-    #$QuilterCmd = $QuilterCmd.' -n '.$species_cpus;
-
     # Do we want a whole bunch of stuff spat at us?
     $QuilterCmd = $QuilterCmd.' --v' if ($verbose);
 
     # Are we timing?
     $QuilterCmd = $QuilterCmd.' --time' if ($timed);
     
-    # Do we want to hold onto some tracking info about spaln?
-    #$QuilterCmd = $QuilterCmd.' -trackspaln' if ($track_spaln);
-
     # Display the call if we're being loud
     if ($verbose) {
 	print "\n  Aligning to the $Species[$i] genome using Quilter.pl\n";
@@ -217,6 +211,10 @@ for ($i=0; $i<$numSpecies; $i++) {
 
     # Make that daaaaaang call.
     RunSystemCommand($QuilterCmd);
+
+    # DEBUGGING
+    die;
+    # DEBUGGING
 
     # Figure out how much time that took and record it
     $QuilterTimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
