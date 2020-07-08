@@ -1162,7 +1162,7 @@ sub CheckSourceFiles
     push(@RequiredFiles,$location.'MultiMSA.pl');
     push(@RequiredFiles,$location.'FinalMSA.pl');
     push(@RequiredFiles,$location.'FastMap2');
-    push(@RequiredFiles,$location.'TransSW');
+    push(@RequiredFiles,$location.'HitWeaver');
     push(@RequiredFiles,$location.'MultiSeqNW');
 
     foreach my $srcfile (@RequiredFiles) {

@@ -673,6 +673,11 @@ void SortFloats (float * Vals, int * Index, int num_vals) {
       
     }
 
+    // If we didn't have enough to fill up a full block, we'll still need to
+    // copy over the final values into 'Write'
+    while (i<num_vals)
+      Write[pos++] = Read[i++];
+
     // Read becomes write, write becomes read, the first shall be last, etc!
     Swap  = Read;
     Read  = Write;
@@ -704,7 +709,7 @@ void SortFloats (float * Vals, int * Index, int num_vals) {
 void OrganizeEdgeList (HW_NODE * N) {
 
   int i;
-  
+
   // We'll make an array of edge indices, and an equally-sized
   // temporary array
   int index_size = MBB_MaxInt(N->num_incoming,N->num_outgoing);
@@ -1199,7 +1204,7 @@ void ReportSplicing
     N = Graph[ExonIDs[i]];
 
     score += N->score;
-    
+
     // NOTE that we want to friendly to biologists, so we'll index starting at '1'
     // Moreover, we'll keep this as '+1' so we can do a straight amino_count as the
     // EndAminoOut at the end of the loop.
