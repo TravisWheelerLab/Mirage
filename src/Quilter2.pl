@@ -1346,6 +1346,7 @@ sub AttemptSpalnFill
 		# Scan to where the nucleotide range is hiding
 		$line = <$hwoutf>; # blank line
 		$line = <$hwoutf>; # exon id list
+		$line = <$hwoutf>; # mapping score
 		$line = <$hwoutf>; # amino range
 		$line = <$hwoutf>; # Nucleotide Range!
 		$line =~ s/\n|\r//g;
@@ -1651,7 +1652,7 @@ sub AttemptChimericHWMap
     for (my $i=0; $i<scalar(@HWInNames); $i++) {
 
 	# Which chromosome is this?
-	$HWInNames[$i] = /\.([^\.]+)\.weaver\.in$/;
+	$HWInNames[$i] =~ /\.([^\.]+)\.weaver\.in$/;
 	my $chr = $1;
 
 	# We can treat the canonical chromosome somewhat specially, since it has
@@ -2081,7 +2082,7 @@ sub FindMaximalHWHitSet
     push(@MaximalHitSet,0); # Prime it!
     my $num_top_hits = 1;
     my $top_recent_hit = 0;
-    for (my $i=0; $i<$num_hits; $i++) {
+    for (my $i=1; $i<$num_hits; $i++) {
 
 	# If this overlaps with our most recent top hit, see which covers more of the
 	# sequence.
@@ -2108,7 +2109,7 @@ sub FindMaximalHWHitSet
     my $exon_list_str  = $TargetHitExons[$MaximalHitSet[0]];
     my $amino_list_str = $TargetHitStarts[$MaximalHitSet[0]].'..'.$TargetHitEnds[$MaximalHitSet[0]];
     my $hit_list_str   = $MaximalHitSet[0];
-    for (my $i=0; $i<$num_hits; $i++) {
+    for (my $i=1; $i<$num_top_hits; $i++) {
 	$exon_list_str  = $exon_list_str.','.$TargetHitExons[$MaximalHitSet[$i]];
 	$amino_list_str = $amino_list_str.','.$TargetHitStarts[$MaximalHitSet[$i]].'..'.$TargetHitEnds[$MaximalHitSet[$i]];
 	$hit_list_str   = $hit_list_str.','.$MaximalHitSet[$i];
@@ -2507,7 +2508,7 @@ sub GenBlatMaps
 	foreach my $datum (split(/\&/,$BlatData{$gene})) {
 	    $datum =~ /^(\S+) (.+)$/;
 	    my $seqname = $1;
-	    my $hitdata = $1;
+	    my $hitdata = $2;
 	    if ($BlatBySeq{$seqname}) {
 		$BlatBySeq{$seqname} = $BlatBySeq{$seqname}.'&'.$hitdata;
 	    } else {
@@ -2844,7 +2845,7 @@ sub BlatToSpalnSearch
 
 	# We'll end up clearing out the first pieces of data in the blat hits,
 	# since we know there aren't partial hits in this list.
-	$BlatHits[$i] =~ /^\S\s+\-\s+(.*)$/;
+	$BlatHits[$i] =~ /^\-\s+(.*)$/;
 	my $blat_outline = $1;
 	my ($blat_chr,$blat_amino_start,$blat_amino_end,$blat_nucl_start,$blat_nucl_end,$blat_score)
 	    = ParseBlatLine($blat_outline);
