@@ -1431,7 +1431,7 @@ sub AttemptSpalnFill
 	my $sfetch_cmd = $sfetch." -c $nucl_range \"$genome\" \"$chr\" > $nucl_fname";
 	RunSystemCommand($sfetch_cmd);
 
-	my $spaln_cmd = $spaln." -Q3 -O1 -S3 -ya3 \"$nucl_fname\" \"$temp_fname\"";
+	my $spaln_cmd = $spaln." -Q3 -O1 -S3 -ya3 \"$nucl_fname\" \"$temp_fname\" 2>/dev/null";
 	my $SpalnOut  = OpenSystemCommand($spaln_cmd);
 
 	# Note that while the intuition is that a gap is a single wily
