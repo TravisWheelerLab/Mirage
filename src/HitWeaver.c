@@ -824,7 +824,7 @@ void ConnectGraph (HW_NODE ** Graph, int num_exons, char * Seq, HW_OPTS * Opts) 
 	break;
 
       // Is this too much overlap, even for us?
-      if (overlap_len > max_overlap)
+      if (overlap_len > max_overlap || Graph[i]->start_amino == right_start_amino)
 	continue;
       
       // Remember to make sure these hits are compatibly located on the chromosome!

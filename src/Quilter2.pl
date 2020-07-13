@@ -1442,15 +1442,13 @@ sub AttemptSpalnFill
 	while (!eof($SpalnOut)) {
 
 	    my $line = <$SpalnOut>;
-	    while ($line =~ /\;C (\S+)/) {
+	    while ($line && $line =~ /\;C (\S+)/) {
 
 		my $line_coords = $1;
 
 		# We might need to do some cleanup of this line, if it's
 		# the first or last of the list.
-		$line_coords =~ s/^join\(//;
-		$line_coords =~ s/\)$//;
-
+		$line_coords =~ s/complement|join|\(|\)|\s//g;
 		$coordlist_str = $coordlist_str.$line_coords;
 
 		$line = <$SpalnOut>;
