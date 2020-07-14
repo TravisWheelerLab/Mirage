@@ -11,6 +11,7 @@
 //  + IncreaseInEdgeCapacity
 //  + IncreaseOutEdgeCapacity
 //  + DestroyGraph
+//  + SpliceProbToScore
 //  + ReadNodesFromFile
 //  + UpdateHitExtScore
 //  + AttemptConnection
@@ -40,6 +41,12 @@
 //       a comment reading '*17*' wherever this assumption is being
 //       explicitly applied.
 
+
+// There's a small automatic penalty for splicing, so that everything else
+// equal we'll prefer alignments with fewer exons.
+// There's also a maximum score for looking like a great 3' or 5' splice site!
+const float SPLICE_COST      = -6.0;
+const float MAX_SPLICE_SCORE =  5.0;
 
 
 /*
@@ -241,6 +248,17 @@ void DestroyGraph (HW_NODE ** Graph, int num_exons) {
 
 
 
+/*
+ *  Function: SpliceProbToScore
+ *
+ */
+float SpliceProbToScore (float prob) {
+  // For now, we'll do a simple quadratic function, with a max score of 10
+  return MAX_SPLICE_SCORE * (prob * prob);
+}
+
+
+
 
 /*
  *  Function: ReadNodesFromFile
@@ -278,11 +296,16 @@ void ReadNodesFromFile (HW_NODE ** Graph, int num_exons, FILE * inf) {
     // Reading in the nucleotide stuff is gonna prove my mastery of fscanf...
     fscanf(inf,"Nucleotides : %s\n",Node->Nucls);
     fscanf(inf,"3' SS Str.  :");
-    for (j=0; j<Node->nucl_str_len; j++)
-      fscanf(inf," %f",&(Node->TPSS[j]));
+    float splice_prob;
+    for (j=0; j<Node->nucl_str_len; j++) {
+      fscanf(inf," %f",&splice_prob);
+      Node->TPSS[j] = SpliceProbToScore(splice_prob);
+    }
     fscanf(inf,"\n5' SS Str.  :");
-    for (j=0; j<Node->nucl_str_len; j++)
-      fscanf(inf," %f",&(Node->FPSS[j]));
+    for (j=0; j<Node->nucl_str_len; j++) {
+      fscanf(inf," %f",&splice_prob);
+      Node->FPSS[j] = SpliceProbToScore(splice_prob);
+    }
     fscanf(inf,"\n");
 
     // Finish up this node by initializing edge-connection stuff
@@ -351,7 +374,7 @@ void UpdateHitExtScore
 	AliScores[i] = MBB_AminoAliScore(TransSeq[i],RefSeq[i]);
 	*sum_score  += AliScores[i];
       }
-      
+
     }
       
   } else if (next_amino == 'X') {
@@ -405,7 +428,10 @@ void AttemptConnection
   // How far do we need to unravel into each on account of overlap?
   // Note that this will work fine if we're extending into the buffer
   // zone, rather than unraveling the original exons.
-  int overlap_len  = left_end_amino - right_start_amino + 1;
+  //
+  int overlap_len = left_end_amino - right_start_amino + 1;
+
+  // So how many coding nucleotides are overlapping?
   int nucl_overlap = overlap_len * 3;
 
   // If we have negative overlap (i.e., we need to extend into buffer)
@@ -491,6 +517,45 @@ void AttemptConnection
   //
   // AND, MORE IMPORTANTLY, WE NEED TO UNRAVEL THE SCORE, WHERE APPLICABLE!
   //
+
+  // Compute the cost of unraveling the aminos at each overlapping position
+  float UnravelCost[overlap_len];
+  if (overlapped) {
+
+    float LeftUnravelCost[overlap_len];
+    float RightUnravelCost[overlap_len];
+    float pos_score;
+
+    // Compute the score of each position independently for the two exons
+    for (i=0; i<overlap_len; i++) {
+
+      pos_score = MBB_AminoAliScore(RefSeq[i],MBB_TranslateCodon(&LeftNucls[i*3]));
+      if (pos_score != MBB_NINF) LeftUnravelCost[i] = 0.0 - pos_score;
+      else                       LeftUnravelCost[i] = 0.0;
+
+      pos_score = MBB_AminoAliScore(RefSeq[i],MBB_TranslateCodon(&RightNucls[i*3]));
+      if (pos_score != MBB_NINF) RightUnravelCost[i] = 0.0 - pos_score;
+      else                       RightUnravelCost[i] = 0.0;
+
+    }
+
+    // Accumulate cost for the left-side node, from right-to-left
+    for (i=overlap_len-2; i>=0; i--)
+      LeftUnravelCost[i] += LeftUnravelCost[i+1];
+
+    // Accumulate cost for the right-side node, from left-to-right
+    for (i=1; i<overlap_len; i++)
+      RightUnravelCost[i] += RightUnravelCost[i-1];
+    
+    // Transfer over into a combined unraveling cost
+    for (i=0; i<overlap_len; i++)
+      UnravelCost[i] = LeftUnravelCost[i] + RightUnravelCost[i];
+    
+  } else {
+    for (i=0; i<overlap_len; i++)
+      UnravelCost[i] = 0.0;
+  }
+  
   
 
   // Finally, initialize our translated sequence space.
@@ -531,16 +596,15 @@ void AttemptConnection
   // Could still be -inf, but whatever...
   sum_score += AminoAliScores[0];
 
+  // If we started out with any stop codons, our sum score is -inf
+  if (num_stop_codons) sum_score = MBB_NINF;
+
   // Track the highest score and what positions defined the ends of
   // our coding regions.  Currently, these will always be one off from
   // one another, but if we ever add gappery these could split apart...
   int top_left_break  = 0;
   int top_right_break = 1;
-  float top_score = sum_score + LeftFPSS[0] + RightTPSS[1];
-
-
-  // If we started out with any stop codons, our sum score is -inf
-  if (num_stop_codons) sum_score = MBB_NINF;
+  float top_score = sum_score + LeftFPSS[0] + RightTPSS[1] + UnravelCost[0];
 
   // i tracks the position that will be the first drawing from
   //   the left node's nucleotide sequence,
@@ -573,16 +637,16 @@ void AttemptConnection
     // it to a different function.
     //
     char next_amino = MBB_TranslateCodon(Codon);
-    UpdateHitExtScore(TransSeq,RefSeq,AminoAliScores,j,overlap_len,next_amino,
-		      &num_stop_codons,&sum_score);
+    UpdateHitExtScore(TransSeq,RefSeq,AminoAliScores,
+		      j,overlap_len,next_amino,&num_stop_codons,&sum_score);
 
     // If we've beaten out the previous champion, then we'll seize the throne!
     if (num_stop_codons == 0) {
-      float score_check = sum_score + LeftFPSS[i] + RightTPSS[i+1];
+      float score_check = sum_score + LeftFPSS[i] + RightTPSS[i+1] + UnravelCost[j];
       if (score_check > top_score) {
 	top_left_break  = i;
 	top_right_break = i+1;
-	top_score = sum_score + LeftFPSS[i] + RightTPSS[i+1];
+	top_score       = score_check;
       }
     }
     
@@ -592,6 +656,9 @@ void AttemptConnection
   // can reverse engineer the actual positions in our sequences that we'd
   // use for splicing
   if (top_score == MBB_NINF) return;
+
+  // WE'RE SPLICING! (so you gotta pay that lil' tax...)
+  top_score += SPLICE_COST;
 
   // Before we record any position info., check if we need to bump up the
   // space for recording edges 
@@ -811,20 +878,21 @@ void ConnectGraph (HW_NODE ** Graph, int num_exons, char * Seq, HW_OPTS * Opts) 
   for (i=0; i<num_exons-1; i++) {
 
     int left_end_amino = Graph[i]->end_amino;
-    int right_start_amino;
 
     // Wowee! Let's see how many friends we can hook up with ;)
     for (j=i+1; j<num_exons; j++) {
 
-      right_start_amino = Graph[j]->start_amino;
-      int overlap_len   = left_end_amino - right_start_amino + 1;
+      int right_start_amino = Graph[j]->start_amino;
+      int overlap_len = left_end_amino - right_start_amino + 1;
 
       // We don't want to overextend ourselves, now
       if (overlap_len < -1 * max_extension)
 	break;
 
       // Is this too much overlap, even for us?
-      if (overlap_len > max_overlap || Graph[i]->start_amino == right_start_amino)
+      if (overlap_len > max_overlap
+	  || Graph[i]->start_amino == right_start_amino
+	  || left_end_amino == Graph[j]->end_amino)
 	continue;
       
       // Remember to make sure these hits are compatibly located on the chromosome!
@@ -833,9 +901,6 @@ void ConnectGraph (HW_NODE ** Graph, int num_exons, char * Seq, HW_OPTS * Opts) 
 	  ((!revcomp && Graph[i]->end_nucl - (3*overlap_len) < Graph[j]->start_nucl) ||
 	   ( revcomp && Graph[i]->end_nucl + (3*overlap_len) > Graph[j]->start_nucl)))
 	AttemptConnection(Graph,i,j,Seq);
-      
-      // How you doin'?
-      j++;
       
     }
     

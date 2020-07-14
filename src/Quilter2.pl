@@ -1270,6 +1270,7 @@ sub ExtractCanonHWMap
 	# If we're at an internal exon, there may be flanking splice signal characters
 	while ($Nucls[$scan] eq lc($Nucls[$scan])) {
 	    $scan++;
+	    die "\n  Scan error: $fname\n  ($scan in '@Nucls')\n\n" if ($scan >= scalar(@Nucls)); # DEBUGGING
 	}
 
 	# Now run until the end of the exon (either the end of the sequence or the
