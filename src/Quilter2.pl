@@ -1745,6 +1745,10 @@ sub AttemptChimericHWMap
 	
     }
 
+    # In case we *only* hit to a noncanonical chromosome, we might not have pulled
+    # any exons in for this check, so we'll want to jump off.
+    return 0 if ($num_exons == 0);
+
     # NOTE that we don't check to see whether there's really any chance of getting
     # a chimeric hit, since we'll want to hang onto the original hits this sequence
     # had to the canonical chromosome anyways.
@@ -2927,9 +2931,9 @@ sub BlatToSpalnSearch
 	    # Run through and see if we have continuity...
 	    my $continuity = 1;
 	    for (my $i=1; $i<$num_exons; $i++) {
-		$ExonAminos[$i-1] = /\.\.(\d+)$/;
+		$ExonAminos[$i-1] =~ /\.\.(\d+)$/;
 		my $last_end = $1;
-		$ExonAminos[$i]   = /^(\d+)\.\./;
+		$ExonAminos[$i] =~ /^(\d+)\.\./;
 		my $this_start = $1;
 		if ($last_end != $this_start-1) {
 		    $continuity = 0;
@@ -3183,6 +3187,7 @@ sub SpalnSearchChr
 		    $i = $HitData[1]-1;
 		    last;
 		}
+		$j++;
 	    }
 	    
 	}
@@ -3634,9 +3639,6 @@ sub ParseSpalnOutput
     my $nucl_pos    =  0; # Only advances by counting
     my $recent_skip = -1; # Did we just 'skip'?
     while ($line = <$SpalnFile>) {
-
-	# Each content line is preceded by an empty line
-	$line = <$SpalnFile>;
 
 	# This could be a skip... stay frosty!
 	# The final line also replaces where the translated seq line would be,

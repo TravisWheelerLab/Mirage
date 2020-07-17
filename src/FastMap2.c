@@ -12,6 +12,19 @@
 #include <math.h>
 #include "BasicBio.h"
 
+// FUNCTION LIST
+//
+// + PrintUsage
+// + ParseNucleotideFile
+// + ParseProteinFile
+// + TranslateRF
+// + PrintMap
+// + BlockScan
+// + OriginalFastMap
+
+// How many mismatches are allowed (on each side) as we extend a diagonal?
+const int MAX_MISMATCH = 2;
+
 int PrintUsage () {
   printf("\n");
   printf("  USAGE:  ./FastMap2.c [protein-seq-file] [num-protein-seqs] [chromosomal-seq-file] {exon-start-index exon-end-index}\n");
@@ -489,15 +502,34 @@ void BlockScan
     for (j=0; j<=prot_end_index-prot_start_index; j++)
       score += MBB_AminoAliScore(ProtSeq[prot_start_index+j],ORF[orf_start_index+j]);
 
-    while (prot_start_index && orf_start_index
-	   && ProtSeq[prot_start_index-1] == ORF[orf_start_index-1]) {
+    int num_mismatches = 0;
+    while (prot_start_index && orf_start_index) {
+
+      // Check for mismatches (possibly jumping ship)
+      if (ProtSeq[prot_start_index-1] != ORF[orf_start_index-1]) {
+	num_mismatches++;
+	if (num_mismatches == MAX_MISMATCH || ORF[orf_start_index-1] == 'X')
+	  break;
+      }
+
+      // I'm still standing!
       score += MBB_AminoAliScore(ProtSeq[--prot_start_index],ORF[--orf_start_index]);
+
     }
     
-    
-    while (prot_end_index+1 < prot_len && orf_end_index+1 < orf_len
-	   && ProtSeq[prot_end_index+1] == ORF[orf_end_index+1]) {
+    num_mismatches = 0;
+    while (prot_end_index+1 < prot_len && orf_end_index+1 < orf_len) {
+
+      // Check for mismatches (possibly jumping ship)
+      if (ProtSeq[prot_end_index+1] != ORF[orf_end_index+1]) {
+	num_mismatches++;
+	if (num_mismatches == MAX_MISMATCH || ORF[orf_start_index+1] == 'X')
+	  break;
+      }
+
+      // Boost that stinky score!
       score += MBB_AminoAliScore(ProtSeq[++prot_end_index],ORF[++orf_end_index]);
+
     }
     
     // Time to shout 'n' scream about that mapping!
