@@ -482,9 +482,9 @@ sub UseFastMap
 		$exon_list_str = $exon_list_str.' '.$high.' '.$low;
 	    }
 
-	    # The cutest buffer you've ever seen
-	    $search_start += 20;
-	    $search_end   -= 20;
+	    # Buff it up! Until you can feel it!
+	    $search_start += 50;
+	    $search_end   -= 50;
 	    
 	} else {
 
@@ -499,9 +499,9 @@ sub UseFastMap
 		$exon_list_str = $exon_list_str.' '.$low.' '.$high;
 	    }
 
-	    # A teensy tiny little buffer
-	    $search_start -= 20;
-	    $search_end   += 20;
+	    # Buff it up! And you don't even need it!
+	    $search_start -= 50;
+	    $search_end   += 50;
 	    
 	}
 
@@ -2482,8 +2482,8 @@ sub GenBlatMaps
 	    # protein sequence -- check if this is the case!
 	    my $partial = '-';
 	    if ($seqname =~ /^(\d+)(s\d+e\d+)$/) {
-		my $seqname = $1.'-partial'; # Just for quick recognition...
-		$partial    = $2;
+		$seqname = $1.'-partial'; # Just for quick recognition...
+		$partial = $2;
 	    }
 
 	    # We no longer need the indirection of the numeric naming for BLAT
