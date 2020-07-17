@@ -25,6 +25,12 @@
 // How many mismatches are allowed (on each side) as we extend a diagonal?
 const int MAX_MISMATCH = 2;
 
+typedef struct _FM2_OPTS_ {
+  int blocksize;
+} FM2_OPTS;
+
+  
+// PrintUsage
 int PrintUsage () {
   printf("\n");
   printf("  USAGE:  ./FastMap2.c [protein-seq-file] [num-protein-seqs] [chromosomal-seq-file] {exon-start-index exon-end-index}\n");
@@ -364,7 +370,8 @@ void BlockScan
   char * NuclSeq,
   int    rel_start_nucl,
   int    chr_start_nucl,
-  int    revcomp
+  int    revcomp,
+  FM2_OPTS * Opts
  ){
 
   int i,j;
@@ -375,7 +382,7 @@ void BlockScan
   // and we might as well fill in all the diagonals (necessarily
   // a bad idea? -- prot_len * orf_len...), but too big and we
   // might miss something we don't really want to miss...
-  int blocksize = 6;
+  int blocksize = Opts->blocksize;
   if (blocksize > orf_len) blocksize = orf_len;
   int num_blocks = orf_len / blocksize; // OK to risk being one short
 
@@ -508,7 +515,7 @@ void BlockScan
       // Check for mismatches (possibly jumping ship)
       if (ProtSeq[prot_start_index-1] != ORF[orf_start_index-1]) {
 	num_mismatches++;
-	if (num_mismatches == MAX_MISMATCH || ORF[orf_start_index-1] == 'X')
+	if (num_mismatches == MAX_MISMATCH)
 	  break;
       }
 
@@ -523,7 +530,7 @@ void BlockScan
       // Check for mismatches (possibly jumping ship)
       if (ProtSeq[prot_end_index+1] != ORF[orf_end_index+1]) {
 	num_mismatches++;
-	if (num_mismatches == MAX_MISMATCH || ORF[orf_start_index+1] == 'X')
+	if (num_mismatches == MAX_MISMATCH)
 	  break;
       }
 
@@ -691,6 +698,9 @@ int main (int argc, char ** argv) {
   // Check usage
   if (argc < 6) return PrintUsage();
 
+  FM2_OPTS * Opts = malloc(sizeof(FM2_OPTS));
+  Opts->blocksize = 6;
+
   // Parse the nucleotide file
   // Note that in the case of reverse strand the start_index will be larger
   int nucl_seq_len;
@@ -724,10 +734,11 @@ int main (int argc, char ** argv) {
   int *ExonEnds   = malloc(num_exons*sizeof(int));
 
   // We'll start off by just pulling in the coordinates
+  // (and expanding out a couple codons, for the hallibut!)
   j=4;
   for (i=0; i<num_exons; i++) {
-    ExonStarts[i] = atoi(argv[j++]);
-    ExonEnds[i]   = atoi(argv[j++]);
+    ExonStarts[i] = atoi(argv[j++]) - 3 * Opts->blocksize;
+    ExonEnds[i]   = atoi(argv[j++]) + 3 * Opts->blocksize;
   }
 
   // Are we in revcomp land?
@@ -775,7 +786,7 @@ int main (int argc, char ** argv) {
       // frame, we'll distinguish what we're getting out of this
       // function as an RF rather than as an ORF.
       TranslateRF(NuclSeq,ExonStarts[i]+rf_index,ExonEnds[i]+rf_index,RF);
-      int rf_len = 1 + (ExonEnds[i] - ExonStarts[i]) / 3;
+      int rf_len = strlen(RF);
 
       // We'll scan through the frame and pull out each open reading
       // frame (w/ at least 5 aminos)
@@ -831,7 +842,7 @@ int main (int argc, char ** argv) {
 	  //
 	  for (j=0; j<num_seqs; j++)
 	    BlockScan(ProtSeqs[j],j,i,rf_index,&RF[orf_start_index],orf_len,
-		      NuclSeq,orf_rel_nucl,orf_chr_nucl,revcomp);
+		      NuclSeq,orf_rel_nucl,orf_chr_nucl,revcomp,Opts);
 
 	  // [2]
 	  //
@@ -872,6 +883,9 @@ int main (int argc, char ** argv) {
   // These things are also irrelevant now!
   free(ExonStarts);
   free(ExonEnds);
+
+  // Your choices are now pointless!
+  free(Opts);
 
   return 0;
   

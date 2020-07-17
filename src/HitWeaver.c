@@ -1489,7 +1489,7 @@ void ReportMaximalPaths
   for (i=0; i<num_exons; i++) {
     j = ComMembership[i];
     ComMinAmino[j] = MBB_MinInt(ComMinAmino[j],Graph[i]->start_amino);
-    ComMaxAmino[j] = MBB_MaxInt(ComMinAmino[j],Graph[i]->end_amino);
+    ComMaxAmino[j] = MBB_MaxInt(ComMaxAmino[j],Graph[i]->end_amino);
   }
 
   // So now we're going to do some nasty business.
