@@ -2942,7 +2942,7 @@ sub BlatToSpalnSearch
 	    }
 
 	    # If we have continuity, this is a full hit!
-	    push(@FullHitIndices,$num_hits) if ($continuity);
+	    push(@FullHitIndices,$num_hits-1) if ($continuity);
 	    
 	}
 	
