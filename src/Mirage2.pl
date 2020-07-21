@@ -21,10 +21,10 @@ use POSIX;
 use Cwd;
 
 # YUCK
-sub GetBM { my $lib = $0; $lib =~ s/Mirage2.pl$//; return $lib; }
-use lib GetBM();
+sub GetThisDir { my $lib = $0; $lib =~ s/Mirage2.pl$//; return $lib; }
+use lib GetThisDir();
 use BureaucracyMirage;
-
+use DisplayProgress;
 
 sub PrintUsage;
 sub DetailedUsage;
@@ -125,6 +125,11 @@ my @Genomes    = @{$genomesref};
 $ResultsDir = CreateDirectory($ResultsDir);
 print "\n  Results Directory:  $ResultsDir\n\n";
 
+
+# Stick in a directory to record progress information as we're running the
+# various tools that we're so happy to have this opportunity to be running!
+my $progress_dirname = CreateDirectory($ResultsDir.'.progress');
+
 # We'll also create a directory to house any sequences belonging to species that
 # we don't have genomes for.  'Misc' is safe to use because all actual species are
 # lower-cased in our list.
@@ -155,7 +160,8 @@ foreach my $species (@Species) {
 #
 # TODO, MAYBE: Allow for users to provide a list of genes to try searching a family
 #              against (e.g., "nord_pseudo_fam1: obscn titin fgfr2") -- synonyms
-#
+
+ProgressMirageInit('db-speciation');
 my ($originalseqnames_ref) = GenerateSpeciesDBs($ProteinDB,$num_cpus,\%SpeciesSeqDir);
 my @OriginalSeqNames = @{$originalseqnames_ref};
 
@@ -510,106 +516,9 @@ for ($i=0; $i<$numSpecies; $i++) {
     # Knock it off with that darn timing!
     $MultiMSATimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
 
-
-
-
-    ##################################################################
-    #                                                                #
-    #   NEW STAGE: Finding mappings after we've established an MSA   #
-    #                                                                #
-    ##################################################################
-
-
-
-    # Before we really get to work, make a public list of gene families that
-    # need to get investigated, and roughly divvy-up the load.
-    my @PartialMapFams = keys %QuilterMisses;
-    if (scalar(@PartialMapFams)) {
-    
-	my $numPMprocesses = $num_cpus;
-	$numPMprocesses    = scalar(@PartialMapFams) if ($numPMprocesses > scalar(@PartialMapFams));
-	my $threadportion  = int(scalar(@PartialMapFams) / $numPMprocesses);
-
-	# Make an output directory to store all our fun lil mapping datums!
-	# Note that because this is inside the species-specific loop, it's
-	# possible a previous species already wanted to make this directory...
-	my $pm_dirname = $ResultsDir.'/MappingIssues/';
-	if (!(-d $pm_dirname) && system("mkdir $pm_dirname")) { 
-	    die "\n  Failed to create directory '$pm_dirname'\n\n"; 
-	}
-	
-	# NOTE: We're going to need to parallelize here
-	my $processes = 1;
-	my $threadID  = 0;
-	my $pid;
-	while ($processes < $numPMprocesses) {
-	    if ($pid = fork) {
-		if (not defined $pid) { die "\n  ERROR: Fork failed (Mirage.pl:PartialMap)\n\n"; }
-		$threadID = 0;
-	    } else {
-		$threadID = $processes;
-		last;
-	    }
-	    $processes++;
-	}
-	
-	
-	# Which families is this thread in charge of?
-	my $startfam = $threadportion * $threadID;
-	my $endfam   = $threadportion * ($threadID+1); # Tech., the first fam of the next thread
-	$endfam = scalar(@PartialMapFams) if ($endfam > scalar(@PartialMapFams));
-	
-	for (my $fam_id=$startfam; $fam_id<$endfam; $fam_id++) {
-	    
-	    my $fam = $PartialMapFams[$fam_id];
-	    
-	    # We'll store information about partial mappings (or outright misses...) 
-	    # in a family-specific output file.  We can keep this nice 'n' simple.
-	    my $fam_pm_outfname = $pm_dirname.$fam.'.misses.out';
-
-	    # Does this sequence have a hitfile?
-	    my $fam_msa_fname = $MultiMSADir{$Species[$i]}.'/'.$fam.'.afa';
-	    my $hitfilename   = $MultiMSADir{$Species[$i]}.'/'.$fam.'.hits.out';
-	    
-	    my $PMcmd = 'perl '.$location.'PartialMap.pl "'.$fam_msa_fname.'" ';
-	    if (-e $hitfilename) {
-		
-		# Let's keep it simple, smarty
-		$PMcmd = $PMcmd.'"'.$hitfilename.'" "'.$SpeciesDBNames[$i].'" "'.$Genomes[$i].'"';
-		
-	    } elsif ($QuilterNearHits{$fam}) { # Perhaps some 'NearHits' entries are more this family's speed?
-		
-		# We've already put our triples in quotes, so this should be safe for
-		# the commandline...
-		$PMcmd = $PMcmd.'- '.$SpeciesDBNames[$i].' '.$Genomes[$i];
-		foreach my $near_hit_triple (split(/\&/,$QuilterNearHits{$fam})) {
-		    $PMcmd = $PMcmd.' '.$near_hit_triple;
-		}
-		
-	    } else {
-		
-		# NOTHING GOOD HERE -- but we still want to record those misses!
-		open(my $FamMissFile,'>>',$fam_pm_outfname);
-		foreach my $missed_seq (split(/\&/,$QuilterMisses{$fam})) {
-		    print $FamMissFile "  $missed_seq\n  - Unmapped (Quilter miss)\n\n";
-		}
-		close($FamMissFile);
-		next;
-		
-	    }
-
-	    $PMcmd = $PMcmd.' >> "'.$fam_pm_outfname.'"';
-	    
-	    # Run PartialMap.pl and see if we can make our nastiness fresh
-	    if (system($PMcmd)) { die "\n  ERROR:  PartialMap.pl failed ($PMcmd)\n\n"; }
-	    
-	}
-	
-	# All done with those lil' snaccs
-	if ($threadID) { exit(0); }
-	while (wait() > -1) { }
-	
-    }
+    # Species[i] over and out!
+    ClearProgress();
+    print "Intra-species alignment complete for $Species[$i]\n";
 
 }
 
@@ -973,6 +882,9 @@ if ($verbose || $timed) {
 
 # Let the user know where the final directory is
 print "\n\n  All tasks complete.\n  Results in $FinalDir\n\n\n";
+
+# No more progress to be made!
+system("rm -rf \"\$progress_dirname\"");
 
 
 # What, that's all you got? Pssssh, shoulda known it was gonna be EZ PZ :p

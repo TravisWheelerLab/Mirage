@@ -9,9 +9,10 @@ use lib dirname (__FILE__);
 use Cwd;
 
 # YUCKITY YUCK YUCK
-sub GetBM { my $lib = $0; $lib =~ s/Quilter2.pl$//; return $lib; }
-use lib GetBM();
+sub GetThisDir { my $lib = $0; $lib =~ s/Quilter2.pl$//; return $lib; }
+use lib GetThisDir();
 use BureaucracyMirage;
+use DisplayProgress;
 
 sub PrintUsage;
 sub ParseArgs;
@@ -89,6 +90,15 @@ $num_cpus = $1;
 my $chrsizes_ref = ParseChromSizes($genome);
 my %ChrSizes = %{$chrsizes_ref};
 
+# As a last little thing, we'll identify the location of our little progress
+# data alcove and the name of the species
+my $progress_dirname = $species_dirname;
+$progress_dirname =~ s/[^\/]+\/$//;
+$progress_dirname =~ s/[^\/]+\/$//;
+$progress_dirname = $progress_dirname.'.progress/';
+
+$species_dirname =~ /\/([^\/]+)\/$/;
+my $species = $1;
 
 # If we're using a GTF for our first round of searching, hop to it!
 # Otherwise, jump straight to building up one big file for BLAT search.
@@ -247,12 +257,8 @@ sub UseGTF
     my $opts_ref    = shift;
     my %Opts = %{$opts_ref};
 
-    # What was the name of our species, again?
-    $seq_dirname =~ /\/([^\/]+)\/seqs\/$/;
-    my $species = $1;
-
     # UHHHHHH, how exactly did you plan on using a GTF without PARSING IT FIRST?!
-    my $gtf_ref = ParseGTF($gtfname,$species);
+    my $gtf_ref = ParseGTF($gtfname);
     my %GTF = %{$gtf_ref};
 
     # Go ahead and spin up them there CPUs!
@@ -275,6 +281,7 @@ sub UseGTF
     my $BlatFile  = OpenOutputFile($blatfname);
 
     # Work it, thready!
+    my $genes_completed = 0;
     while ($gene) {
 
 	# Let's name the protein file we'll be working with
@@ -288,6 +295,9 @@ sub UseGTF
 	$gene = <$ThreadGuide>;
 	if ($gene =~ /^$threadID (\S+)$/) { $gene = $1; }
 	else                              { $gene = 0;  }
+
+	# Report your progress 
+	$genes_completed++;
 	
     }
 
@@ -316,8 +326,9 @@ sub UseGTF
 sub ParseGTF
 {
     my $gtfname = shift;
-    my $species = shift;
 
+    ProgressMirageQuilter('parsing-gtf',0,$species,$progress_dirname);
+    
     my $GTFile = OpenInputFile($gtfname);
 
     # Essentially, what we want to do is pull all of the GTF entries for our
@@ -3027,102 +3038,64 @@ sub SpalnSearchChr
     my @BlatHits = @{$blathits_ref};
 
     # NOTE: This is somewhat overcomplicated-looking, but I think it's the right
-    #       approach to pulling in nucleotides for our Spaln search.  Basically,
-    #       we try to get 
+    #       approach to pulling in nucleotides for our Spaln search.
+    #
+    #       Basically, we're trying to identify ranges in the protein sequence
+    #       that correspond to particular BLAT hits, so that we can pull DNA sequence
+    #       to concatenate in the expected order for a (hopefully) quick single Spaln
 
-    # Start off by computing the per-position BLAT coverage
+
+    # Initialize the array we'll use to identify which hits need to be grouped.
     my $seq_len = scalar(@Seq);
-    my @BlatCoverage;
-    my @CoverageID; # Who's claiming this sequence segment?
+    my @HitGroupings;
     for (my $i=0; $i<$seq_len; $i++) {
-	$BlatCoverage[$i] = 0;
-	$CoverageID[$i]   = -1;
+	$HitGroupings[$i]  = 0;
     }
 
+    # Now group the hits according to overlapping positions
+    my @HitGroupEnds; # [1..num_hit_groups]
+    my $num_hit_groups = 0;
     for (my $i=0; $i<scalar(@BlatHits); $i++) {
+
 	my @HitData = split(/\|/,$BlatHits[$i]);
+
+	# We'll do an initial run to check whether we have any overlap with another
+	# hit.
+	my $overlaps = 0;
 	for (my $j=$HitData[0]-1; $j<$HitData[1]; $j++) {
-	    $BlatCoverage[$j]++;
-	    $CoverageID[$j]=$i;
-	}
-    }
-
-    # We'll mark gap-adjacent positions and overlap positions in a way that provides
-    # a clean ontology.
-    my @GapAdjacency;
-    my $num_gaps = 0;
-    for (my $i=0; $i<$seq_len; $i++) {
-
-	# Are we preceding a gap?
-	if ($BlatCoverage[$i] == 0) {
-
-	    # We're seeing a new gap!
-	    $num_gaps++;
-
-	    # Hey! You were adjacent the whole time!
-	    $GapAdjacency[$i-1] = $num_gaps if ($i); 
-
-	    # Who else is adjacent to this gap run? (or a member)
-	    $GapAdjacency[$i++] = $num_gaps;
-	    while ($i<$seq_len && $BlatCoverage[$i]==0) {
-		$GapAdjacency[$i++] = $num_gaps;
+	    # If this position has already been covered, look up the hit group we
+	    # belong to and quit this scan
+	    if ($HitGroupings[$j]) {
+		$overlaps = $HitGroupings[$j];
+		last;
 	    }
-	    
-	    # I see you being adjacent over there!
-	    $GapAdjacency[$i] = $num_gaps if ($i<$seq_len);
-	    
+	}
+
+	my $hit_group;
+	if ($overlaps) {
+	    $hit_group = $overlaps;
+	    if ($HitData[1] > $HitGroupEnds[$hit_group]) {
+		$HitGroupEnds[$hit_group] = $HitData[1];
+	    }
 	} else {
-	    $GapAdjacency[$i] = 0;
+	    $num_hit_groups++;
+	    $hit_group = $num_hit_groups;
+	    $HitGroupEnds[$num_hit_groups] = $HitData[1];
+	}
+
+	# Now we can do a second scan to make sure every position is marked
+	# appropriately
+	for (my $j=$HitData[0]-1; $j<$HitData[1]; $j++) {
+	    $HitGroupings[$j] = $hit_group;
 	}
 	
-    }
-
-    my @Overlaps;
-    my $num_overlaps = 0;
-    for (my $i=0; $i<$seq_len; $i++) {
-
-	# Are we in an overlapping region?
-	if ($BlatCoverage[$i] > 1) {
-	    # New overlap!
-	    $num_overlaps++;
-	    while ($i<$seq_len && $BlatCoverage[$i] > 1) {
-		$Overlaps[$i++] = $num_overlaps;
-	    }
-	}
-
-	# Note that we'll have overstepped by one if we were just in an overlap
-	# region, so we don't use an 'else'
-	$Overlaps[$i] = 0;
-	    
-    }
-
-    # Because we could have gaps and overlaps right next to one another,
-    # we'll do a bit of final ontologizing by simply making groups where
-    # there are runs of unclear coverage.
-    my @HitGrouping;
-    my @HitGroupStarts; # inclusive
-    my @HitGroupEnds;   # exclusive
-    my $num_hit_groups = 0;
-    for (my $i=0; $i<$seq_len; $i++) {
-	if ($GapAdjacency[$i] || $Overlaps[$i]) {
-	    $num_hit_groups++;
-	    push(@HitGroupStarts,$i);
-	    while ($i<$seq_len && ($GapAdjacency[$i] || $Overlaps[$i])) {
-		$HitGrouping[$i++] = $num_hit_groups;
-	    }
-	    push(@HitGroupEnds,$i);
-	}
-	$HitGrouping[$i] = 0;
     }
 
     # Next up, we'll figure out the full span of chromosomal sequence that
     # is implicated in groups of hits.  If the range is large (>5Mb) then
     # do some work to split them into more manageable sequence chunks.
     my @GroupNuclRanges;
-    for (my $i=0; $i<$num_hit_groups; $i++) {
-
-	my $group_start = $HitGroupStarts[$i];
-	my $group_end   = $HitGroupEnds[$i];
+    for (my $i=1; $i<=$num_hit_groups; $i++) {
 
 	# Which blat hits are implicated in this group?
 	# NOTE that even if there's a gap starting or ending the sequence, we're
@@ -3134,7 +3107,7 @@ sub SpalnSearchChr
 	for (my $j=0; $j<scalar(@BlatHits); $j++) {
 	    my @HitData = split(/\|/,$BlatHits[$j]);
 	    # Check the first and final positions to see if we're in this group
-	    if ($HitGrouping[$HitData[0]-1]==$i || $HitGrouping[$HitData[1]-1]==$i) {
+	    if ($HitGroupings[$HitData[0]-1]==$i || $HitGroupings[$HitData[1]-1]==$i) {
 		push(@GroupedHits,$j);
 		push(@GroupNuclStarts,$HitData[2]);
 		push(@GroupNuclEnds,$HitData[3]);
@@ -3162,34 +3135,13 @@ sub SpalnSearchChr
     my $range_set_str = '';
     for (my $i=0; $i<$seq_len; $i++) { # This might be better as a 'while' loop... 
 
-	# Are we pulling from a group?
-	if ($HitGrouping[$i]) {
+	# Have we hit the start of a group?
+	if ($HitGroupings[$i]) {
 
 	    # Since we already did all that tough work, this is pretty light lifting!
-	    $range_set_str = $range_set_str.','.$GroupNuclRanges[$HitGrouping[$i]-1];
-	    $i = $HitGroupEnds[$HitGrouping[$i]-1]-1;
+	    $range_set_str = $range_set_str.','.$GroupNuclRanges[$HitGroupings[$i]-1];
+	    $i = $HitGroupEnds[$HitGroupings[$i]];
 
-	} else {
-
-	    # Find the hit who covers this position.  It should be an amino start,
-	    # because of logic.
-	    #
-	    # Sadly, these aren't sorted, so for now I'm just going to risk a full
-	    # scan (it's SCANdalous).
-	    #
-	    # (SCANdalous!)
-	    #
-	    my $j=0;
-	    while ($j<scalar(@BlatHits)) {
-		my @HitData = split(/\|/,$BlatHits[$j]);
-		if ($HitData[0] == $i) {
-		    $range_set_str = $range_set_str.','.$HitData[2].'..'.$HitData[3];
-		    $i = $HitData[1]-1;
-		    last;
-		}
-		$j++;
-	    }
-	    
 	}
 	
     }
@@ -3210,13 +3162,13 @@ sub SpalnSearchChr
 
     # First off, if either end is gapped, pull in 1Mb
     # We'll worry about exceeding the chromosome bounds LATER
-    if ($BlatCoverage[0] == 0) {
-	if ($revcomp) { $RangeStarts[0] += 1000000; }
-	else          { $RangeStarts[0] -= 1000000; }
+    if ($HitGroupings[0] == 0) {
+	if ($revcomp) { $RangeStarts[0] = $RangeEnds[0]+1000000; }
+	else          { $RangeStarts[0] = $RangeEnds[0]-1000000; }
     }
-    if ($BlatCoverage[$seq_len-1] == 0) {
-	if ($revcomp) { $RangeEnds[$num_ranges-1] -= 1000000; }
-	else          { $RangeEnds[$num_ranges-1] += 1000000; }
+    if ($HitGroupings[$seq_len-1] == 0) {
+	if ($revcomp) { $RangeEnds[$num_ranges-1] = $RangeStarts[$num_ranges-1]-1000000; }
+	else          { $RangeEnds[$num_ranges-1] = $RangeStarts[$num_ranges-1]+1000000; }
     }
 
     # Nice!  Now we'll just give each bound an extra 10Kb
@@ -3259,7 +3211,7 @@ sub SpalnSearchChr
 	$num_ranges = $final_num_ranges;
 
 	$RangeStarts[0] = Min($ChrSizes{$chr},$RangeStarts[0]);
-	$RangeEnds[1]   = Max(1,$RangeEnds[0]);
+	$RangeEnds[$num_ranges-1] = Max(1,$RangeEnds[$num_ranges-1]);
 	
     } else {
 
@@ -3287,7 +3239,7 @@ sub SpalnSearchChr
 	$num_ranges = $final_num_ranges;
 
 	$RangeStarts[0] = Max(1,$RangeStarts[0]);
-	$RangeEnds[$num_ranges] = Min($ChrSizes{$chr},$RangeEnds[$num_ranges]);
+	$RangeEnds[$num_ranges-1] = Min($ChrSizes{$chr},$RangeEnds[$num_ranges-1]);
 	
     }
 
