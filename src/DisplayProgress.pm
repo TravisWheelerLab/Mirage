@@ -3,11 +3,6 @@ use warnings;
 use strict;
 use POSIX;
 
-# We'll definitely want our directory-checking / file IO helpers
-sub GetBM { my $lib = $0; $lib =~ s/Quilter2.pl$//; return $lib; }
-use lib GetBM();
-use BureaucracyMirage;
-
 # So every function doesn't need to loop up for length...
 sub PrintProgress;
 sub ClearProgress;
@@ -67,7 +62,7 @@ sub ProgressMirageQuilter
     my $species = shift;
     my $progress_dirname = shift;
 
-    my $status = "  Quilter ($species):";
+    my $status = "  Quilter ($species): ";
     if ($part eq 'parsing-gtf') {
 	$status = $status."Loading GTF data from file";
     }
