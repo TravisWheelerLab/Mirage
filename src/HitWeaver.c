@@ -983,9 +983,9 @@ float RecursivePathEval
 void GetHitExonChrStart
 (
  HW_NODE * N,
- int    in_node_id,
- int  * chr_start_nucl,
- int  * in_edge_id
+ int   in_node_id,
+ int * chr_start_nucl,
+ int * in_edge_id
  ){
 
   // What's the start nucleotide of the full exon?
@@ -1018,13 +1018,13 @@ void GetHitExonChrStart
 void GetHitExonChrEnd
 (
  HW_NODE * N,
- int    out_node_id,
- int  * chr_end_nucl,
- int  * out_edge_id
+ int   out_node_id,
+ int * chr_end_nucl,
+ int * out_edge_id
  ){
 
-  // What's the end nucleotide of the full exon?
-  int nucl = N->end_nucl;
+  // What's the first nucleotide of the full exon?
+  int nucl = N->start_nucl;
 
   int edge_id = 0;
   while (N->OutgoingID[edge_id] != out_node_id)
@@ -1033,10 +1033,7 @@ void GetHitExonChrEnd
 
   // How far over do we shift to get to the last nucleotide used
   // in the spliced exon?
-  // NOTE: Originally this was '- 18' but that was taking us to the
-  //       end of the 5'SS dinucleotides -- I'm not sure if there's
-  //       a bug or if I was confused, but this feels like a patch...
-  int offset = (N->nucl_str_len - 20) - N->LastCodingNucl[edge_id]; // *17*
+  int offset = N->LastCodingNucl[edge_id] - 17; // *17*
 
   // Because we allow for the possibility of inconsistent graphs, we'll
   // check revcomp for each exon individually

@@ -49,6 +49,9 @@ sub InitQuilterProgressVars
 
     # Copy over the number of cpus (requested -- still want to be careful!)
     $DispProg_cpus = $num_cpus;
+
+    # Let 'em know we're initialized!
+    DispProgQuilter('init');
     
 }
 
@@ -110,7 +113,11 @@ sub DispProgQuilter
     my $status = "  Quilter ($DispProg_species): ";
 
     # Now, what part are we working through currently?
-    if ($part eq 'parsing-gtf') {
+    if ($part eq 'init') {
+
+	$status = $status."Preparing to map protein sequences to genome";
+	
+    } elsif ($part eq 'parsing-gtf') {
 
 	$status = $status."Loading GTF data from file";
 
@@ -133,11 +140,12 @@ sub DispProgQuilter
 		    my $thread_genes = <$inf>;
 		    close($inf);
 		    if ($thread_genes =~ /(\d+)/) {
-			$genes_completed += $1;
+			$genes_completed += $1 if ($1);
 		    }
 		}
 	    }
 	    $status = $status."$genes_completed genes examined using GTF coordinates";
+	    $status =~ s/ 1 genes / 1 gene /;
 	}
 
     } elsif ($part eq 'blatprep') {
@@ -167,11 +175,12 @@ sub DispProgQuilter
 		    my $thread_genes = <$inf>;
 		    close($inf);
 		    if ($thread_genes =~ /(\d+)/) {
-			$genes_completed += $1;
+			$genes_completed += $1 if ($1);
 		    }
 		}
 	    }
 	    $status = $status."$genes_completed genes examined using BLAT coordinates";
+	    $status =~ s/ 1 genes / 1 gene /;
 	}
 
     }
