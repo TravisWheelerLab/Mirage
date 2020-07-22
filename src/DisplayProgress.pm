@@ -25,7 +25,8 @@ my $DispProg_species;
 my $DispProg_dirname;
 my $DispProg_cpus;
 
-
+my @QuilterFM2Genes;
+my @QuilterB2SGenes;
 
 
 
@@ -49,6 +50,12 @@ sub InitQuilterProgressVars
 
     # Copy over the number of cpus (requested -- still want to be careful!)
     $DispProg_cpus = $num_cpus;
+
+    # Zero-out the gene completion counters
+    for (my $i=0; $i<$num_cpus; $i++) {
+	$QuilterFM2Genes[$i] = 0;
+	$QuilterB2SGenes[$i] = 0;
+    }
 
     # Let 'em know we're initialized!
     DispProgQuilter('init');
@@ -139,9 +146,10 @@ sub DispProgQuilter
 		    open(my $inf,'<',$outfname);
 		    my $thread_genes = <$inf>;
 		    close($inf);
-		    if ($thread_genes =~ /(\d+)/) {
-			$genes_completed += $1 if ($1);
+		    if ($thread_genes && $thread_genes =~ /(\d+)/) {
+			$QuilterFM2Genes[$i] = $1;
 		    }
+		    $genes_completed += $QuilterFM2Genes[$i];
 		}
 	    }
 	    $status = $status."$genes_completed genes examined using GTF coordinates";
@@ -174,9 +182,10 @@ sub DispProgQuilter
 		    open(my $inf,'<',$outfname);
 		    my $thread_genes = <$inf>;
 		    close($inf);
-		    if ($thread_genes =~ /(\d+)/) {
-			$genes_completed += $1 if ($1);
+		    if ($thread_genes && $thread_genes =~ /(\d+)/) {
+			$QuilterB2SGenes[$i] = $1;
 		    }
+		    $genes_completed += $QuilterB2SGenes[$i];
 		}
 	    }
 	    $status = $status."$genes_completed genes examined using BLAT coordinates";
