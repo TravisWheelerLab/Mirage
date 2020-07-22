@@ -1023,7 +1023,7 @@ void GetHitExonChrEnd
  int  * out_edge_id
  ){
 
-  // What's the start nucleotide of the full exon?
+  // What's the end nucleotide of the full exon?
   int nucl = N->end_nucl;
 
   int edge_id = 0;
@@ -1031,9 +1031,12 @@ void GetHitExonChrEnd
     edge_id++;
   *out_edge_id = edge_id;
 
-  // How far over do we shift to get to the first nucleotide used
+  // How far over do we shift to get to the last nucleotide used
   // in the spliced exon?
-  int offset = (N->nucl_str_len - 18) - N->LastCodingNucl[edge_id]; // *17*
+  // NOTE: Originally this was '- 18' but that was taking us to the
+  //       end of the 5'SS dinucleotides -- I'm not sure if there's
+  //       a bug or if I was confused, but this feels like a patch...
+  int offset = (N->nucl_str_len - 20) - N->LastCodingNucl[edge_id]; // *17*
 
   // Because we allow for the possibility of inconsistent graphs, we'll
   // check revcomp for each exon individually
