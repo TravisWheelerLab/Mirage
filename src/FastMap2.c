@@ -544,7 +544,7 @@ void BlockScan
     
   }
   
-  free(BlockPositives);
+  if (BlockPositives) free(BlockPositives);
   
 }
 
@@ -723,9 +723,9 @@ int main (int argc, char ** argv) {
 
   // Our first task is just to process the exon locations so that they index into
   // the right places in our nucleotide sequence array.
-  int num_exons   = (argc - 3) / 2;
-  int *ExonStarts = malloc(num_exons*sizeof(int));  
-  int *ExonEnds   = malloc(num_exons*sizeof(int));
+  int num_exons    = (argc - 3) / 2;
+  int * ExonStarts = malloc(num_exons*sizeof(int));  
+  int * ExonEnds   = malloc(num_exons*sizeof(int));
 
   // We'll start off by just pulling in the coordinates
   // (and expanding out a couple codons, for the hallibut!)
