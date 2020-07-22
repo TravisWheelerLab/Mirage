@@ -60,12 +60,8 @@ my $mirage_version = 'Version 2.0.0a';
 # assist the user
 if (@ARGV == 0) { PrintUsage(); }
 
-
 # Generics
 my ($i,$j,$k);
-
-# We've officially started Mirage-ery!
-DispProgMirage('init');
 
 
 # Figure out what the location of the Mirage src directory is
@@ -109,6 +105,9 @@ my $cleanMSA     = $Options{cleanmsa};     # Hidden
 my $just_spaln   = $Options{justspaln};    # Hidden
 my $track_spaln  = $Options{trackspaln};   # Hidden
 
+
+# We've officially started Mirage-ery!
+DispProgMirage('init');
 
 # Verify that we have all the files we need on-hand
 #CheckSourceFiles($forcecompile);
@@ -1035,9 +1034,7 @@ sub CheckInstall
 
     my @RequiredFiles;
     push(@RequiredFiles,$location.'Quilter2.pl');
-    push(@RequiredFiles,$location.'BureaucracyMirage.pm');
     push(@RequiredFiles,$location.'FastMap2.c');
-    push(@RequiredFiles,$location.'TransSW.c');
     push(@RequiredFiles,$location.'MultiMSA.pl');
     push(@RequiredFiles,$location.'MultiSeqNW.c');
     push(@RequiredFiles,$location.'MultiSeqNW.h');
