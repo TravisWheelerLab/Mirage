@@ -25,10 +25,8 @@
 // How many mismatches are allowed (on each side) as we extend a diagonal?
 const int MAX_MISMATCH = 2;
 
-typedef struct _FM2_OPTS_ {
-  int blocksize;
-} FM2_OPTS;
-
+// What blocksize do we use during diagonal identification?
+const int BLOCK_SIZE = 6;
   
 // PrintUsage
 int PrintUsage () {
@@ -370,8 +368,7 @@ void BlockScan
   char * NuclSeq,
   int    rel_start_nucl,
   int    chr_start_nucl,
-  int    revcomp,
-  FM2_OPTS * Opts
+  int    revcomp
  ){
 
   int i,j;
@@ -382,7 +379,7 @@ void BlockScan
   // and we might as well fill in all the diagonals (necessarily
   // a bad idea? -- prot_len * orf_len...), but too big and we
   // might miss something we don't really want to miss...
-  int blocksize = Opts->blocksize;
+  int blocksize = BLOCK_SIZE;
   if (blocksize > orf_len) blocksize = orf_len;
   int num_blocks = orf_len / blocksize; // OK to risk being one short
 
@@ -698,9 +695,6 @@ int main (int argc, char ** argv) {
   // Check usage
   if (argc < 6) return PrintUsage();
 
-  FM2_OPTS * Opts = malloc(sizeof(FM2_OPTS));
-  Opts->blocksize = 6;
-
   // Parse the nucleotide file
   // Note that in the case of reverse strand the start_index will be larger
   int nucl_seq_len;
@@ -737,8 +731,8 @@ int main (int argc, char ** argv) {
   // (and expanding out a couple codons, for the hallibut!)
   j=4;
   for (i=0; i<num_exons; i++) {
-    ExonStarts[i] = atoi(argv[j++]) - 3 * Opts->blocksize;
-    ExonEnds[i]   = atoi(argv[j++]) + 3 * Opts->blocksize;
+    ExonStarts[i] = atoi(argv[j++]) - 3 * BLOCK_SIZE;
+    ExonEnds[i]   = atoi(argv[j++]) + 3 * BLOCK_SIZE;
   }
 
   // Are we in revcomp land?
@@ -842,7 +836,7 @@ int main (int argc, char ** argv) {
 	  //
 	  for (j=0; j<num_seqs; j++)
 	    BlockScan(ProtSeqs[j],j,i,rf_index,&RF[orf_start_index],orf_len,
-		      NuclSeq,orf_rel_nucl,orf_chr_nucl,revcomp,Opts);
+		      NuclSeq,orf_rel_nucl,orf_chr_nucl,revcomp);
 
 	  // [2]
 	  //
@@ -883,9 +877,6 @@ int main (int argc, char ** argv) {
   // These things are also irrelevant now!
   free(ExonStarts);
   free(ExonEnds);
-
-  // Your choices are now pointless!
-  free(Opts);
 
   return 0;
   

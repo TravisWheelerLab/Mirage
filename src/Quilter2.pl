@@ -90,15 +90,8 @@ $num_cpus = $1;
 my $chrsizes_ref = ParseChromSizes($genome);
 my %ChrSizes = %{$chrsizes_ref};
 
-# As a last little thing, we'll identify the location of our little progress
-# data alcove and the name of the species
-my $progress_dirname = $species_dirname;
-$progress_dirname =~ s/[^\/]+\/$//;
-$progress_dirname =~ s/[^\/]+\/$//;
-$progress_dirname = $progress_dirname.'.progress/';
-
-$species_dirname =~ /\/([^\/]+)\/$/;
-my $species = $1;
+# Initialize the progress displaying variables
+InitQuilterProgressVars($seq_dirname,$num_cpus);
 
 # If we're using a GTF for our first round of searching, hop to it!
 # Otherwise, jump straight to building up one big file for BLAT search.
@@ -257,8 +250,12 @@ sub UseGTF
     my $opts_ref    = shift;
     my %Opts = %{$opts_ref};
 
+    # Get the name of the species from the directory name
+    $seq_dirname =~ /\/([^\/]+)\/seqs\/$/;
+    my $species = $1;
+
     # UHHHHHH, how exactly did you plan on using a GTF without PARSING IT FIRST?!
-    my $gtf_ref = ParseGTF($gtfname);
+    my $gtf_ref = ParseGTF($gtfname,$species);
     my %GTF = %{$gtf_ref};
 
     # Go ahead and spin up them there CPUs!
@@ -296,8 +293,12 @@ sub UseGTF
 	if ($gene =~ /^$threadID (\S+)$/) { $gene = $1; }
 	else                              { $gene = 0;  }
 
-	# Report your progress 
+	# Report your progress ~1/15 of the time (with a special primer check)
 	$genes_completed++;
+	if (!int(rand(15)) || ($threadID == 0 && $genes_completed == 1)) {
+	    ProgressMirageQuilter('fm2|'.$threadID.'|'.$genes_completed);
+	}
+
 	
     }
 
@@ -326,8 +327,9 @@ sub UseGTF
 sub ParseGTF
 {
     my $gtfname = shift;
+    my $species = shift;
 
-    ProgressMirageQuilter('parsing-gtf',0,$species,$progress_dirname);
+    ProgressMirageQuilter('parsing-gtf');
     
     my $GTFile = OpenInputFile($gtfname);
 
@@ -2327,6 +2329,10 @@ sub RunBlatOnFileSet
     my $gene_name_fmt = shift; # 'seqname' or 'filename'
 
     my @SeqFileNames = @{$seqfiles_ref};
+
+    # Since there's going to be a little bit of file I/O at the start,
+    # we'll give a quick update
+    ProgressMirageQuilter('blatprep');
     
     # Get your mind out of the gutter, the 'cum' stands for 'cumulative'
     #
@@ -2410,6 +2416,9 @@ sub RunBlatOnFileSet
     elsif (uc($uname) =~ /^DARWIN /) { $BLAT = $srcdir.'../inc/blat/blat.macOSX.x86_64'; }
     else                             { $BLAT = $srcdir.'../inc/blat/blat.macOSX.i386';   }
 
+    # I think that now is the time for honesty... We're running BLAT!
+    ProgressMirageQuilter('blatrunning');
+    
     # What do you want your output file to be named? Just kidding, I'll
     # figure it out for you.
     my $blat_outfname = $cum_blat_fname;
@@ -2516,6 +2525,7 @@ sub GenBlatMaps
     #
     # NOTE that if there are any partials for a sequence we'll treat them as a wholly
     # different sequence
+    my $genes_completed = 0;
     foreach my $gene (keys %BlatData) {
 
 	my %BlatBySeq;
@@ -2593,6 +2603,12 @@ sub GenBlatMaps
 	    # Did we get one?
 	    $num_full_maps++ if ($FullMaps[$i]);
 
+	}
+
+	# Regardless of whether or not we found anything, we're done with this gene!
+	$genes_completed++;
+	if (!int(rand(15)) || (!$threadID && $genes_completed == 1)) {
+	    ProgressMirageQuilter('blat2spaln|'.$threadID.'|'.$genes_completed);
 	}
 
 	# Well well welly well...
