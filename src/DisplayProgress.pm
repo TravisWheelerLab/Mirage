@@ -14,8 +14,10 @@ sub InitQuilterProgressVars;
 sub DispProgMirage;
 sub DispProgQuilter;
 
-# Before we get going, let's set a standardized character limit for status messages
-my $DispProg_line_len = 100;
+# Before we get going, let's set a standardized character limit for status messages.
+# Note that we go with a fairly large number to try to get at least one line of
+# text-wrap.
+my $DispProg_line_len = 300;
 
 # Variables that we'll want to have access to
 my $DispProg_species;

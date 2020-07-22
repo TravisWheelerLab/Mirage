@@ -296,7 +296,7 @@ sub UseGTF
 	# Report your progress ~1/15 of the time (with a special primer check)
 	$genes_completed++;
 	if (!int(rand(15)) || ($threadID == 0 && $genes_completed == 1)) {
-	    ProgressMirageQuilter('fm2|'.$threadID.'|'.$genes_completed);
+	    DispProgQuilter('fm2|'.$threadID.'|'.$genes_completed);
 	}
 
 	
@@ -329,7 +329,7 @@ sub ParseGTF
     my $gtfname = shift;
     my $species = shift;
 
-    ProgressMirageQuilter('parsing-gtf');
+    DispProgQuilter('parsing-gtf');
     
     my $GTFile = OpenInputFile($gtfname);
 
@@ -2332,7 +2332,7 @@ sub RunBlatOnFileSet
 
     # Since there's going to be a little bit of file I/O at the start,
     # we'll give a quick update
-    ProgressMirageQuilter('blatprep');
+    DispProgQuilter('blatprep');
     
     # Get your mind out of the gutter, the 'cum' stands for 'cumulative'
     #
@@ -2417,7 +2417,7 @@ sub RunBlatOnFileSet
     else                             { $BLAT = $srcdir.'../inc/blat/blat.macOSX.i386';   }
 
     # I think that now is the time for honesty... We're running BLAT!
-    ProgressMirageQuilter('blatrunning');
+    DispProgQuilter('blatrunning');
     
     # What do you want your output file to be named? Just kidding, I'll
     # figure it out for you.
@@ -2608,7 +2608,7 @@ sub GenBlatMaps
 	# Regardless of whether or not we found anything, we're done with this gene!
 	$genes_completed++;
 	if (!int(rand(15)) || (!$threadID && $genes_completed == 1)) {
-	    ProgressMirageQuilter('blat2spaln|'.$threadID.'|'.$genes_completed);
+	    DispProgQuilter('blat2spaln|'.$threadID.'|'.$genes_completed);
 	}
 
 	# Well well welly well...
