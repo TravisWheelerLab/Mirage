@@ -21,7 +21,7 @@ use POSIX;
 use Cwd;
 
 # YUCK
-sub GetThisDir { my $lib = $0; $lib =~ s/Mirage2.pl$//; return $lib; }
+sub GetThisDir { my $lib = $0; $lib =~ s/\/Mirage2.pl$//; return $lib; }
 use lib GetThisDir();
 use BureaucracyMirage;
 use DisplayProgress;

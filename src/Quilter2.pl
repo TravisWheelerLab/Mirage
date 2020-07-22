@@ -9,7 +9,7 @@ use lib dirname (__FILE__);
 use Cwd;
 
 # YUCKITY YUCK YUCK
-sub GetThisDir { my $lib = $0; $lib =~ s/Quilter2.pl$//; return $lib; }
+sub GetThisDir { my $lib = $0; $lib =~ s/\/Quilter2.pl$//; return $lib; }
 use lib GetThisDir();
 use BureaucracyMirage;
 use DisplayProgress;
