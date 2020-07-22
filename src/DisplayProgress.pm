@@ -11,14 +11,11 @@ sub ClearProgress;
 sub InitQuilterProgressVars;
 
 # Many functions for specific outs-put
-sub ProgressMirageInit;
-sub ProgressMirageQuilter;
-sub ProgressMirageMultiMSA;
-sub ProgressMirageMultiSeqNW;
-sub ProgressMirageCleanup;
+sub DispProgMirage;
+sub DispProgQuilter;
 
 # Before we get going, let's set a standardized character limit for status messages
-my $DispProg_line_len = 120;
+my $DispProg_line_len = 100;
 
 # Variables that we'll want to have access to
 my $DispProg_species;
@@ -68,14 +65,19 @@ sub ClearProgress { PrintProgress(' '); }
 
 ###############################################################
 #
-sub ProgressMirageInit
+sub DispProgMirage
 {
-    # What part of the initialization are we immersed in?
-    my $part = shift;
-    my $status;
+    my $data_str = shift;
+    my @Data = split(/\|/,$data_str);
 
-    if ($part eq 'db-speciation') {
-	$status = "Dividing protein database according to species";
+    # Field 0 is always the part of the program we're working on
+    my $part = $Data[0];
+	
+    my $status = "  Mirage: ";
+    if ($part eq 'init') {
+	$status = $status."Checking files and performing setup";
+    } elsif ($part eq 'db-speciation') {
+	$status = $status."Dividing protein database according to species";
     }
     
     PrintProgress($status);
@@ -88,7 +90,7 @@ sub ProgressMirageInit
 
 ###############################################################
 #
-sub ProgressMirageQuilter
+sub DispProgQuilter
 {
     my $data_str = shift;
     my @Data = split(/\|/,$data_str);
@@ -175,44 +177,6 @@ sub ProgressMirageQuilter
     PrintProgress($status) if (!$threadID);
     
 }
-
-
-
-
-
-
-###############################################################
-#
-sub ProgressMirageMultiMSA
-{
-
-}
-
-
-
-
-
-
-###############################################################
-#
-sub ProgressMirageMultiSeqNW
-{
-
-}
-
-
-
-
-
-
-###############################################################
-#
-sub MirageCleanup
-{
-
-}
-
-
 
 
 

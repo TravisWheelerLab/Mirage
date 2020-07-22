@@ -64,6 +64,9 @@ if (@ARGV == 0) { PrintUsage(); }
 # Generics
 my ($i,$j,$k);
 
+# We've officially started Mirage-ery!
+DispProgMirage('init');
+
 
 # Figure out what the location of the Mirage src directory is
 my $location = $0;
@@ -123,7 +126,7 @@ my @Genomes    = @{$genomesref};
 
 # Make a directory to store results
 $ResultsDir = CreateDirectory($ResultsDir);
-print "\n  Results Directory:  $ResultsDir\n\n";
+print "\n  Results Directory:  $ResultsDir\n\n" if ($verbose);
 
 
 # Stick in a directory to record progress information as we're running the
@@ -161,7 +164,7 @@ foreach my $species (@Species) {
 # TODO, MAYBE: Allow for users to provide a list of genes to try searching a family
 #              against (e.g., "nord_pseudo_fam1: obscn titin fgfr2") -- synonyms
 
-ProgressMirageInit('db-speciation');
+DispProgMirage('db-speciation');
 my ($originalseqnames_ref) = GenerateSpeciesDBs($ProteinDB,$num_cpus,\%SpeciesSeqDir);
 my @OriginalSeqNames = @{$originalseqnames_ref};
 
