@@ -3637,7 +3637,7 @@ sub ParseSpalnOutput
 	    # The only time we'll take its word over our skip counting
 	    # during a disagreement is if the skip is 60 nt's, in which
 	    # case we'll assume that the skip was unnecessary.
-	    $nucl_line =~ /^\s+(\d+)/;
+	    $nucl_line =~ /^\s*(\d+)/;
 	    my $line_nucl_pos = $1;
 
 	    # A catch for the first "skip"
