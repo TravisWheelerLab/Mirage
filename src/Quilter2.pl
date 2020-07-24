@@ -3104,9 +3104,13 @@ sub BlatToSpalnSearch
 	$ChrGroupSorting{$chr} =~ /(\d+)$/;
 	my $end_amino = $GroupEnds[$1];
 
-	# We'll also want to know the REAL chromosome behind the mask
+	# We'll also want to know the REAL chromosome behind the mask (or at least
+	# it's strand direction and length...)
 	my $strand = 1;
 	$strand = -1 if ($chr =~ /\-$/);
+	my $true_chr = $chr;
+	$true_chr =~ s/\S$//;
+	my $chr_len = $ChrSizes{$true_chr};
 
 	# What did I tell you about benefitting from knowing the start and end aminos?
 	# If either end is gapped, pull in 100Kb
@@ -3115,71 +3119,14 @@ sub BlatToSpalnSearch
 
 	# We'll also just pull in 10Kb to each range...
 	for (my $i=0; $i<$num_ranges; $i++) {
+
 	    $RangeStarts[$i] -= 10000 * $strand;
 	    $RangeEnds[$i]   += 10000 * $strand;
-	}
 
-	# Because we *could* cause new overlaps by pulling in this additional sequence,
-	# we do a bit of finalization...
-	# Note that we'll need to have the actual chromosome's name on-hand for the
-	# sizing lookup
-	my $true_chr = $chr;
-	$true_chr =~ s/\S$//;
-	if ($strand == -1) {
+	    # Make sure that you aren't overstepping any boundaries
+	    $RangeStarts[$i] = Max(1,Min($RangeStarts[$i],$chr_len));
+	    $RangeEnds[$i]   = Max(1,Min($RangeEnds[$i],  $chr_len));
 
-	    my @FinalRangeStarts;
-	    my @FinalRangeEnds;
-	    
-	    push(@FinalRangeStarts,$RangeStarts[0]);
-	    push(@FinalRangeEnds,$RangeEnds[0]);
-	    my $final_num_ranges = 1;
-	    for (my $i=1; $i<$num_ranges; $i++) {
-		if ($RangeStarts[$i] > $FinalRangeEnds[$final_num_ranges-1]) {
-		    $FinalRangeEnds[$final_num_ranges-1] = $RangeEnds[$i];
-		} else {
-		    push(@FinalRangeStarts,$RangeStarts[$i]);
-		    push(@FinalRangeEnds,$RangeEnds[$i]);
-		    $final_num_ranges++;
-		}
-	    }
-	    
-	    for (my $i=0; $i<$final_num_ranges; $i++) {
-		$RangeStarts[$i] = $FinalRangeStarts[$i];
-		$RangeEnds[$i]   = $FinalRangeEnds[$i];
-	    }
-	    $num_ranges = $final_num_ranges;
-	    
-	    $RangeStarts[0] = Min($ChrSizes{$true_chr},$RangeStarts[0]);
-	    $RangeEnds[$num_ranges-1] = Max(1,$RangeEnds[$num_ranges-1]);
-	    
-	} else {
-	    
-	    my @FinalRangeStarts;
-	    my @FinalRangeEnds;
-	    
-	    push(@FinalRangeStarts,$RangeStarts[0]);
-	    push(@FinalRangeEnds,$RangeEnds[0]);
-	    
-	    my $final_num_ranges = 1;
-	    for (my $i=1; $i<$num_ranges; $i++) {
-		if ($RangeStarts[$i] < $FinalRangeEnds[$final_num_ranges-1]) {
-		    $FinalRangeEnds[$final_num_ranges-1] = $RangeEnds[$i];
-		} else {
-		    push(@FinalRangeStarts,$RangeStarts[$i]);
-		    push(@FinalRangeEnds,$RangeEnds[$i]);
-		    $final_num_ranges++;
-		}
-	    }
-	    
-	    for (my $i=0; $i<$final_num_ranges; $i++) {
-		$RangeStarts[$i] = $FinalRangeStarts[$i];
-		$RangeEnds[$i]   = $FinalRangeEnds[$i];
-	    }
-	    $num_ranges = $final_num_ranges;
-	    
-	    $RangeStarts[0] = Max(1,$RangeStarts[0]);
-	    $RangeEnds[$num_ranges-1] = Min($ChrSizes{$true_chr},$RangeEnds[$num_ranges-1]);
-	    
 	}
 
 	# Because we're using a function that plays friendly with a multiple-chromosome
