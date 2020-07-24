@@ -2984,11 +2984,16 @@ sub BlatToSpalnSearch
 	    next if ($GroupChrs[$check] ne $chr);
 
 	    # OOOOOH, same chromosome! Do they overlap at all?
-	    if (($GroupStarts[$group] >= $GroupStarts[$check] &&
-		 $GroupStarts[$group] <= $GroupEnds[$check])
+
+	    # NOTE: While this 'gap' seems large, the way to think about it
+	    #  (i.m.o.) is "What size of Blat hit to another chromosome would
+	    #  be enough to consider interrupting this run?"
+	    my $maxgap = 30;
+	    if (($GroupStarts[$group] >= $GroupStarts[$check] - $maxgap &&
+		 $GroupStarts[$group] <= $GroupEnds[$check] + $maxgap)
 		||
-		($GroupEnds[$group] >= $GroupStarts[$check] &&
-		 $GroupEnds[$group] <= $GroupEnds[$check])) {
+		($GroupEnds[$group] >= $GroupStarts[$check] - $maxgap &&
+		 $GroupEnds[$group] <= $GroupEnds[$check] + $maxgap)) {
 
 		# OVERLAP!!!! Combine those groups!
 		$GroupStarts[$group] = Min($GroupStarts[$group],$GroupStarts[$check]);
