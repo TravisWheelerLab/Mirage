@@ -38,7 +38,6 @@ sub RunBlatOnFileSet;
 sub GenBlatMaps;
 sub AttemptBlatFill;
 sub BlatToSpalnSearch;
-sub GetSpalnSfetchRanges;
 sub SpalnSearch;
 sub ClusterNuclRanges;
 sub AdjustNuclCoord;
@@ -3077,6 +3076,15 @@ sub BlatToSpalnSearch
 
 	}
     }
+
+
+    
+
+    ##########################
+    #                        #
+    #    S E A R C H    1    #
+    #                        #
+    ##########################
     
     
     # Swell! Now we'll go through each of our chromosomes, and any that have more
@@ -3118,7 +3126,7 @@ sub BlatToSpalnSearch
 	# range
 	my @SpalnChrs;
 	for (my $i=0; $i<$num_ranges; $i++) {
-	    push(@SpalnChrs,$chr);
+	    $SpalnChrs[$i] = $chr;
 	}
 
 	# Let's see what we see!
@@ -3126,31 +3134,66 @@ sub BlatToSpalnSearch
 	    = SpalnSearch($seqname,$seq_str,$prot_fname,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs);
 
 	# If we got a hit, then we'll be happy about that!
-	if ($hit_pct_id) {
-
-	    # WOOOO! Is this our best chromosome, yet?
-	    if ($hit_pct_id > $top_pct_id) {
-		$top_pct_id  = $hit_pct_id;
-		$top_hit_str = $hit_str;
-	    }
-
-	    # Either way, let's ditch this stinky ol' chromosome!
-	    next;
-
+	if ($hit_pct_id > $top_pct_id) {
+	    $top_pct_id  = $hit_pct_id;
+	    $top_hit_str = $hit_str;
 	}
+    }
+
+    # Any chance we got a hit on easy mode?
+    if ($top_pct_id) {
+	RunSystemCommand("rm \"$protf_name\"");
+	return $top_hit_str;
+    }
+
+
+    ##########################
+    #                        #
+    #    S E A R C H    2    #
+    #                        #
+    ##########################
+    
+    # Alright, we've tried the 'standard' approach to splicing -- now let's see if
+    # there's anything out-of-order, but just on a chromosomal level...
+    foreach my $chr (keys %CoverageByChr) {
+
+	# Do you have solid coverage?
+	next if ($CoverageByChr{$chr} < 3 * $seq_len / 4);
+
+	# Woot! So, if your coverage is so great, where's it coming from?
+	my @RangeStarts;
+	my @RangeEnds;
+	foreach my $group (split(/\,/,$ChrGroupSorting{$chr})) {
+	    foreach my $range (split/\,/,$GroupNuclRanges[$group]) {
+		$range =~ /^(\d+)\.\.(\d+)$/;
+		push(@RangeStarts,$1);
+		push(@RangeEnds,$2);
+	    }
+	}
+
+	# We'll need to know the chromosome's true identity
+	my $revcomp = 0;
+	$revcomp = 1 if ($chr =~ /\-$/);
+	my $true_chr = $chr;
+	$true_chr =~ s/\S$//;
+	my $chr_len = $ChrSizes{$true_chr};
+
+	# First off, we'll try a spaln search on a range that assumes no funny business
+	# vis-a-vis splicing.
 
 	# Hmm, doesn't look like we got a solid hit the first time.
 	# Let's see if there's a funkiness to the order (weird splicing alert!)
-	($starts_ref,$ends_ref,$num_ranges)
+	my ($starts_ref,$ends_ref,$num_ranges)
 	    = GetSpalnSfetchRanges(\@RangeStarts,\@RangeEnds,$chr_len,0);
-	@SpalnStarts = @{$starts_ref};
-	@SpalnEnds   = @{$ends_ref};
+	my @SpalnStarts = @{$starts_ref};
+	my @SpalnEnds   = @{$ends_ref};
+	my @SpalnChrs;
 	for (my $i=0; $i<$num_ranges; $i++) {
 	    $SpalnChrs[$i] = $chr;
 	}
 
 	# Let's try this again!
-	($hit_str,$hit_pct_id)
+	my ($hit_str,$hit_pct_id)
 	    = SpalnSearch($seqname,$seq_str,$prot_fname,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs);
 
 	# Last call for spaln-ohol!
@@ -3169,7 +3212,11 @@ sub BlatToSpalnSearch
     }
 
 
-
+    ##########################
+    #                        #
+    #    S E A R C H    3    #
+    #                        #
+    ##########################
     
     # Hmmmmm.....
     # Alright, let's go wild 'n' crazy and see if we can jumble our chromosomes together
@@ -3205,7 +3252,7 @@ sub BlatToSpalnSearch
 	}
     }
 
-    # Go for it!
+    # Last call for Spaln-ohol!
     my ($hit_str,$hit_pct_id)
 	= SpalnSearch($seqname,$seq_str,$prot_fname,\@RangeStarts,\@RangeEnds,\@RangeChrs);
 
@@ -3367,7 +3414,7 @@ sub SpalnSearch
     my @RangeChrs = @{$range_chrs_ref};
 
     my $num_ranges = scalar(@RangeChrs);
-    
+
     # We'll need to track where jump positions are in our Frankensteinian seq.
     # The format will be 'reported-pos':'actual-nucl-pos' so we scan until
     # 'reported-pos' is higher than the index we have, and then add the difference
