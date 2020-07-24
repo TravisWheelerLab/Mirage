@@ -3477,6 +3477,12 @@ sub ClusterNuclRanges
 	}
     }
 
+    # If we're already under the span, we're done!
+    if ($max-$min < $max_span) {
+	return $max.'..'.$min if ($revcomp);
+	return $min.'..'.$max;
+    }
+
     # Nope, recursion time!  Group sequences according to who they're closest to.
     # Note that this is a little fast 'n' loose, but given the span is as large as
     # it is, we aren't worried about (what I assume would be) minor roughness
