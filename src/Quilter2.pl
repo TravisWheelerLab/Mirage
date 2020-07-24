@@ -38,8 +38,8 @@ sub RunBlatOnFileSet;
 sub GenBlatMaps;
 sub AttemptBlatFill;
 sub BlatToSpalnSearch;
-sub SpalnSearchChr;
-sub GroupRanges;
+sub SpalnSearch;
+sub ClusterNuclRanges;
 sub AdjustNuclCoord;
 sub ParseBlatLine;
 sub ParseSpalnOutput;
@@ -2867,35 +2867,9 @@ sub BlatToSpalnSearch
     my $seq_str = shift;
     my $blathits_ref = shift;
 
-    # We'll start off by building up a hash of hits, broken apart by chromosome
     my @BlatHits = @{$blathits_ref};
-    my %BlatHitsByChr;
-    for (my $i=0; $i<scalar(@BlatHits); $i++) {
 
-	# We'll end up clearing out the first pieces of data in the blat hits,
-	# since we know there aren't partial hits in this list.
-	$BlatHits[$i] =~ /^\-\s+(.*)$/;
-	my $blat_outline = $1;
-	my ($blat_chr,$blat_amino_start,$blat_amino_end,$blat_nucl_start,$blat_nucl_end,$blat_score)
-	    = ParseBlatLine($blat_outline);
-
-	# We'll want to know if this is the reverse complement
-	my $revcomp = 0;
-	$revcomp = 1 if ($blat_nucl_start > $blat_nucl_end);
-
-	# Hash it!
-	my $chr = $blat_chr.'-'.$revcomp;
-	my $hit = $blat_amino_start.'|'.$blat_amino_end.'|'.$blat_nucl_start;
-	$hit    = $hit.'|'.$blat_nucl_end.'|'.$blat_score;
-	if ($BlatHitsByChr{$chr}) {
-	    $BlatHitsByChr{$chr} = $BlatHitsByChr{$chr}.'&'.$hit;
-	} else {
-	    $BlatHitsByChr{$chr} = $hit;
-	}
-	
-    }
-
-    # We'll go ahead and make a file with the protein sequence
+    # We'll go ahead and kick things off by making a file with the protein sequence
     my $prot_fname = $seq_dirname.$seqname.'.blat2spaln.prot.in';
     my $ProtFile = OpenOutputFile($prot_fname);
     print $ProtFile ">$seqname\n";
@@ -2907,124 +2881,379 @@ sub BlatToSpalnSearch
     print $ProtFile "\n";
     close($ProtFile);
 
-    # Now we can go through each of the chromosomes and see how high-quality of a
-    # mapping we can get out of Spaln
-    my @HitsByChr;
-    my @HitPctsID;
-    my @ChrList;
-    my @FullHitIndices;
-    my $tot_exons = 0;
-    my $num_hits = 0;
-    foreach my $blat_chr (keys %BlatHitsByChr) {
 
-	$blat_chr =~ /^(\S+)\-(\d)$/;
-	my $chr = $1;
-	my $revcomp = $2;
+    # Now we'll organize our hits into groups along the length of the protein.
+    #
+    # The idea is that each position of the protein can belong to one or more groups,
+    # where a group is defined by overlapping hits to the same chromosome.
+    #
+    # Our groups will run [1..num_hit_groups]
+    #
+    my $seq_len = length($seq_str);
+    my @Groupings;
+    for (my $i=0; $i<$seq_len; $i++) {
+	$Groupings[$i] = 0;
+    }
+    my @GroupHits; # The index in BlatHits
+    my @GroupStarts;
+    my @GroupEnds;
+    my @GroupChrs;
+    my $num_groups = 0;
+    for (my $hit_id=0; $hit_id<scalar(@BlatHits); $hit_id++) {
 
-	my @HitList = split(/\&/,$BlatHitsByChr{$blat_chr});
-	my ($hitstr,$pct_id)
-	    = SpalnSearchChr($seqname,\@Seq,$chr,$revcomp,\@HitList,$prot_fname);
+	# We'll end up clearing out the first pieces of data in the blat hits,
+	# since we know there aren't partial hits in this list.
+	$BlatHits[$hit_id] =~ /^\-\s+(.*)$/;
+	my $blat_outline = $1;
+	my ($chr,$amino_start,$amino_end,$nucl_start,$nucl_end,$score)
+	    = ParseBlatLine($blat_outline);
 
-	# Did we get a little ol' snack?
-	next if (!$hitstr);
-
-	# Note that these hits are fully formatted (so they all start with the whole
-	# "sequence id," "map method," "chromosome," and "num exons" dump).
-	$num_hits++;
-	push(@HitsByChr,$hitstr);
-	push(@HitPctsID,$pct_id);
-	push(@ChrList,$blat_chr);
-
-	# Quick question for ya: Does this hit give us full coverage?
-
-	# Pull out the data and gather all of the amino ranges
-	my @HitLines = split(/\n/,$hitstr);
-	$HitLines[3] =~ /Num Exons  \: (\d+)/;
-	my $num_exons = $1;
-	my @ExonAminos;
-	for (my $i=4; $i<4+($num_exons*2); $i+=2) {
-	    $HitLines[$i] =~ /Aminos (\d+\.\.\d+)\,/;
-	    push(@ExonAminos,$1);
+	# We'll want to know if this is the reverse complement
+	if ($nucl_start > $nucl_end) {
+	    $chr = $chr.'-';
+	    my $temp = $nucl_start;
+	    $nucl_start = $nucl_end;
+	    $nucl_end = $temp;
 	}
 
-	# Increment the total number of exons across all hits
-	$tot_exons += $num_exons;
+	# Let's go ahead and convert the amino coordinates into easy mode
+	$amino_start--;
+	$amino_end--;
 
-	# We can initially check if the first exon starts the protein and the final
-	# exon ends the protein
-	my $seq_len = scalar(@Seq);
-	if ($ExonAminos[0] =~ /^1\.\./ && $ExonAminos[$num_exons-1] =~ /\.\.$seq_len$/) {
-	    # Run through and see if we have continuity...
-	    my $continuity = 1;
-	    for (my $i=1; $i<$num_exons; $i++) {
-		$ExonAminos[$i-1] =~ /\.\.(\d+)$/;
-		my $last_end = $1;
-		$ExonAminos[$i] =~ /^(\d+)\.\./;
-		my $this_start = $1;
-		if ($last_end != $this_start-1) {
-		    $continuity = 0;
-		    last;
+	# Revisionist hit-story!
+	my $hit = $chr.'|'.$amino_start.'|'.$amino_end.'|'.$nucl_start.'|'.$nucl_end;
+	$hit    = $hit.'|'.$score.'|'.$hit_id;
+	$BlatHits[$hit_id] = $hit;
+
+	# Does this hit overlap with any other hits to the same chromosome?
+	my $overlap = 0;
+	for (my $i=$amino_start; $i<=$amino_end; $i++) {
+	    if ($Groupings[$i]) {
+		foreach my $group (split(/\,/,$Groupings[$i])) {
+		    if ($GroupChrs[$group] eq $chr) {
+			$overlap = $group;
+			last;
+		    }
 		}
 	    }
-
-	    # If we have continuity, this is a full hit!
-	    push(@FullHitIndices,$num_hits-1) if ($continuity);
+	    last if ($overlap);
+	}
+	
+	# Find your crew, lil' hit
+	my $group;
+	if ($overlap) {
+	    
+	    $group = $overlap;
+	    $GroupHits[$group] = $GroupHits[$group].','.$hit_id;
+	    $GroupStarts[$group] = Min($GroupStarts[$group],$amino_start);
+	    $GroupEnds[$group] = Max($GroupEnds[$group],$amino_end);
+	    
+	} else {
+	    
+	    # First to lay claim (from this chromosome)!
+	    $num_groups++;
+	    $GroupHits[$num_groups] = $hit_id;
+	    $GroupChrs[$num_groups] = $chr;
+	    $GroupStarts[$num_groups] = $amino_start;
+	    $GroupEnds[$num_groups] = $amino_end;
+	    $group = $num_groups;
 	    
 	}
-	
 
+	# Make sure every position is appropriately marked for this group!
+	for (my $i=$amino_start; $i<=$amino_end; $i++) {
+	    if (!$Groupings[$i]) {
+		$Groupings[$i] = $group;
+	    } elsif ($Groupings[$i] !~ /^$group|\,$group/) {
+		$Groupings[$i] = $Groupings[$i].','.$group;
+	    }
+	}
+	
     }
 
-    # No more searching for you, mister/miss!
-    RunSystemCommand("rm \"$prot_fname\"");
 
-    # If we didn't get anything worth reporting, we'll just have to cry all night
-    return 0 if ($num_hits == 0);
+    # Next up, because it's possible that groups could have merged, we'll
+    # do a quick scan through the array to merge overlapping groups from the
+    # same chromosome
+    my %StartsToGroups;
+    my $final_num_groups = 0;
+    for (my $group=1; $group<=$num_groups; $group++) {
+
+	# Which chromosome is this?
+	my $chr = $GroupChrs[$group];
+	next if (!$chr);
+
+	for (my $check=$group+1; $check<=$num_groups; $check++) {
+
+	    next if ($GroupChrs[$check] ne $chr);
+
+	    # OOOOOH, same chromosome! Do they overlap at all?
+	    if (($GroupStarts[$group] >= $GroupStarts[$check] &&
+		 $GroupStarts[$group] <= $GroupEnds[$check])
+		||
+		($GroupEnds[$group] >= $GroupStarts[$check] &&
+		 $GroupEnds[$group] <= $GroupEnds[$check])) {
+
+		# OVERLAP!!!! Combine those groups!
+		$GroupStarts[$group] = Min($GroupStarts[$group],$GroupStarts[$check]);
+		$GroupEnds[$group] = Max($GroupEnds[$group],$GroupEnds[$check]);
+		$GroupHits[$group] = $GroupHits[$group].','.$GroupHits[$check];
+		$GroupChrs[$check] = 0;
+
+		# So, this is annoying, but we'll have to go back and make
+		# sure that we don't now transitively overlap with an earlier group...
+		$check = $group;
+		
+	    }
+	    
+	}
+
+	# Switch over to the 'final_num_groups' index
+	$GroupStarts[$final_num_groups] = $GroupStarts[$group];
+	$GroupEnds[$final_num_groups] = $GroupEnds[$group];
+	$GroupChrs[$final_num_groups] = $GroupChrs[$group];
+	$GroupHits[$final_num_groups] = $GroupHits[$group];
+
+	# Good stuff! Now we'll record the start position of this group, so we can
+	# go through the hits in sorted order along the protein.
+	if ($StartsToGroups{$GroupStarts[$final_num_groups]}) {
+	    $StartsToGroups{$GroupStarts[$final_num_groups]}
+	    = $StartsToGroups{$GroupStarts[$final_num_groups]}.','.$final_num_groups;
+	} else {
+	    $StartsToGroups{$GroupStarts[$final_num_groups]} = $final_num_groups;
+	}
+	
+	# That's a keeper!
+	$final_num_groups++;
+	
+    }
+
+
+    # Radical! Now, we'll go through all of our groups and determine their
+    # search ranges on the chromosome.
+    my @GroupNuclRanges;
+    my @GroupSorting;
+    my %ChrGroupSorting;
+    my %CoverageByChr;
+    foreach my $start_amino (sort {$a <=> $b} keys %StartsToGroups) {
+	foreach my $group (split(/\,/,$StartsToGroups{$start_amino})) {
+
+	    # And that's your place!
+	    push(@GroupSorting,$group);
+
+	    # But this is also your place!
+	    my $chr = $GroupChrs[$group];
+	    if ($ChrGroupSorting{$chr}) {
+		$ChrGroupSorting{$chr} = $ChrGroupSorting{$chr}.','.$group;
+	    } else {
+		$ChrGroupSorting{$chr} = $group;
+	    }
+
+	    # While we're at it (wrt bookkeeping), how much of the protein do the
+	    # hits to this chromosome cover?
+	    my $group_coverage = $GroupEnds[$group] - $GroupStarts[$group] + 1;
+	    if ($CoverageByChr{$chr}) { $CoverageByChr{$chr} += $group_coverage; }
+	    else                      { $CoverageByChr{$chr}  = $group_coverage; }
+
+	    # Make a list of all nucleotide start and end positions
+	    my @NuclStarts;
+	    my @NuclEnds;
+	    foreach my $hit_id (split(/\,/,$GroupHits[$group])) {
+		my $hit = $BlatHits[$hit_id];
+		$hit =~ /^[^\|]+\|\d+\|\d+\|(\d+)\|(\d+)\|/;
+		push(@NuclStarts,$1);
+		push(@NuclEnds,$2);
+	    }
+
+	    # Perform a series of clusterings until the span of each set of clustered
+	    # hits is less than a preset distance
+	    my $max_span = 1000000; # 1 Mb	
+	    my $ranges   = ClusterNuclRanges(\@NuclStarts,\@NuclEnds,$max_span);
+	    $GroupNuclRanges[$group] = $ranges;
+
+	}
+    }
+    
+    
+    # Swell! Now we'll go through each of our chromosomes, and any that have more
+    # than 75% coverage will be Spalned
+    my $top_pct_id = 0;
+    my $top_hit_str;
+    foreach my $chr (keys %CoverageByChr) {
+
+	# Do you have solid coverage?
+	next if ($CoverageByChr{$chr} < 3 * $seq_len / 4);
+
+	# Woot! So, if your coverage is so great, where's it coming from?
+	my @RangeStarts;
+	my @RangeEnds;
+	foreach my $group (split(/\,/,$ChrGroupSorting{$chr})) {
+	    foreach my $range (split/\,/,$GroupNuclRanges[$group]) {
+		$range =~ /^(\d+)\.\.(\d+)$/;
+		push(@RangeStarts,$1);
+		push(@RangeEnds,$2);
+	    }
+	}
+	my $num_ranges = scalar(@RangeStarts);
+
+	# We'll want to know the start and end aminos so we can determine if the
+	# ends are gapped.
+	$ChrGroupSorting{$chr} =~ /^(\d+)/;
+	my $start_amino = $GroupStarts[$1];
+	$ChrGroupSorting{$chr} =~ /(\d+)$/;
+	my $end_amino = $GroupEnds[$1];
+
+	# We'll also want to know the REAL chromosome behind the mask
+	my $strand = 1;
+	$strand = -1 if ($chr =~ /\-$/);
+
+	# What did I tell you about benefitting from knowing the start and end aminos?
+	# If either end is gapped, pull in 100Kb
+	$RangeStarts[0]           -= 100000 * $strand if ($start_amino);
+	$RangeEnds[$num_ranges-1] += 100000 * $strand if ($end_amino != $seq_len-1);
+
+	# We'll also just pull in 10Kb to each range...
+	for (my $i=0; $i<$num_ranges; $i++) {
+	    $RangeStarts[$i] -= 10000 * $strand;
+	    $RangeEnds[$i]   += 10000 * $strand;
+	}
+
+	# Because we *could* cause new overlaps by pulling in this additional sequence,
+	# we do a bit of finalization...
+	# Note that we'll need to have the actual chromosome's name on-hand for the
+	# sizing lookup
+	my $true_chr = $chr;
+	$true_chr =~ s/\S$//;
+	if ($strand == -1) {
+
+	    my @FinalRangeStarts;
+	    my @FinalRangeEnds;
+	    
+	    push(@FinalRangeStarts,$RangeStarts[0]);
+	    push(@FinalRangeEnds,$RangeEnds[0]);
+	    my $final_num_ranges = 1;
+	    for (my $i=1; $i<$num_ranges; $i++) {
+		if ($RangeStarts[$i] > $FinalRangeEnds[$final_num_ranges-1]) {
+		    $FinalRangeEnds[$final_num_ranges-1] = $RangeEnds[$i];
+		} else {
+		    push(@FinalRangeStarts,$RangeStarts[$i]);
+		    push(@FinalRangeEnds,$RangeEnds[$i]);
+		    $final_num_ranges++;
+		}
+	    }
+	    
+	    for (my $i=0; $i<$final_num_ranges; $i++) {
+		$RangeStarts[$i] = $FinalRangeStarts[$i];
+		$RangeEnds[$i]   = $FinalRangeEnds[$i];
+	    }
+	    $num_ranges = $final_num_ranges;
+	    
+	    $RangeStarts[0] = Min($ChrSizes{$true_chr},$RangeStarts[0]);
+	    $RangeEnds[$num_ranges-1] = Max(1,$RangeEnds[$num_ranges-1]);
+	    
+	} else {
+	    
+	    my @FinalRangeStarts;
+	    my @FinalRangeEnds;
+	    
+	    push(@FinalRangeStarts,$RangeStarts[0]);
+	    push(@FinalRangeEnds,$RangeEnds[0]);
+	    
+	    my $final_num_ranges = 1;
+	    for (my $i=1; $i<$num_ranges; $i++) {
+		if ($RangeStarts[$i] < $FinalRangeEnds[$final_num_ranges-1]) {
+		    $FinalRangeEnds[$final_num_ranges-1] = $RangeEnds[$i];
+		} else {
+		    push(@FinalRangeStarts,$RangeStarts[$i]);
+		    push(@FinalRangeEnds,$RangeEnds[$i]);
+		    $final_num_ranges++;
+		}
+	    }
+	    
+	    for (my $i=0; $i<$final_num_ranges; $i++) {
+		$RangeStarts[$i] = $FinalRangeStarts[$i];
+		$RangeEnds[$i]   = $FinalRangeEnds[$i];
+	    }
+	    $num_ranges = $final_num_ranges;
+	    
+	    $RangeStarts[0] = Max(1,$RangeStarts[0]);
+	    $RangeEnds[$num_ranges-1] = Min($ChrSizes{$true_chr},$RangeEnds[$num_ranges-1]);
+	    
+	}
+
+	# Because we're using a function that plays friendly with a multiple-chromosome
+	# version of this index building, we'll need to note the chromosomes for each
+	# range
+	my @RangeChrs;
+	for (my $i=0; $i<$num_ranges; $i++) {
+	    push(@RangeChrs,$chr);
+	}
+
+	# Let's see what we see!
+	my ($hit_str,$hit_pct_id)
+	    = SpalnSearch($seqname,$seq_str,$prot_fname,\@RangeStarts,\@RangeEnds,\@RangeChrs);
+
+	next if (!$hit_pct_id);
+
+	# WOOOO! Is this our best chromosome, yet?
+	if ($hit_pct_id > $top_pct_id) {
+	    $top_pct_id  = $hit_pct_id;
+	    $top_hit_str = $hit_str;
+	}
+
+    }
 
     
-    # TOTALLY TUBULAR!
-    #
-    # If we have one full-length mapping, we can just pass it up the chain.
-    #
-    # If we have multiple full-length mappings, pass up the one with the
-    # highest percent-identity.
-    #
-    # If we haven't identified a solid full-sequence mapping, we'll mark the 
-    # chromosome as 'Incomplete' and dump all of our exons as a giant mess.
-    #
-    if (scalar(@FullHitIndices)) {
-
-	# Find the highest percent-identity hit
-	my $top_hit_id = $FullHitIndices[0];
-	my $top_pct_id = $HitPctsID[$top_hit_id];
-	for (my $i=1; $i<scalar(@FullHitIndices); $i++) {
-	    my $hit_id = $FullHitIndices[$i];
-	    my $pct_id = $HitPctsID[$i];
-	    if ($pct_id > $top_pct_id) {
-		$top_hit_id = $hit_id;
-		$top_pct_id = $pct_id;
-	    }
-	}
-
-	# WINNER!
-	return $HitsByChr[$top_hit_id];
-	
-    } else {
-
-	# FRANKENSTEIN!
-	my $final_hit = "Sequence ID: $seqname\n";
-	$final_hit = $final_hit."Map Method : BLAT\+Spaln\n";
-	$final_hit = $final_hit."Chromosome : Incomplete\n";
-	$final_hit = $final_hit."Num Exons  : $tot_exons\n";
-	for (my $i=0; $i<$num_hits; $i++) {
-	    my @HitLines = split(/\n/,$HitsByChr[$i]);
-	    for (my $j=4; $j<scalar(@HitLines); $j++) {
-		$final_hit = $final_hit.$HitLines[$j]."\n";
-	    }
-	}
-	return $final_hit;
-
+    # If we had a good hit, that's a good thing, don't you see?
+    if ($top_pct_id) {
+	RunSystemCommand("rm \"$prot_fname\"");
+	return $top_hit_str;
     }
+
+    
+    # Hmmmmm.....
+    # Alright, let's go wild 'n' crazy and see if we can jumble our chromosomes together
+    # in some sort of pleasing fashion...
+    my @RangeStarts;
+    my @RangeEnds;
+    my @RangeChrs;
+    foreach my $group (@GroupSorting) {
+
+	my $group_chr = $GroupChrs[$group];
+	my $true_chr = $group_chr;
+	$true_chr =~ s/\S$//;
+	
+	if ($group_chr =~ /\-$/) {
+	    foreach my $range (split(/\,/,$GroupNuclRanges[$group])) {
+		$range =~ /^(\d+)\.\.(\d+)$/;
+		my $start = $1;
+		my $end = $2;
+		push(@RangeStarts,Min($ChrSizes{$true_chr},$start+20000));
+		push(@RangeEnds,Max(1,$end-20000));
+		push(@RangeChrs,$group_chr);
+	    }
+	} else {
+	    foreach my $range (split(/\,/,$GroupNuclRanges[$group])) {
+		$range =~ /^(\d+)\.\.(\d+)$/;
+		my $start = $1;
+		my $end = $2;
+		push(@RangeStarts,Max(1,$start-20000));
+		push(@RangeEnds,Min($ChrSizes{$true_chr},$end+20000));
+		push(@RangeChrs,$group_chr);
+	    }
+	}
+    }
+
+    # Go for it!
+    my ($hit_str,$hit_pct_id)
+	= SpalnSearch($seqname,$seq_str,$prot_fname,\@RangeStarts,\@RangeEnds,\@RangeChrs);
+
+    # However this breaks, it breaks with you in the bin!
+    RunSystemCommand("rm \"$prot_fname\"");
+
+    # And that's all there is!
+    return 0 if (!$hit_pct_id);
+    return $hit_str;
     
 }
 
@@ -3034,229 +3263,26 @@ sub BlatToSpalnSearch
 
 
 
-
 ############################################################
 #
-#  Function: SpalnSearchChr
+#  Function: SpalnSearch
 #
-sub SpalnSearchChr
+sub SpalnSearch
 {
-    
     my $seqname = shift;
-    my $seq_ref = shift;
-    my $chr     = shift;
-    my $revcomp = shift;
-    my $blathits_ref = shift;
+    my $seq_str = shift;
     my $prot_fname = shift;
+    my $range_starts_ref = shift;
+    my $range_ends_ref = shift;
+    my $range_chrs_ref = shift;
 
-    my @Seq = @{$seq_ref};
-    my @BlatHits = @{$blathits_ref};
-
-    # NOTE: This is somewhat overcomplicated-looking, but I think it's the right
-    #       approach to pulling in nucleotides for our Spaln search.
-    #
-    #       Basically, we're trying to identify ranges in the protein sequence
-    #       that correspond to particular BLAT hits, so that we can pull DNA sequence
-    #       to concatenate in the expected order for a (hopefully) quick single Spaln
-
-
-    # Initialize the array we'll use to identify which hits need to be grouped.
-    my $seq_len = scalar(@Seq);
-    my @HitGroupings;
-    for (my $i=0; $i<$seq_len; $i++) {
-	$HitGroupings[$i]  = 0;
-    }
-
-    # Now group the hits according to overlapping positions
-    my @HitGroupEnds; # [1..num_hit_groups]
-    my $num_hit_groups = 0;
-    for (my $i=0; $i<scalar(@BlatHits); $i++) {
-
-	my @HitData = split(/\|/,$BlatHits[$i]);
-
-	# We'll do an initial run to check whether we have any overlap with another
-	# hit.
-	my $overlaps = 0;
-	for (my $j=$HitData[0]-1; $j<$HitData[1]; $j++) {
-	    # If this position has already been covered, look up the hit group we
-	    # belong to and quit this scan
-	    if ($HitGroupings[$j]) {
-		$overlaps = $HitGroupings[$j];
-		last;
-	    }
-	}
-
-	my $hit_group;
-	if ($overlaps) {
-	    $hit_group = $overlaps;
-	    if ($HitData[1] > $HitGroupEnds[$hit_group]) {
-		$HitGroupEnds[$hit_group] = $HitData[1];
-	    }
-	} else {
-	    $num_hit_groups++;
-	    $hit_group = $num_hit_groups;
-	    $HitGroupEnds[$num_hit_groups] = $HitData[1];
-	}
-
-	# Now we can do a second scan to make sure every position is marked
-	# appropriately
-	for (my $j=$HitData[0]-1; $j<$HitData[1]; $j++) {
-	    $HitGroupings[$j] = $hit_group;
-	}
-	
-    }
-
-    # Next up, we'll figure out the full span of chromosomal sequence that
-    # is implicated in groups of hits.  If the range is large (>5Mb) then
-    # do some work to split them into more manageable sequence chunks.
-    my @GroupNuclRanges;
-    for (my $i=1; $i<=$num_hit_groups; $i++) {
-
-	# Which blat hits are implicated in this group?
-	# NOTE that even if there's a gap starting or ending the sequence, we're
-	# guaranteed to touch at least one hit, so we don't need to worry about
-	# getting too funky.
-	my @GroupedHits;
-	my @GroupNuclStarts;
-	my @GroupNuclEnds;
-	for (my $j=0; $j<scalar(@BlatHits); $j++) {
-	    my @HitData = split(/\|/,$BlatHits[$j]);
-	    # Check the first and final positions to see if we're in this group
-	    if ($HitGroupings[$HitData[0]-1]==$i || $HitGroupings[$HitData[1]-1]==$i) {
-		push(@GroupedHits,$j);
-		push(@GroupNuclStarts,$HitData[2]);
-		push(@GroupNuclEnds,$HitData[3]);
-	    }
-	}
-	
-	# What we're going to end up doing here is a series of clusterings until
-	# the span of each set of grouped hits is less than a preset distance
-	my $max_span = 5000000; # 5 Mb	
-	my $group_ranges_str
-	    = GroupRanges(\@GroupNuclStarts,\@GroupNuclEnds,$max_span,$revcomp);
-	push(@GroupNuclRanges,$group_ranges_str); # These come out pre-sorted!
-
-    }
-
-
-    # WOOF, this is some madness, eh?
-    #
-    # Next up, we'll run through the whole sequence and build a string representing
-    # the collection of ranges that provide coverage suggested-ish by BLAT
-    #
-    # NOTE that these are still going to be tight-ish ranges -- we'll worry about
-    # extending out a bit in the next step...
+    my @Seq = split(//,$seq_str);
     
-    my $range_set_str = '';
-    for (my $i=0; $i<$seq_len; $i++) { # This might be better as a 'while' loop... 
+    my @RangeStarts = @{$range_starts_ref};
+    my @RangeEnds = @{$range_ends_ref};
+    my @RangeChrs = @{$range_chrs_ref};
 
-	# Have we hit the start of a group?
-	if ($HitGroupings[$i]) {
-
-	    # Since we already did all that tough work, this is pretty light lifting!
-	    $range_set_str = $range_set_str.','.$GroupNuclRanges[$HitGroupings[$i]-1];
-	    $i = $HitGroupEnds[$HitGroupings[$i]];
-
-	}
-	
-    }
-
-    # Don't need a leading comma
-    $range_set_str =~ s/^\,//;
-
-    # Next up, we'll convert our set of tight-ish ranges into slightly wider ranges,
-    # especially on the ends if they're gapped...
-    my @RangeStarts;
-    my @RangeEnds;
-    foreach my $range (split(/\,/,$range_set_str)) {
-	$range =~ /^(\d+)\.\.(\d+)$/;
-	push(@RangeStarts,$1);
-	push(@RangeEnds,$2);
-    }
     my $num_ranges = scalar(@RangeStarts);
-
-    # First off, if either end is gapped, pull in 1Mb
-    # We'll worry about exceeding the chromosome bounds LATER
-    if ($HitGroupings[0] == 0) {
-	if ($revcomp) { $RangeStarts[0] = $RangeEnds[0]+1000000; }
-	else          { $RangeStarts[0] = $RangeEnds[0]-1000000; }
-    }
-    if ($HitGroupings[$seq_len-1] == 0) {
-	if ($revcomp) { $RangeEnds[$num_ranges-1] = $RangeStarts[$num_ranges-1]-1000000; }
-	else          { $RangeEnds[$num_ranges-1] = $RangeStarts[$num_ranges-1]+1000000; }
-    }
-
-    # Nice!  Now we'll just give each bound an extra 10Kb
-    if ($revcomp) {
-	for (my $i=0; $i<$num_ranges; $i++) {
-	    $RangeStarts[$i] += 10000;
-	    $RangeEnds[$i]   -= 10000;
-	}
-    } else {
-	for (my $i=0; $i<$num_ranges; $i++) {
-	    $RangeStarts[$i] -= 10000;
-	    $RangeEnds[$i]   += 10000;
-	}
-    }
-
-    # Our last little bit of prep work is to merge any ranges that overlap
-    # (and then make sure we're in the safety zone)
-    if ($revcomp) {
-
-	my @FinalRangeStarts;
-	my @FinalRangeEnds;
-
-	push(@FinalRangeStarts,$RangeStarts[0]);
-	push(@FinalRangeEnds,$RangeEnds[0]);
-	my $final_num_ranges = 1;
-	for (my $i=1; $i<$num_ranges; $i++) {
-	    if ($RangeStarts[$i] > $FinalRangeEnds[$final_num_ranges-1]) {
-		$FinalRangeEnds[$final_num_ranges-1] = $RangeEnds[$i];
-	    } else {
-		push(@FinalRangeStarts,$RangeStarts[$i]);
-		push(@FinalRangeEnds,$RangeEnds[$i]);
-		$final_num_ranges++;
-	    }
-	}
-
-	for (my $i=0; $i<$final_num_ranges; $i++) {
-	    $RangeStarts[$i] = $FinalRangeStarts[$i];
-	    $RangeEnds[$i]   = $FinalRangeEnds[$i];
-	}
-	$num_ranges = $final_num_ranges;
-
-	$RangeStarts[0] = Min($ChrSizes{$chr},$RangeStarts[0]);
-	$RangeEnds[$num_ranges-1] = Max(1,$RangeEnds[$num_ranges-1]);
-	
-    } else {
-
-	my @FinalRangeStarts;
-	my @FinalRangeEnds;
-
-	push(@FinalRangeStarts,$RangeStarts[0]);
-	push(@FinalRangeEnds,$RangeEnds[0]);
-
-	my $final_num_ranges = 1;
-	for (my $i=1; $i<$num_ranges; $i++) {
-	    if ($RangeStarts[$i] < $FinalRangeEnds[$final_num_ranges-1]) {
-		$FinalRangeEnds[$final_num_ranges-1] = $RangeEnds[$i];
-	    } else {
-		push(@FinalRangeStarts,$RangeStarts[$i]);
-		push(@FinalRangeEnds,$RangeEnds[$i]);
-		$final_num_ranges++;
-	    }
-	}
-
-	for (my $i=0; $i<$final_num_ranges; $i++) {
-	    $RangeStarts[$i] = $FinalRangeStarts[$i];
-	    $RangeEnds[$i]   = $FinalRangeEnds[$i];
-	}
-	$num_ranges = $final_num_ranges;
-
-	$RangeStarts[0] = Max(1,$RangeStarts[0]);
-	$RangeEnds[$num_ranges-1] = Min($ChrSizes{$chr},$RangeEnds[$num_ranges-1]);
-	
-    }
 
     # We'll need to track where jump positions are in our Frankensteinian seq.
     # The format will be 'reported-pos':'actual-nucl-pos' so we scan until
@@ -3269,26 +3295,25 @@ sub SpalnSearchChr
     my @JumpList;
     my $reported_pos = 1;
     for (my $i=0; $i<$num_ranges; $i++) {
-	my $jump_info = $reported_pos.':'.$RangeStarts[$i];
+	my $jump_info = $reported_pos.':'.$RangeStarts[$i].'|'.$RangeChrs[$i];
 	push(@JumpList,$jump_info);
 	$reported_pos += abs($RangeEnds[$i]-$RangeStarts[$i])+1;
     }
-
     
-
+	
+    
     # Wowee!  Time to pull in a bunch of nucleotides, concatenate them into one
     # great big sequence, and do a Spaln search!
     my $nucl_fname = $prot_fname;
     $nucl_fname =~ s/\.prot\.in/\.nucl\.in/;
     my $NuclFile = OpenOutputFile($nucl_fname);
-
-    # Just for fun, let's know how wide an area we're (patchily) covering
-    my $span = $RangeStarts[0].'..'.$RangeEnds[$num_ranges-1];
-    print $NuclFile ">$seqname\:$chr\:$span\n";
-
+    print $NuclFile ">$seqname\:nucls\n";
+    
     for (my $i=0; $i<$num_ranges; $i++) {
-
+	
 	my $range = $RangeStarts[$i].'..'.$RangeEnds[$i];
+	my $chr = $RangeChrs[$i];
+	$chr =~ s/\S$//;
 	my $sfetchcmd = $sfetch." -c $range \"$genome\" \"$chr\"";
 	my $inf = OpenSystemCommand($sfetchcmd);
 	my $line = <$inf>; # eat header
@@ -3300,79 +3325,111 @@ sub SpalnSearchChr
 	close($inf);
 	
     }
-
+    
     # Ready, cap'n!
     close($NuclFile);
-
+    
     # Assemble the Spaln command!
     my $spaln_fname = $prot_fname;
     $spaln_fname =~ s/\.prot\.in/\.spaln\.out/;
     my $spaln_cmd = $spaln." -Q3 -O1 -S3 -ya3 \"$nucl_fname\" \"$prot_fname\" 1>\"$spaln_fname\" 2>/dev/null";
     RunSystemCommand($spaln_cmd);
-
+    
     # Get that nucleotide file OUTTA HERE!
     RunSystemCommand("rm \"$nucl_fname\"");
-
+    
     # Don't tell me we did all that for NOTHING?!
-    return (0,0) if (!(-e $spaln_fname));
+    next if (!(-e $spaln_fname));
     
     # UGH, I wish I could quit you, Spaln parsing
     # Note that we'll open the file here, just so it's easier to return
     # if we run into parsing errors.
     my $SpalnFile = OpenInputFile($spaln_fname);
-    my ($spaln_nucl_ranges_ref,$spaln_amino_ranges_ref,$spaln_centers_ref,$spaln_pct_id)
+    my ($nucl_ranges_ref,$amino_ranges_ref,$centers_ref,$spaln_pct_id)
 	= ParseSpalnOutput($SpalnFile,\@Seq);
     close($SpalnFile);
-
+    
     # Get that spaln output file THE HECK OUTTA HERE!
     RunSystemCommand("rm \"$spaln_fname\"") if (-e $spaln_fname);
-
+    
     # If we didn't have a good return on investment, we're done-zo!
     return (0,0) if ($spaln_pct_id < 90.0);
-
+    
     # All of our nucleotide coordinates need to be adjusted...
-    my @UnadjNuclRanges = @{$spaln_nucl_ranges_ref};
-    my @UnadjCenters = @{$spaln_centers_ref};
+    my @UnadjNuclRanges = @{$nucl_ranges_ref};
+    my @UnadjCenters = @{$centers_ref};
 
+    my @HitChrs;
+    my %ChrsUsed;
     my @NuclRanges;
-    my @AminoRanges = @{$spaln_amino_ranges_ref};
+    my @AminoRanges = @{$amino_ranges_ref};
     my @CodonCenters;
     my $num_exons = 0;
     while ($num_exons < scalar(@UnadjNuclRanges)) {
-
+	
 	$UnadjNuclRanges[$num_exons] =~ /^(\d+)\.\.(\d+)$/;
 	my $range_start = $1;
 	my $range_end   = $2;
-
-	$range_start = AdjustNuclCoord($range_start,\@JumpList,$revcomp);
-	$range_end   = AdjustNuclCoord($range_end,\@JumpList,$revcomp);
+	my $start_chr;
+	my $end_chr;
+	
+	($range_start,$start_chr) = AdjustNuclCoord($range_start,\@JumpList);
+	($range_end,$end_chr) = AdjustNuclCoord($range_end,\@JumpList);
 	$NuclRanges[$num_exons] = $range_start.'..'.$range_end;
 
+	# Clean up the chromosome -- NOW WITH CHIMERIC EXON CAPABILITIES!
+	if ($start_chr ne $end_chr) {
+
+	    if ($end_chr =~ /\-$/) { $end_chr =~ s/\-$/\[revcomp\]/; }
+	    else                   { $end_chr =~ s/\+$//;            }
+	    if ($start_chr =~ /\-$/) { $start_chr =~ s/\-$/\[revcomp\]/; }
+	    else                     { $start_chr =~ s/\+$//;            }
+	    $HitChrs[$num_exons] = 'Chimeric('.$start_chr.'/'.$end_chr.')';
+	    $ChrsUsed{'Chimeric'} = 1;
+
+	} else {
+	    
+	    if ($end_chr =~ /\-$/) { $end_chr =~ s/\-$/\[revcomp\]/; }
+	    else                   { $end_chr =~ s/\+$//;            }
+	    $HitChrs[$num_exons] = $end_chr;
+	    $ChrsUsed{$end_chr} = 1;
+
+	}
+
+	# Acquire the actual codon centers
 	my $codon_center_str = '';
 	foreach my $coord (split(/\,/,$UnadjCenters[$num_exons])) {
-	    my $codon_center = AdjustNuclCoord($coord,\@JumpList,$revcomp);
+	    my ($codon_center,$codon_chr) = AdjustNuclCoord($coord,\@JumpList);
 	    $codon_center_str = $codon_center_str.','.$codon_center;
 	}
 	$codon_center_str =~ s/^\,//;
 	$CodonCenters[$num_exons] = $codon_center_str;
-
+	
 	$num_exons++;
+
     }
 
-    # Finally, let your hair down!
-    $chr = $chr.'[revcomp]' if ($revcomp);
-
+    my $chr;
+    if (scalar(keys %ChrsUsed) > 1) {
+	$chr = 'Chimeric';
+    } else {
+	# There's just one, but how else are we going to access it?
+	foreach my $used_chr (keys %ChrsUsed) {
+	    $chr = $used_chr;
+	}
+    }
+    
     # Build up the hit string for this chromosome
     my $hitstr = "Sequence ID: $seqname\n";
     $hitstr    = $hitstr."Map Method : BLAT+Spaln\n";
     $hitstr    = $hitstr."Chromosome : $chr\n";
     $hitstr    = $hitstr."Num Exons  : $num_exons\n";
     for (my $i=0; $i<$num_exons; $i++) {
-	$hitstr = $hitstr."* Aminos $AminoRanges[$i], $chr:$NuclRanges[$i]\n";
-	$hitstr = $hitstr."$CodonCenters[$i]\n";
+	$hitstr= $hitstr."* Aminos $AminoRanges[$i], $HitChrs[$i]:$NuclRanges[$i]\n";
+	$hitstr= $hitstr."$CodonCenters[$i]\n";
     }
-
-    # That's it, dude!
+    
+    # WOOF
     return ($hitstr,$spaln_pct_id);
     
 }
@@ -3386,64 +3443,38 @@ sub SpalnSearchChr
 
 ############################################################
 #
-#  Function: GroupRanges
+#  Function: ClusterNuclRanges
 #
-sub GroupRanges
+sub ClusterNuclRanges
 {
     my $starts_ref = shift;
     my $ends_ref   = shift;
     my $max_span   = shift;
-    my $revcomp    = shift;
 
     my @Starts     = @{$starts_ref};
     my @Ends       = @{$ends_ref};
     my $num_ranges = scalar(@Starts);
 
-    # Special case: single range gets returned
-    if ($num_ranges == 1) {
-	return $Starts[0].'..'.$Ends[0];
-    }
+    my $revcomp = 0;
+    $revcomp = 1 if ($Starts[0] > $Ends[0]);
 
-    # Find (1.) the total span of the range, and (2.) the pair of sequences
-    # with the greatest distance between them.
-    my $span = 0;
-    my $left_leader  = -1;
-    my $right_leader = -1;
-    my $top_gap_size = 0;
-    for (my $i=0; $i<$num_ranges; $i++) {
-	for (my $j=0; $j<$num_ranges; $j++) {
-	    if (( $revcomp && $Ends[$i] > $Starts[$j]) ||
-		(!$revcomp && $Ends[$i] < $Starts[$j])) {
-
-		$span = Max($span,abs($Starts[$i]-$Ends[$j]));
-		my $gap_size = abs($Ends[$i]-$Starts[$j]);
-		if ($top_gap_size < $gap_size) {
-		    $top_gap_size = $gap_size;
-		    $left_leader  = $i;
-		    $right_leader = $j;
-		}
-
-	    }
+    # What are the minimum and maximum values?
+    my $min;
+    my $max;
+    if ($revcomp) {
+	$min = $Ends[0];
+	$max = $Starts[0];
+	for (my $i=1; $i<$num_ranges; $i++) {
+	    $min = Min($min,$Ends[$i]);
+	    $max = Max($max,$Starts[$i]);
 	}
-    }
-
-    # There's a *very* special case where overlap would lead us to not pick up
-    # any hits, in which case we just figure out what the min and max are, and
-    # return those.
-    if ($top_gap_size == 0) {
-	my $min = 2 ** 35;
-	my $max = 0;
-	for (my $i=0; $i<$num_ranges; $i++) {
+    } else {
+	$min = $Starts[0];
+	$max = $Ends[0];
+	for (my $i=1; $i<$num_ranges; $i++) {
 	    $min = Min($min,$Starts[$i]);
 	    $max = Max($max,$Ends[$i]);
 	}
-	if ($revcomp) { return $max.'..'.$min; }
-	else          { return $min.'..'.$max; }
-    }
-
-    # If the span is below our maximum, we're good!
-    if ($span < $max_span) {
-	return $Starts[$left_leader].'..'.$Ends[$right_leader];
     }
 
     # Nope, recursion time!  Group sequences according to who they're closest to.
@@ -3454,43 +3485,24 @@ sub GroupRanges
     my @RightStarts;
     my @RightEnds;
     for (my $i=0; $i<$num_ranges; $i++) {
-	my $left_dist = abs($Starts[$i] - $Starts[$left_leader]);
-	my $right_dist = abs($Starts[$i] - $Starts[$right_leader]);
-	if ($left_dist < $right_dist) {
+	my $center = ($Starts[$i] + $Ends[$i]) / 2;
+	if ($max - $center > $center - $min) {
+	    # Closer to min than max (left)
 	    push(@LeftStarts,$Starts[$i]);
 	    push(@LeftEnds,$Ends[$i]);
 	} else {
+	    # Closer to max than min (right)
 	    push(@RightStarts,$Starts[$i]);
 	    push(@RightEnds,$Ends[$i]);
 	}
     }
 
     # RECURSE
-    my $left_ranges_str  = GroupRanges(\@LeftStarts,\@LeftEnds,$max_span,$revcomp);
-    my $right_ranges_str = GroupRanges(\@RightStarts,\@RightEnds,$max_span,$revcomp);
-
-    # The very last thing we'll do is give a bit of an extended buffer to each side,
-    # by employing the *worst* variable names you've ever seen!
-    $left_ranges_str =~ /^(\S+)\.\.(\d+)$/;
-    my $left_left  = $1;
-    my $left_right = $2;
-    $right_ranges_str =~ /^(\d+)\.\.(\S+)$/;
-    my $right_left  = $1;
-    my $right_right = $2;
-
-    # Given that the current max span is 5Mb, I'll allow 500Kb -- and pretend this is
-    # more generally a reasonable computation.
-    if ($revcomp) {
-	$left_right -= int($max_span/10);
-	$right_left += int($max_span/10);
-    } else {
-	$left_right += int($max_span/10);
-	$right_left -= int($max_span/10);
-    }
-    $left_ranges_str  = $left_left.'..'.$left_right;
-    $right_ranges_str = $right_left.'..'.$right_right;
+    my $left_ranges_str  = ClusterNuclRanges(\@LeftStarts,\@LeftEnds,$max_span);
+    my $right_ranges_str = ClusterNuclRanges(\@RightStarts,\@RightEnds,$max_span);
 
     # And away you go!
+    return $right_ranges_str.','.$left_ranges_str if ($revcomp);
     return $left_ranges_str.','.$right_ranges_str;
     
 }
@@ -3509,7 +3521,6 @@ sub AdjustNuclCoord
 {
     my $coord    = shift;
     my $jump_ref = shift;
-    my $revcomp  = shift;
 
     # We'll need to be a little sneaky to figure out which position is the last
     # *before* our guide's value is too high...
@@ -3524,15 +3535,19 @@ sub AdjustNuclCoord
 	}
     }
 
-    $Jumps[$index] =~ /^(\d+)\:(\d+)$/;
+    $Jumps[$index] =~ /^(\d+)\:(\d+)\|(\S+)$/;
     my $relative_pos = $1;
     my $absolute_pos = $2;
+    my $chr = $3;
 
+    my $revcomp = 0;
+    $revcomp = 1 if ($chr =~ /\-$/);
+    
     # We've found our closest jump point -- but we need to get particular about things!
     if ($revcomp) { $absolute_pos -= $coord - $relative_pos; }
     else          { $absolute_pos += $coord - $relative_pos; }
 
-    return $absolute_pos;
+    return ($absolute_pos,$chr);
     
 }
 
@@ -3791,6 +3806,9 @@ sub FinalFileCheck
 	push(@OutFileList,$dirname.$fname) if ($fname =~ /\.quilter\.out$/);
     }
     closedir($Dir);
+
+    # If we don't have any result files, that's some real rough stuff
+    return if (scalar(@OutFileList) == 0);
 
     # We'll generate a bunch of processes to make things go down sooooo smooth
     $num_cpus = Min($num_cpus,scalar(@OutFileList));

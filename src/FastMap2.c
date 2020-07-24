@@ -390,7 +390,8 @@ void BlockScan
   // The value we store is equal to (prot_len*block_num + i)
   //
   int bp_size = prot_len;
-  int * BlockPositives = malloc(bp_size * sizeof(int));
+  int * BlockPositives = NULL;
+  BlockPositives = malloc(bp_size * sizeof(int));
   int num_positives = 0;
 
   // Now we'll check, treating each protein position as a candidate
