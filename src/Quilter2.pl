@@ -2909,12 +2909,8 @@ sub BlatToSpalnSearch
 	    = ParseBlatLine($blat_outline);
 
 	# We'll want to know if this is the reverse complement
-	if ($nucl_start > $nucl_end) {
-	    $chr = $chr.'-';
-	    my $temp = $nucl_start;
-	    $nucl_start = $nucl_end;
-	    $nucl_end = $temp;
-	}
+	if ($nucl_start > $nucl_end) { $chr = $chr.'-'; }
+	else                         { $chr = $chr.'+'; }
 
 	# Let's go ahead and convert the amino coordinates into easy mode
 	$amino_start--;
@@ -3209,6 +3205,8 @@ sub BlatToSpalnSearch
 	RunSystemCommand("rm \"$prot_fname\"");
 	return $top_hit_str;
     }
+
+
 
     
     # Hmmmmm.....
