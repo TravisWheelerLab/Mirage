@@ -38,6 +38,7 @@ sub RunBlatOnFileSet;
 sub GenBlatMaps;
 sub AttemptBlatFill;
 sub BlatToSpalnSearch;
+sub GetSpalnSfetchRanges;
 sub SpalnSearch;
 sub ClusterNuclRanges;
 sub AdjustNuclCoord;
@@ -1444,7 +1445,9 @@ sub AttemptSpalnFill
 	my $sfetch_cmd = $sfetch." -c $nucl_range \"$genome\" \"$chr\" > $nucl_fname";
 	RunSystemCommand($sfetch_cmd);
 
-	my $spaln_cmd = $spaln." -Q3 -O1 -S3 -ya3 \"$nucl_fname\" \"$temp_fname\" 2>/dev/null";
+	# NOTE: I'm going to test out forcing forward-strand only (S1)
+	# as opposed to both strands (S3)
+	my $spaln_cmd = $spaln." -Q3 -O1 -S1 -ya3 \"$nucl_fname\" \"$temp_fname\" 2>/dev/null";
 	my $SpalnOut  = OpenSystemCommand($spaln_cmd);
 
 	# Note that while the intuition is that a gap is a single wily
@@ -2988,7 +2991,7 @@ sub BlatToSpalnSearch
 	    # NOTE: While this 'gap' seems large, the way to think about it
 	    #  (i.m.o.) is "What size of Blat hit to another chromosome would
 	    #  be enough to consider interrupting this run?"
-	    my $maxgap = 30;
+	    my $maxgap = 25;
 	    if (($GroupStarts[$group] >= $GroupStarts[$check] - $maxgap &&
 		 $GroupStarts[$group] <= $GroupEnds[$check] + $maxgap)
 		||
@@ -3078,8 +3081,8 @@ sub BlatToSpalnSearch
     
     # Swell! Now we'll go through each of our chromosomes, and any that have more
     # than 75% coverage will be Spalned
-    my $top_pct_id = 0;
-    my $top_hit_str;
+    my $top_pct_id  = 0;
+    my $top_hit_str = 0;
     foreach my $chr (keys %CoverageByChr) {
 
 	# Do you have solid coverage?
@@ -3095,111 +3098,62 @@ sub BlatToSpalnSearch
 		push(@RangeEnds,$2);
 	    }
 	}
-	my $num_ranges = scalar(@RangeStarts);
 
-	# We'll want to know the start and end aminos so we can determine if the
-	# ends are gapped.
-	$ChrGroupSorting{$chr} =~ /^(\d+)/;
-	my $start_amino = $GroupStarts[$1];
-	$ChrGroupSorting{$chr} =~ /(\d+)$/;
-	my $end_amino = $GroupEnds[$1];
-
-	# We'll also want to know the REAL chromosome behind the mask (or at least
-	# it's strand direction and length...)
-	my $strand = 1;
-	$strand = -1 if ($chr =~ /\-$/);
+	# We'll need to know the chromosome's true identity
+	my $revcomp = 0;
+	$revcomp = 1 if ($chr =~ /\-$/);
 	my $true_chr = $chr;
 	$true_chr =~ s/\S$//;
 	my $chr_len = $ChrSizes{$true_chr};
 
-	# What did I tell you about benefitting from knowing the start and end aminos?
-	# If either end is gapped, pull in 100Kb
-	$RangeStarts[0]           -= 100000 * $strand if ($start_amino);
-	$RangeEnds[$num_ranges-1] += 100000 * $strand if ($end_amino != $seq_len-1);
-
-	# We'll also just pull in 10Kb to each range...
-	for (my $i=0; $i<$num_ranges; $i++) {
-	    $RangeStarts[$i] -= 10000 * $strand;
-	    $RangeEnds[$i]   += 10000 * $strand;
-	}
-
-	# Check for any overlapping ranges.  Note that it's possible for adjacent
-	# ranges to not be in the expected order, so we can't do the easy implicit
-	# check...
-	if ($strand == 1) { # FWD (usually revcomp comes first)
-
-	    my @FinalStarts;
-	    my @FinalEnds;
-
-	    push(@FinalStarts,$RangeStarts[0]);
-	    push(@FinalEnds,$RangeEnds[0]);
-	    my $num_finals = 0; # We'll keep this 1 too low for now, for indexing
-
-	    for (my $i=1; $i<$num_ranges; $i++) {
-		if ($RangeStarts[$i] > $FinalStarts[$num_finals]
-		    && $RangeStarts[$i] < $FinalEnds[$num_finals]) {
-		    $FinalEnds[$num_finals] = $RangeEnds[$i];
-		} else {
-		    push(@FinalStarts,$RangeStarts[$i]);
-		    push(@FinalEnds,$RangeEnds[$i]);
-		    $num_finals++;
-		}
-	    }
-
-	    # Copy it over!
-	    for (my $i=0; $i<=$num_finals; $i++) {
-		$RangeStarts[$i] = $FinalStarts[$i];
-		$RangeEnds[$i] = $FinalEnds[$i];
-	    }
-	    $num_ranges = $num_finals+1; # No longer 1 too low!
-
-	} else { # REV (usually revcomp comes first, like I already told you)
-
-	    my @FinalStarts;
-	    my @FinalEnds;
-
-	    push(@FinalStarts,$RangeStarts[0]);
-	    push(@FinalEnds,$RangeEnds[0]);
-	    my $num_finals = 0; # We'll keep this 1 too low for now, for indexing
-
-	    for (my $i=1; $i<$num_ranges; $i++) {
-		if ($RangeStarts[$i] < $FinalStarts[$num_finals]
-		    && $RangeStarts[$i] > $FinalEnds[$num_finals]) {
-		    $FinalEnds[$num_finals] = $RangeEnds[$i];
-		} else {
-		    push(@FinalStarts,$RangeStarts[$i]);
-		    push(@FinalEnds,$RangeEnds[$i]);
-		    $num_finals++;
-		}
-	    }
-
-	    # Copy it over!
-	    for (my $i=0; $i<=$num_finals; $i++) {
-		$RangeStarts[$i] = $FinalStarts[$i];
-		$RangeEnds[$i] = $FinalEnds[$i];
-	    }
-	    $num_ranges = $num_finals+1; # No longer 1 too low!
-
-	}
-
+	# First off, we'll try a spaln search on a range that assumes no funny business
+	# vis-a-vis splicing.
+	my ($starts_ref,$ends_ref,$num_ranges)
+	    = GetSpalnSfetchRanges(\@RangeStarts,\@RangeEnds,$chr_len,1);
+	my @SpalnStarts = @{$starts_ref};
+	my @SpalnEnds   = @{$ends_ref};
+	
 	# Because we're using a function that plays friendly with a multiple-chromosome
 	# version of this index building, we'll need to note the chromosomes for each
 	# range
-	my @RangeChrs;
+	my @SpalnChrs;
 	for (my $i=0; $i<$num_ranges; $i++) {
-	    # Make sure that you aren't overstepping any boundaries
-	    $RangeStarts[$i] = Max(1,Min($RangeStarts[$i],$chr_len));
-	    $RangeEnds[$i]   = Max(1,Min($RangeEnds[$i],  $chr_len));
-	    push(@RangeChrs,$chr);
+	    push(@SpalnChrs,$chr);
 	}
 
 	# Let's see what we see!
 	my ($hit_str,$hit_pct_id)
-	    = SpalnSearch($seqname,$seq_str,$prot_fname,\@RangeStarts,\@RangeEnds,\@RangeChrs);
-	
-	next if (!$hit_pct_id);
+	    = SpalnSearch($seqname,$seq_str,$prot_fname,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs);
 
-	# WOOOO! Is this our best chromosome, yet?
+	# If we got a hit, then we'll be happy about that!
+	if ($hit_pct_id) {
+
+	    # WOOOO! Is this our best chromosome, yet?
+	    if ($hit_pct_id > $top_pct_id) {
+		$top_pct_id  = $hit_pct_id;
+		$top_hit_str = $hit_str;
+	    }
+
+	    # Either way, let's ditch this stinky ol' chromosome!
+	    next;
+
+	}
+
+	# Hmm, doesn't look like we got a solid hit the first time.
+	# Let's see if there's a funkiness to the order (weird splicing alert!)
+	($starts_ref,$ends_ref,$num_ranges)
+	    = GetSpalnSfetchRanges(\@RangeStarts,\@RangeEnds,$chr_len,0);
+	@SpalnStarts = @{$starts_ref};
+	@SpalnEnds   = @{$ends_ref};
+	for (my $i=0; $i<$num_ranges; $i++) {
+	    $SpalnChrs[$i] = $chr;
+	}
+
+	# Let's try this again!
+	($hit_str,$hit_pct_id)
+	    = SpalnSearch($seqname,$seq_str,$prot_fname,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs);
+
+	# Last call for spaln-ohol!
 	if ($hit_pct_id > $top_pct_id) {
 	    $top_pct_id  = $hit_pct_id;
 	    $top_hit_str = $hit_str;
@@ -3262,6 +3216,129 @@ sub BlatToSpalnSearch
     return 0 if (!$hit_pct_id);
     return $hit_str;
     
+}
+
+
+
+
+
+
+
+############################################################
+#
+#  Function: GetSpalnSfetchRanges
+#
+sub GetSpalnSfetchRanges
+{
+    my $starts_ref = shift;
+    my $ends_ref = shift;
+    my $chr_len = shift;
+    my $condense = shift;
+
+    my @RangeStarts = @{$starts_ref};
+    my @RangeEnds   = @{$ends_ref};
+    my $num_ranges  = scalar(@RangeStarts);
+
+    my $strand = 1;
+    $strand = -1 if ($RangeStarts[0] > $RangeEnds[0]);
+
+    if ($condense) {
+	# We'll run everything through our cluster-er first
+	my $max_span = 1000000; # 1Mb
+	my $ranges_str = ClusterNuclRanges(\@RangeStarts,\@RangeEnds,$max_span);
+	my @Ranges = split(/\,/,$ranges_str);
+	for (my $i=0; $i<scalar(@Ranges); $i++) {
+	    $Ranges[$i] =~ /^(\d+)\.\.(\d+)$/;
+	    $RangeStarts[$i] = $1;
+	    $RangeEnds[$i] = $2;
+	}
+	$num_ranges = scalar(@Ranges);
+    }
+    
+    # Give the boundaries some extra room to play
+    $RangeStarts[0]           -= 50000 * $strand;
+    $RangeEnds[$num_ranges-1] += 50000 * $strand;
+    
+    # We'll also just pull in 10Kb to each range...
+    for (my $i=0; $i<$num_ranges; $i++) {
+	$RangeStarts[$i] -= 10000 * $strand;
+	$RangeEnds[$i]   += 10000 * $strand;
+    }
+    
+    # Check for any overlapping ranges.  Note that it's possible for adjacent
+    # ranges to not be in the expected order, so we can't do the easy implicit
+    # check...
+    if ($strand == 1) { # FWD (usually revcomp comes first)
+	
+	my @FinalStarts;
+	my @FinalEnds;
+	
+	push(@FinalStarts,$RangeStarts[0]);
+	push(@FinalEnds,$RangeEnds[0]);
+	my $num_finals = 0; # We'll keep this 1 too low for now, for indexing
+	
+	for (my $i=1; $i<$num_ranges; $i++) {
+	    if ($RangeStarts[$i] > $FinalStarts[$num_finals]
+		&& $RangeStarts[$i] < $FinalEnds[$num_finals]) {
+		$FinalEnds[$num_finals] = $RangeEnds[$i];
+	    } else {
+		push(@FinalStarts,$RangeStarts[$i]);
+		push(@FinalEnds,$RangeEnds[$i]);
+		$num_finals++;
+	    }
+	}
+	
+	# Copy it over!
+	for (my $i=0; $i<=$num_finals; $i++) {
+	    $RangeStarts[$i] = $FinalStarts[$i];
+	    $RangeEnds[$i] = $FinalEnds[$i];
+	}
+	$num_ranges = $num_finals+1; # No longer 1 too low!
+	
+	# Make sure that you aren't overstepping any boundaries
+	for (my $i=0; $i<$num_ranges; $i++) {
+	    $RangeStarts[$i] = Max(1,$RangeStarts[$i]);
+	    $RangeEnds[$i] = Min($RangeEnds[$i],$chr_len);
+	}
+	
+    } else { # REV (usually revcomp comes first, like I already told you)
+	
+	my @FinalStarts;
+	my @FinalEnds;
+	
+	push(@FinalStarts,$RangeStarts[0]);
+	push(@FinalEnds,$RangeEnds[0]);
+	my $num_finals = 0; # We'll keep this 1 too low for now, for indexing
+	
+	for (my $i=1; $i<$num_ranges; $i++) {
+	    if ($RangeStarts[$i] < $FinalStarts[$num_finals]
+		&& $RangeStarts[$i] > $FinalEnds[$num_finals]) {
+		$FinalEnds[$num_finals] = $RangeEnds[$i];
+	    } else {
+		push(@FinalStarts,$RangeStarts[$i]);
+		push(@FinalEnds,$RangeEnds[$i]);
+		$num_finals++;
+	    }
+	}
+	
+	# Copy it over!
+	for (my $i=0; $i<=$num_finals; $i++) {
+	    $RangeStarts[$i] = $FinalStarts[$i];
+	    $RangeEnds[$i] = $FinalEnds[$i];
+	}
+	$num_ranges = $num_finals+1; # No longer 1 too low!
+	
+	# Make sure that you aren't overstepping any boundaries
+	for (my $i=0; $i<$num_ranges; $i++) {
+	    $RangeStarts[$i] = Min($RangeStarts[$i],$chr_len);
+	    $RangeEnds[$i] = Max(1,$RangeEnds[$i]);
+	}
+	
+    }
+
+    # Return the adjusted ranges
+    return (\@RangeStarts,\@RangeEnds,$num_ranges);
+
 }
 
 
@@ -3339,7 +3416,9 @@ sub SpalnSearch
     # Assemble the Spaln command!
     my $spaln_fname = $prot_fname;
     $spaln_fname =~ s/\.prot\.in/\.spaln\.out/;
-    my $spaln_cmd = $spaln." -Q3 -O1 -S3 -ya3 \"$nucl_fname\" \"$prot_fname\" 1>\"$spaln_fname\" 2>/dev/null";
+    # NOTE: I'm going to test out forcing forward-strand only (S1)
+    # as opposed to both strands (S3)
+    my $spaln_cmd = $spaln." -Q3 -O1 -S1 -ya3 \"$nucl_fname\" \"$prot_fname\" 1>\"$spaln_fname\" 2>/dev/null";
     RunSystemCommand($spaln_cmd);
     
     # Get that nucleotide file OUTTA HERE!
