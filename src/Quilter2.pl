@@ -3142,7 +3142,7 @@ sub BlatToSpalnSearch
 
     # Any chance we got a hit on easy mode?
     if ($top_pct_id) {
-	RunSystemCommand("rm \"$protf_name\"");
+	RunSystemCommand("rm \"$prot_fname\"");
 	return $top_hit_str;
     }
 
