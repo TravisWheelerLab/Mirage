@@ -3196,7 +3196,7 @@ sub BlatToSpalnSearch
 	# Let's see what we see!
 	my ($hit_str,$hit_pct_id)
 	    = SpalnSearch($seqname,$seq_str,$prot_fname,\@RangeStarts,\@RangeEnds,\@RangeChrs);
-
+	
 	next if (!$hit_pct_id);
 
 	# WOOOO! Is this our best chromosome, yet?
@@ -3228,13 +3228,14 @@ sub BlatToSpalnSearch
 	my $group_chr = $GroupChrs[$group];
 	my $true_chr = $group_chr;
 	$true_chr =~ s/\S$//;
+	my $chr_len = $ChrSizes{$true_chr};
 	
 	if ($group_chr =~ /\-$/) {
 	    foreach my $range (split(/\,/,$GroupNuclRanges[$group])) {
 		$range =~ /^(\d+)\.\.(\d+)$/;
 		my $start = $1;
 		my $end = $2;
-		push(@RangeStarts,Min($ChrSizes{$true_chr},$start+20000));
+		push(@RangeStarts,Min($chr_len,$start+20000));
 		push(@RangeEnds,Max(1,$end-20000));
 		push(@RangeChrs,$group_chr);
 	    }
@@ -3244,7 +3245,7 @@ sub BlatToSpalnSearch
 		my $start = $1;
 		my $end = $2;
 		push(@RangeStarts,Max(1,$start-20000));
-		push(@RangeEnds,Min($ChrSizes{$true_chr},$end+20000));
+		push(@RangeEnds,Min($chr_len,$end+20000));
 		push(@RangeChrs,$group_chr);
 	    }
 	}
@@ -3288,8 +3289,8 @@ sub SpalnSearch
     my @RangeEnds = @{$range_ends_ref};
     my @RangeChrs = @{$range_chrs_ref};
 
-    my $num_ranges = scalar(@RangeStarts);
-
+    my $num_ranges = scalar(@RangeChrs);
+    
     # We'll need to track where jump positions are in our Frankensteinian seq.
     # The format will be 'reported-pos':'actual-nucl-pos' so we scan until
     # 'reported-pos' is higher than the index we have, and then add the difference
