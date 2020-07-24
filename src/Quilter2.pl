@@ -3119,13 +3119,66 @@ sub BlatToSpalnSearch
 
 	# We'll also just pull in 10Kb to each range...
 	for (my $i=0; $i<$num_ranges; $i++) {
-
 	    $RangeStarts[$i] -= 10000 * $strand;
 	    $RangeEnds[$i]   += 10000 * $strand;
+	}
 
-	    # Make sure that you aren't overstepping any boundaries
-	    $RangeStarts[$i] = Max(1,Min($RangeStarts[$i],$chr_len));
-	    $RangeEnds[$i]   = Max(1,Min($RangeEnds[$i],  $chr_len));
+	# Check for any overlapping ranges.  Note that it's possible for adjacent
+	# ranges to not be in the expected order, so we can't do the easy implicit
+	# check...
+	if ($strand == 1) { # FWD (usually revcomp comes first)
+
+	    my @FinalStarts;
+	    my @FinalEnds;
+
+	    push(@FinalStarts,$RangeStarts[0]);
+	    push(@FinalEnds,$RangeEnds[0]);
+	    my $num_finals = 0; # We'll keep this 1 too low for now, for indexing
+
+	    for (my $i=1; $i<$num_ranges; $i++) {
+		if ($RangeStarts[$i] > $FinalStarts[$num_finals]
+		    && $RangeStarts[$i] < $FinalEnds[$num_finals]) {
+		    $FinalEnds[$num_finals] = $RangeEnds[$i];
+		} else {
+		    push(@FinalStarts,$RangeStarts[$i]);
+		    push(@FinalEnds,$RangeEnds[$i]);
+		    $num_finals++;
+		}
+	    }
+
+	    # Copy it over!
+	    for (my $i=0; $i<=$num_finals; $i++) {
+		$RangeStarts[$i] = $FinalStarts[$i];
+		$RangeEnds[$i] = $FinalEnds[$i];
+	    }
+	    $num_ranges = $num_finals+1; # No longer 1 too low!
+
+	} else { # REV (usually revcomp comes first, like I already told you)
+
+	    my @FinalStarts;
+	    my @FinalEnds;
+
+	    push(@FinalStarts,$RangeStarts[0]);
+	    push(@FinalEnds,$RangeEnds[0]);
+	    my $num_finals = 0; # We'll keep this 1 too low for now, for indexing
+
+	    for (my $i=1; $i<$num_ranges; $i++) {
+		if ($RangeStarts[$i] < $FinalStarts[$num_finals]
+		    && $RangeStarts[$i] > $FinalEnds[$num_finals]) {
+		    $FinalEnds[$num_finals] = $RangeEnds[$i];
+		} else {
+		    push(@FinalStarts,$RangeStarts[$i]);
+		    push(@FinalEnds,$RangeEnds[$i]);
+		    $num_finals++;
+		}
+	    }
+
+	    # Copy it over!
+	    for (my $i=0; $i<=$num_finals; $i++) {
+		$RangeStarts[$i] = $FinalStarts[$i];
+		$RangeEnds[$i] = $FinalEnds[$i];
+	    }
+	    $num_ranges = $num_finals+1; # No longer 1 too low!
 
 	}
 
@@ -3134,6 +3187,9 @@ sub BlatToSpalnSearch
 	# range
 	my @RangeChrs;
 	for (my $i=0; $i<$num_ranges; $i++) {
+	    # Make sure that you aren't overstepping any boundaries
+	    $RangeStarts[$i] = Max(1,Min($RangeStarts[$i],$chr_len));
+	    $RangeEnds[$i]   = Max(1,Min($RangeEnds[$i],  $chr_len));
 	    push(@RangeChrs,$chr);
 	}
 
