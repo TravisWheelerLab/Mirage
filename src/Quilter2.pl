@@ -25,13 +25,13 @@ sub GenSpliceGraph;
 sub PrintHitToWeaverInf;
 sub GetSpliceStrengths;
 sub CheckForFullMaps;
-sub ExtractCanonHWMap;
+sub ExtractCanonXWMap;
 sub AttemptSpalnFill;
-sub AttemptChimericHWMap;
-sub ExtractHWInputExons;
-sub ExtractChimericHWMap;
-sub FindMaximalHWHitSet;
-sub SaveTopHWInputs;
+sub AttemptChimericXWMap;
+sub ExtractXWInputExons;
+sub ExtractChimericXWMap;
+sub FindMaximalXWHitSet;
+sub SaveTopXWInputs;
 sub GetAminoHitGaps;
 sub RecordMaximalHits;
 sub RunBlatOnFileSet;
@@ -460,11 +460,11 @@ sub UseFastMap
 
     # Our goal is to build a splice graph (possibly per chromosome...) for each
     # sequence in this family, so we'll first build up a list of filenames of
-    # HitWeaver outputs.
+    # ExonWeaver outputs.
     my @SpliceGraphs;
-    my @HWInputNames;
+    my @XWInputNames;
     for (my $i=0; $i<$num_seqs; $i++) {
-	$HWInputNames[$i] = 0;
+	$XWInputNames[$i] = 0;
 	$SpliceGraphs[$i] = 0;
     }
 
@@ -564,20 +564,20 @@ sub UseFastMap
 	for (my $i=0; $i<$num_seqs; $i++) {
 	    if ($HitsBySeq[$i]) {
 
-		# Get the name of the files provided to and produced by HitWeaver
-		my ($hw_infname,$hw_outfname) =
+		# Get the name of the files provided to and produced by ExonWeaver
+		my ($xw_infname,$xw_outfname) =
 		    GenSpliceGraph($HitsBySeq[$i],$Seqs[$i],$SeqNames[$i],$chr,$revcomp,$gene_fname);
 
-		# If we didn't get any spliced alignments out of ol' HW, move along
-		next if (!$hw_outfname);
+		# If we didn't get any spliced alignments out of ol' XW, move along
+		next if (!$xw_outfname);
 
 		# That's lookin' like a graph to me!  Toss it on the pile!
 		if ($SpliceGraphs[$i]) {
-		    $HWInputNames[$i] = $HWInputNames[$i].';'.$hw_infname;
-		    $SpliceGraphs[$i] = $SpliceGraphs[$i].';'.$hw_outfname;
+		    $XWInputNames[$i] = $XWInputNames[$i].';'.$xw_infname;
+		    $SpliceGraphs[$i] = $SpliceGraphs[$i].';'.$xw_outfname;
 		} else {
-		    $HWInputNames[$i] = $hw_infname;
-		    $SpliceGraphs[$i] = $hw_outfname;
+		    $XWInputNames[$i] = $xw_infname;
+		    $SpliceGraphs[$i] = $xw_outfname;
 		}
 	    }
 	}
@@ -587,7 +587,7 @@ sub UseFastMap
     # reusing the file name for SPALN-assisted search
     
     
-    # SpliceGraphs is now an array of file names (or zeros) for HitWeaver output,
+    # SpliceGraphs is now an array of file names (or zeros) for ExonWeaver output,
     # which we can read in to check for full-protein splicings (or else to see if
     # there's at least agreement on some canonical exons...)
 
@@ -607,9 +607,9 @@ sub UseFastMap
 	    # that had full mappings
 	    next if (!$FullMaps[$i]);
 
-	    foreach my $hw_fname (split(/\;/,$FullMaps[$i])) {
+	    foreach my $xw_fname (split(/\;/,$FullMaps[$i])) {
 
-		$hw_fname =~ /\.([^\.]+)\.weaver\.out/;
+		$xw_fname =~ /\.([^\.]+)\.weaver\.out/;
 		my $chr = $1;
 
 		if ($FullMapsByChr{$chr}) { $FullMapsByChr{$chr}++; }
@@ -677,7 +677,7 @@ sub UseFastMap
 
 		# TOO EASY!!!
 		$SeqHitStrs[$i] =
-		    ExtractCanonHWMap($TopChrMaps[$i],$seq_len,$SeqNames[$i],$top_chr);
+		    ExtractCanonXWMap($TopChrMaps[$i],$seq_len,$SeqNames[$i],$top_chr);
 
 	    } elsif ($top_chr_fname) {
 
@@ -685,7 +685,7 @@ sub UseFastMap
 		# expected chromosome.  We'll see if we can use SPALN to find
 		# putative exons to fill in the gaps in the 
 		my ($max_exon_str,$max_amino_str,$max_hits_str) =
-		    FindMaximalHWHitSet($SpliceGraphs[$i],$top_chr_fname);
+		    FindMaximalXWHitSet($SpliceGraphs[$i],$top_chr_fname);
 
 		# We can easily build up a set of ranges of that we'll need to fill in,
 		# knowing where we have solid hits to the top chromosome.
@@ -699,7 +699,7 @@ sub UseFastMap
 		# exons that we could detect with Spaln.
 		#
 		# The biggest nuisance with this is that we're going to need to rip
-		# SPALN putative exon ranges, but then plug them into a new HitWeaver
+		# SPALN putative exon ranges, but then plug them into a new ExonWeaver
 		# run, since we want clean splice boundary delineation between our
 		# exons.
 		#
@@ -712,7 +712,7 @@ sub UseFastMap
 		# the full set of hits (across chromosomes) could be useful...
 		if (!$SeqHitStrs[$i]) {
 		    $SeqHitStrs[$i] =
-			AttemptChimericHWMap($HWInputNames[$i],$SpliceGraphs[$i],
+			AttemptChimericXWMap($XWInputNames[$i],$SpliceGraphs[$i],
 					     $top_chr_fname,$max_exon_str,\@GapStarts,
 					     \@GapEnds,$Seqs[$i],$SeqNames[$i],
 					     $gene_fname);
@@ -760,11 +760,11 @@ sub UseFastMap
 		    #RecordMaximalHits($top_chr_fname,$max_hits_fname,$max_hits_str);
 		    #
 		    # ACTUALLY, let's only hold onto the sequences we'd feed into
-		    # HitWeaver -- this could be optimized, but I'm pretty sure we'd
+		    # ExonWeaver -- this could be optimized, but I'm pretty sure we'd
 		    # see diminishing returns...
-		    my $top_hwinfname = $top_chr_fname;
-		    $top_hwinfname =~ s/\.out$/\.in/;
-		    SaveTopHWInputs($top_hwinfname);
+		    my $top_xwinfname = $top_chr_fname;
+		    $top_xwinfname =~ s/\.out$/\.in/;
+		    SaveTopXWInputs($top_xwinfname);
 		    
 		}
 
@@ -824,7 +824,7 @@ sub UseFastMap
 	foreach my $fname (split(/\;/,$SpliceGraphs[$i])) {
 	    RunSystemCommand("rm \"$fname\"") if ($fname);
 	}
-	foreach my $fname (split(/\;/,$HWInputNames[$i])) {
+	foreach my $fname (split(/\;/,$XWInputNames[$i])) {
 	    RunSystemCommand("rm \"$fname\"") if ($fname);
 	}
     }
@@ -993,7 +993,7 @@ sub GenSpliceGraph
     my @Hits     = split(/\&/,$hitstr);
     my $num_hits = scalar(@Hits);
 
-    # Now we can prep a lil' file for Weaver (working title)!
+    # Now we can prep a lil' file for ExonWeaver
     my $weaver_in = $gene_fname;
     $weaver_in =~ s/\.fa$/\-$seq_id\.$chr\.weaver\.in/;
     my $WeaverFile = OpenOutputFile($weaver_in);
@@ -1023,7 +1023,7 @@ sub GenSpliceGraph
     close($WeaverFile);
 
     # Also, in case you're like me, and you've hit this point and started wondering,
-    # "Hey, why aren't we just piping FastMap2 output into HitWeaver?" the main reason
+    # "Hey, why aren't we just piping FastMap2 output into ExonWeaver?" the main reason
     # is that we needed to divide FastMap2 output according to the protein sequences
     # and then sort them so that we have a guarantee of ascending start aminos.
 
@@ -1032,7 +1032,7 @@ sub GenSpliceGraph
     $weaver_out =~ s/\.in$/\.out/;
 
     # PUT IT TO WORK!!!
-    my $weaver_cmd = $srcdir."HitWeaver --report-singles \"$weaver_in\" > \"$weaver_out\"";
+    my $weaver_cmd = $srcdir."ExonWeaver --report-singles \"$weaver_in\" > \"$weaver_out\"";
     RunSystemCommand($weaver_cmd);
 
     # If there's any content to the output file, return its name -- otherwise,
@@ -1144,19 +1144,19 @@ sub CheckForFullMaps
 
     # If we find any full mappings, we'll return those filenames
     my $full_maps = 0;
-    foreach my $hw_outfname (split(/\;/,$splicegraphs)) {
+    foreach my $xw_outfname (split(/\;/,$splicegraphs)) {
 
-	my $hwf = OpenInputFile($hw_outfname);
-	while (my $line = <$hwf>) {
+	my $xwf = OpenInputFile($xw_outfname);
+	while (my $line = <$xwf>) {
 	    $line =~ s/\n|\r//g;
 	    if ($line =~ /Amino Acid Range : 1\.\.$seq_len/) {
 		# GOT ONE!
-		if ($full_maps) { $full_maps = $full_maps.';'.$hw_outfname; }
-		else            { $full_maps = $hw_outfname;                }
+		if ($full_maps) { $full_maps = $full_maps.';'.$xw_outfname; }
+		else            { $full_maps = $xw_outfname;                }
 		last;
 	    }
 	}
-	close($hwf);
+	close($xwf);
 	
     }
 
@@ -1171,13 +1171,13 @@ sub CheckForFullMaps
 
 ############################################################
 #
-#  Function: ExtractCanonHWMap
+#  Function: ExtractCanonXWMap
 #
 #  NOTE: This function assumes that we have a full mapping to a single chromosome.
-#        Any full mappings using chimeric inputs to HitWeaver will need to use
-#        ExtractChimericHWMap.
+#        Any full mappings using chimeric inputs to ExonWeaver will need to use
+#        ExtractChimericXWMap.
 #
-sub ExtractCanonHWMap
+sub ExtractCanonXWMap
 {
     my $fname  = shift;
     my $seqlen = shift;
@@ -1317,7 +1317,7 @@ sub ExtractCanonHWMap
 #
 sub AttemptSpalnFill
 {
-    my $hw_outfname       = shift;
+    my $xw_outfname       = shift;
     my $max_hits_list_str = shift;
     my $gap_starts_ref    = shift;
     my $gap_ends_ref      = shift;
@@ -1334,7 +1334,7 @@ sub AttemptSpalnFill
     my @Seq = split(//,$seq_str);
 
     # Figure out what chromosome we're dealing with
-    $hw_outfname =~ /\/([^\/]+)$/;
+    $xw_outfname =~ /\/([^\/]+)$/;
     my $hitfname = $1;
     $hitfname =~ /^[^\.]+\.([^\.]+)\./;
     my $chr = $1;
@@ -1344,24 +1344,24 @@ sub AttemptSpalnFill
 	$revcomp = 1;
     }
 
-    # We'll kick things off by opening up the HitWeaver output file and grabbing the
+    # We'll kick things off by opening up the ExonWeaver output file and grabbing the
     # nucleotide ranges corresponding to each of our favorite hits.
-    my $hwoutf = OpenInputFile($hw_outfname);
+    my $xwoutf = OpenInputFile($xw_outfname);
     my @MaxHits = split(/\,/,$max_hits_list_str); # These are [0..num_hits-1]
     my @MaxHitNuclRanges;
     my $hit_num = 0;
     my $exon_num = 0;
-    while (my $line = <$hwoutf>) {
+    while (my $line = <$xwoutf>) {
 
 	if ($line =~ /\-\-\-\-\- Exons/) {
 	    if ($exon_num == $MaxHits[$hit_num]) {
 
 		# Scan to where the nucleotide range is hiding
-		$line = <$hwoutf>; # blank line
-		$line = <$hwoutf>; # exon id list
-		$line = <$hwoutf>; # mapping score
-		$line = <$hwoutf>; # amino range
-		$line = <$hwoutf>; # Nucleotide Range!
+		$line = <$xwoutf>; # blank line
+		$line = <$xwoutf>; # exon id list
+		$line = <$xwoutf>; # mapping score
+		$line = <$xwoutf>; # amino range
+		$line = <$xwoutf>; # Nucleotide Range!
 		$line =~ s/\n|\r//g;
 		$line =~ /Nucleotide Range \: (\d+\.\.\d+)$/;
 
@@ -1376,7 +1376,7 @@ sub AttemptSpalnFill
 	}
 	
     }
-    close($hwoutf);
+    close($xwoutf);
 
     # Now we can run through our list of gaps and determine where we'd
     # want to look in the genome to try to fill them in
@@ -1542,32 +1542,32 @@ sub AttemptSpalnFill
     #
     # Next up, we'll pull in the original FastMap2 hits and add them
     # to GapHits.  This will give us a full input to push off to
-    # HitWeaver, which will hopefully give us a full-sequence mapping...
+    # ExonWeaver, which will hopefully give us a full-sequence mapping...
 
 
-    # Open up the original HitWeaver input file
-    my $hw_infname = $hw_outfname;
-    $hw_infname =~ s/out$/in/;
-    my $hwinf = OpenInputFile($hw_infname);
+    # Open up the original ExonWeaver input file
+    my $xw_infname = $xw_outfname;
+    $xw_infname =~ s/out$/in/;
+    my $xwinf = OpenInputFile($xw_infname);
 
-    while (my $line = <$hwinf>) {
+    while (my $line = <$xwinf>) {
 
 	# Is this the start of a new exon?
 	if ($line =~ /Hit Score   \: (\S+)/) {
 
 	    my $hit_score = $1 + 0.0;
 
-	    $line = <$hwinf>; # Amino range
+	    $line = <$xwinf>; # Amino range
 	    $line =~ /Amino Range \: (\d+)\.\.(\d+)/;
 	    my $hit_amino_start = $1;
 	    my $hit_amino_end   = $2;
 	    
-	    $line = <$hwinf>; # Nucl  range
+	    $line = <$xwinf>; # Nucl  range
 	    $line =~ /Nucl Range  \: (\d+)\.\.(\d+)/;
 	    my $hit_nucl_start = $1;
 	    my $hit_nucl_end   = $2;
 	    
-	    $line = <$hwinf>; # Nucleotide Seq.
+	    $line = <$xwinf>; # Nucleotide Seq.
 	    $line =~ /Nucleotides \: (\S+)/;
 	    my $hit_nucl_str = $1;
 
@@ -1582,7 +1582,7 @@ sub AttemptSpalnFill
 	
     }
 
-    close($hwinf);
+    close($xwinf);
 
     # Sort those stinky hits!
     my %StartAminoToHits;
@@ -1606,15 +1606,15 @@ sub AttemptSpalnFill
     # At this point, we can assume that we'll at least recover the existing output
     # data (if not grow it), so we clear the prior files (mainly so we can reuse
     # the file names...)
-    RunSystemCommand("rm \"$hw_infname\"");
-    RunSystemCommand("rm \"$hw_outfname\"");
+    RunSystemCommand("rm \"$xw_infname\"");
+    RunSystemCommand("rm \"$xw_outfname\"");
 
-    # Push off to HitWeaver!
-    ($hw_infname,$hw_outfname) =
+    # Push off to ExonWeaver!
+    ($xw_infname,$xw_outfname) =
 	GenSpliceGraph($final_exon_str,$seq_str,$seq_id,$chr,$revcomp,$gene_fname);
 
     # Did we get a full mapping?
-    my $hit_str = CheckForFullMaps($hw_outfname,$seq_len);
+    my $hit_str = CheckForFullMaps($xw_outfname,$seq_len);
 
     # If we did get a full mapping, give credit to SPALN for filling in the gaps
     if ($hit_str) {
@@ -1633,12 +1633,12 @@ sub AttemptSpalnFill
 
 ############################################################
 #
-#  Function: AttemptChimericHWMap
+#  Function: AttemptChimericXWMap
 #
-sub AttemptChimericHWMap
+sub AttemptChimericXWMap
 {
-    my $orig_hw_inf_str   = shift;
-    my $orig_hw_outf_str  = shift;
+    my $orig_xw_inf_str   = shift;
+    my $orig_xw_outf_str  = shift;
     my $canon_chr_fname   = shift;
     my $max_exon_list_str = shift;
     my $amino_starts_ref  = shift;
@@ -1647,13 +1647,13 @@ sub AttemptChimericHWMap
     my $seq_id            = shift;
     my $gene_fname        = shift;
 
-    my @HWOutNames     = split(/\;/,$orig_hw_outf_str);
-    my @HWInNames      = split(/\;/,$orig_hw_inf_str);
+    my @XWOutNames     = split(/\;/,$orig_xw_outf_str);
+    my @XWInNames      = split(/\;/,$orig_xw_inf_str);
     my @AminoGapStarts = split(/\,/,$amino_starts_ref);
     my @AminoGapEnds   = split(/\,/,$amino_ends_ref);
 
     # I'm going to build a list of all the exons we want to use as inputs to
-    # HitWeaver.  We'll need a method for sorting these by their starting aminos, too.
+    # ExonWeaver.  We'll need a method for sorting these by their starting aminos, too.
     my @FullExonList;
     my %ExonInfoToListIndex;
     my @ChrsByExon;
@@ -1662,19 +1662,19 @@ sub AttemptChimericHWMap
     # files and find all of the putative exons that fall into the gaps between
     # canonical hits
     my $num_exons = 0;
-    for (my $i=0; $i<scalar(@HWInNames); $i++) {
+    for (my $i=0; $i<scalar(@XWInNames); $i++) {
 
 	# Which chromosome is this?
-	$HWInNames[$i] =~ /\.([^\.]+)\.weaver\.in$/;
+	$XWInNames[$i] =~ /\.([^\.]+)\.weaver\.in$/;
 	my $chr = $1;
 
 	# We can treat the canonical chromosome somewhat specially, since it has
 	# a list pre-generated
 	my @ExonList;
-	if ($HWOutNames[$i] eq $canon_chr_fname) {
+	if ($XWOutNames[$i] eq $canon_chr_fname) {
 
 	    my $exon_list_ref
-		= ExtractHWInputExons($canon_chr_fname,$max_exon_list_str);
+		= ExtractXWInputExons($canon_chr_fname,$max_exon_list_str);
 
 	    @ExonList = @{$exon_list_ref};
 	    for (my $j=0; $j<scalar(@ExonList); $j++) {
@@ -1700,9 +1700,9 @@ sub AttemptChimericHWMap
 	    # Noncanonical chromosome!  We'll need to search the input file for
 	    # exons that fit in the canonical gaps (with a bit of wiggle room for
 	    # overlap).
-	    my $hwinf = OpenInputFile($HWInNames[$i]);
+	    my $xwinf = OpenInputFile($XWInNames[$i]);
 	    my $gap_num = 0;
-	    while (my $line = <$hwinf>) {
+	    while (my $line = <$xwinf>) {
 
 		# Exon is kicking off!
 		if ($line =~ /^Hit Score/) {
@@ -1710,7 +1710,7 @@ sub AttemptChimericHWMap
 		    # Begin the exon tracking
 		    my $exon = $line;
 
-		    $line = <$hwinf>;
+		    $line = <$xwinf>;
 		    $line =~ /Amino Range \: (\d+)\.\.(\d+)/;
 		    my $start_amino = $1;
 		    my $end_amino   = $2;
@@ -1730,13 +1730,13 @@ sub AttemptChimericHWMap
 			$end_amino   <= $AminoGapEnds[$gap_num]+2) {
 
 			# Excellent!  Build it up and add it to the list
-			$line = <$hwinf>; # Nucl. Range
+			$line = <$xwinf>; # Nucl. Range
 			$exon = $exon.$line;
-			$line = <$hwinf>; # Nucl. String
+			$line = <$xwinf>; # Nucl. String
 			$exon = $exon.$line;
-			$line = <$hwinf>; # 3' SS Strengths
+			$line = <$xwinf>; # 3' SS Strengths
 			$exon = $exon.$line;
-			$line = <$hwinf>; # 5' SS Strengths
+			$line = <$xwinf>; # 5' SS Strengths
 			$exon = $exon.$line."\n";
 
 			push(@FullExonList,$exon);
@@ -1753,7 +1753,7 @@ sub AttemptChimericHWMap
 
 	    }
 
-	    close($hwinf);
+	    close($xwinf);
 
 	}
 	
@@ -1787,7 +1787,7 @@ sub AttemptChimericHWMap
 	print $ChimeraFile "$exon";
     }
 
-    # Close up the file and give it to HitWeaver!  Be sure to let them know
+    # Close up the file and give it to ExonWeaver!  Be sure to let them know
     # that you don't want to worry about chromosome consistency...
     #
     # NOTE: We aren't interested in single-exon hits this time -- if we don't
@@ -1795,7 +1795,7 @@ sub AttemptChimericHWMap
     #       entirely over to BLAT+SPALN
     #
     close($ChimeraFile);
-    my $weaver_cmd = $srcdir."HitWeaver --allow-inconsistency \"$chimera_in\" > \"$chimera_out\"";
+    my $weaver_cmd = $srcdir."ExonWeaver --allow-inconsistency \"$chimera_in\" > \"$chimera_out\"";
     RunSystemCommand($weaver_cmd);
 
     # We don't need to hold onto this file anymore
@@ -1810,7 +1810,7 @@ sub AttemptChimericHWMap
     # If we have a full mapping, we'll need to extract it!
     my $full_map = CheckForFullMaps($chimera_out,$seq_len);
     if ($full_map) {
-	$full_map = ExtractChimericHWMap($chimera_out,\@ChrsByExon,$seq_len,$seq_id);
+	$full_map = ExtractChimericXWMap($chimera_out,\@ChrsByExon,$seq_len,$seq_id);
     }
 
     # No more need for this file -- burn it and punt the full map (if we have one)
@@ -1824,9 +1824,9 @@ sub AttemptChimericHWMap
 
 ############################################################
 #
-#  Function: ExtractHWInputExons
+#  Function: ExtractXWInputExons
 #
-sub ExtractHWInputExons
+sub ExtractXWInputExons
 {
     my $fname = shift;
     my $exon_list_str = shift;
@@ -1883,14 +1883,14 @@ sub ExtractHWInputExons
 
 ############################################################
 #
-#  Function: ExtractChimericHWMap
+#  Function: ExtractChimericXWMap
 #
-#  NOTE: To give the opposite note from ExtractCanonHWMap, this function doesn't
+#  NOTE: To give the opposite note from ExtractCanonXWMap, this function doesn't
 #        assume that all hits are to the same strand / chromosome.
 #
-sub ExtractChimericHWMap
+sub ExtractChimericXWMap
 {
-    my $hw_outfname = shift;
+    my $xw_outfname = shift;
     my $chr_list_ref = shift;
     my $seqlen = shift;
     my $seq_id = shift;
@@ -1898,7 +1898,7 @@ sub ExtractChimericHWMap
     my @ChrsByExon = @{$chr_list_ref};
     
     # Open the file and scan until we we're in the full mapping zone (FMZ)
-    my $inf = OpenInputFile($hw_outfname);
+    my $inf = OpenInputFile($xw_outfname);
     my $line = <$inf>;
     while ($line = <$inf>) {
 	$line =~ s/\n|\r//g;
@@ -1906,7 +1906,7 @@ sub ExtractChimericHWMap
     }
 
     # I'm not going to tolerate abuse of this function!
-    if (eof($inf)) { close($inf); die "\n  ERROR:  '$hw_outfname' didn't fully map!\n\n"; }
+    if (eof($inf)) { close($inf); die "\n  ERROR:  '$xw_outfname' didn't fully map!\n\n"; }
     
     # Eat the nucleotide range and subsequent empty line
     $line = <$inf>;
@@ -2046,9 +2046,9 @@ sub ExtractChimericHWMap
 
 ############################################################
 #
-#  Function: FindMaximalHWHitSet
+#  Function: FindMaximalXWHitSet
 #
-sub FindMaximalHWHitSet
+sub FindMaximalXWHitSet
 {
     my $outf_list_str    = shift;
     my $target_chr_fname = shift;
@@ -2061,26 +2061,26 @@ sub FindMaximalHWHitSet
 	$target_index++;
     }
 
-    # Open up the target chromosome's HW output file and pull in
+    # Open up the target chromosome's XW output file and pull in
     # a list of the hits our sequence had to it, with exon indices.
     # Keep in mind that these exon indices are [1..num_exons],
     # with respect to the order of exons in the input file.
     my @TargetHitStarts;
     my @TargetHitEnds;
     my @TargetHitExons;
-    my $hwoutf   = OpenInputFile($OutFileNames[$target_index]);
+    my $xwoutf   = OpenInputFile($OutFileNames[$target_index]);
     my $num_hits = 0;
-    while (my $line = <$hwoutf>) {
+    while (my $line = <$xwoutf>) {
 
 	next if ($line !~ /\-\-\-\-\- Exons/);
 
-	$line = <$hwoutf>; # blank line
-	$line = <$hwoutf>; # Exon list!
+	$line = <$xwoutf>; # blank line
+	$line = <$xwoutf>; # Exon list!
 	$line =~ /Spliced Exon IDs \: (\S+)/;
 	$TargetHitExons[$num_hits] = $1;
 
-	$line = <$hwoutf>; # score line
-	$line = <$hwoutf>; # Amino range!
+	$line = <$xwoutf>; # score line
+	$line = <$xwoutf>; # Amino range!
 	$line =~ /Amino Acid Range \: (\d+)\.\.(\d+)/;
 	$TargetHitStarts[$num_hits] = $1;
 	$TargetHitEnds[$num_hits]   = $2;
@@ -2088,10 +2088,10 @@ sub FindMaximalHWHitSet
 	$num_hits++;
 	
     }
-    close($hwoutf);
+    close($xwoutf);
 
     # Where are there holes in our mapping?
-    # NOTE: Because the output method in HW runs linearly through the list of exons
+    # NOTE: Because the output method in XW runs linearly through the list of exons
     #       to see which start hits, they should be pre-sorted according to amino
     #       start position, so we can take advantage of that when determining the
     #       set of non-overlapping hits that maximally cover the protein
@@ -2196,14 +2196,14 @@ sub GetAminoHitGaps
 
 ############################################################
 #
-#  Function: SaveTopHWInputs
+#  Function: SaveTopXWInputs
 #
-sub SaveTopHWInputs
+sub SaveTopXWInputs
 {
-    my $hw_infname = shift;
+    my $xw_infname = shift;
 
     # Get the name without any of the directory path stuff
-    $hw_infname =~ /\/([^\/]+)$/;
+    $xw_infname =~ /\/([^\/]+)$/;
     my $fname = $1;
 
     # Break the name up into its components
@@ -2226,7 +2226,7 @@ sub SaveTopHWInputs
     print $SaveFile "Chromosome: $chr\n\n";
 
     # Next, open up the original file and copy over all of the important stuff
-    my $inf = OpenInputFile($hw_infname);
+    my $inf = OpenInputFile($xw_infname);
     while (my $line = <$inf>) {
 	if ($line =~ /^Hit Score/) {
 	    print $SaveFile "$line"; # Hit Score
@@ -2261,12 +2261,12 @@ sub RecordMaximalHits
     my $outfname = shift;
     my $hit_index_list = shift;
 
-    # Open up the original HitWeaver output file and the file we'll be transferring
+    # Open up the original ExonWeaver output file and the file we'll be transferring
     # a subset of those hits into
     my $inf  = OpenInputFile($infname);
     my $outf = OpenOutputFile($outfname);
 
-    # HitWeaver output files always start with a blank line, and who am I to
+    # ExonWeaver output files always start with a blank line, and who am I to
     # question that?
     print $outf "\n";
 
@@ -2498,7 +2498,7 @@ sub GenBlatMaps
 	    # If this isn't one of ours, leave it for a different friend to play with
 	    next if (!$ThreadGenes{$gene});
 	    
-	    # If we have partial information from HitWeaver (derived from GTF)
+	    # If we have partial information from ExonWeaver (derived from GTF)
 	    # then our search might only pertain to certain parts of the actual
 	    # protein sequence -- check if this is the case!
 	    my $partial = '-';
@@ -2658,36 +2658,36 @@ sub AttemptBlatFill
 
     my @BlatHits = @{$blathits_ref};
 
-    # Find the file with the stored HitWeaver inputs to this gene's canon chromosome
-    my $hwinfname = $seq_dirname.$seqname.'.partial.tmp';
+    # Find the file with the stored ExonWeaver inputs to this gene's canon chromosome
+    my $xwinfname = $seq_dirname.$seqname.'.partial.tmp';
 
     # Open it up and pull in the original hits, along with the chromosome info
-    my $OrigHWInf = OpenInputFile($hwinfname);
+    my $OrigXWInf = OpenInputFile($xwinfname);
 
-    my $orig_chr = <$OrigHWInf>;
+    my $orig_chr = <$OrigXWInf>;
     $orig_chr =~ s/\n|\r//g;
     $orig_chr =~ s/^Chromosome\: //;
     $orig_chr =~ s/\[revcomp\]/\-revcomp/;
 
     my @OrigHits;
-    while (my $line = <$OrigHWInf>) {
+    while (my $line = <$OrigXWInf>) {
 
 	if ($line =~ /Hit Score/) {
 
 	    $line =~ /Hit Score   \: (\S+)/;
 	    my $hit_score = $1;
 
-	    $line = <$OrigHWInf>;
+	    $line = <$OrigXWInf>;
 	    $line =~ /Amino Range \: (\d+)\.\.(\d+)/;
 	    my $amino_start = $1;
 	    my $amino_end   = $2;
 	    
-	    $line = <$OrigHWInf>;
+	    $line = <$OrigXWInf>;
 	    $line =~ /Nucl Range  \: (\d+)\.\.(\d+)/;
 	    my $nucl_start = $1;
 	    my $nucl_end   = $2;
 	    
-	    $line = <$OrigHWInf>;
+	    $line = <$OrigXWInf>;
 	    $line =~ /Nucleotides \: (\S+)/;
 	    my $nucl_str = $1;
 
@@ -2698,10 +2698,10 @@ sub AttemptBlatFill
 	}
 	
     }
-    close($OrigHWInf);
+    close($OrigXWInf);
 
     # We'll clear this file out, since it's not going to be used for anything else
-    RunSystemCommand("rm \"$hwinfname\"");
+    RunSystemCommand("rm \"$xwinfname\"");
 
     # Next up, we'll parse each of the lines from our BLAT hit, and assume that it
     # nailed the ranges exactly right...
@@ -2746,7 +2746,7 @@ sub AttemptBlatFill
 
 	# Now we're past the point of using the chromosome for actual data extraction,
 	# so we can change the name to be more human-informative.
-	# NOTE that we'll be passing this off to ExtractChimericHWMap, which
+	# NOTE that we'll be passing this off to ExtractChimericXWMap, which
 	# anticipates '-revcomp' rather than '[revcomp]'
 	$blat_chr = $blat_chr.'-revcomp' if ($blat_nucl_start > $blat_nucl_end);
 
@@ -2771,7 +2771,7 @@ sub AttemptBlatFill
 
     my $orig_exon_pos = 0;
     my $blat_list_pos = 0;
-    my @ChrsByExon; # Keeping with the nomenclature of 'ExtractChimericHWMap'
+    my @ChrsByExon; # Keeping with the nomenclature of 'ExtractChimericXWMap'
     my @FullHitList;
     while ($orig_exon_pos < scalar(@OrigHits) && $blat_list_pos < scalar(@BlatStarts)){
 	if ($OrigHits[$orig_exon_pos] <= $BlatStarts[$blat_list_pos]) {
@@ -2807,11 +2807,11 @@ sub AttemptBlatFill
 	$blat_list_pos++;
     }
 
-    # Now we can convert our hits into HitWeaver input! We'll reuse the filename
+    # Now we can convert our hits into ExonWeaver input! We'll reuse the filename
     # that stored the original hits.
     my $num_exons  = scalar(@FullHitList);
     my $seq_len    = length($seq_str);
-    my $WeaverFile = OpenOutputFile($hwinfname);
+    my $WeaverFile = OpenOutputFile($xwinfname);
     print $WeaverFile "Num Hits : $num_exons\n";
     print $WeaverFile "Seq Len  : $seq_len\n";
     print $WeaverFile "Sequence : $seq_str\n";
@@ -2822,34 +2822,34 @@ sub AttemptBlatFill
     close($WeaverFile);
 
     # Come up with a hip name for the output file
-    my $hwoutfname = $hwinfname;
-    $hwoutfname =~ s/\.tmp$/\.out/;
+    my $xwoutfname = $xwinfname;
+    $xwoutfname =~ s/\.tmp$/\.out/;
 
     # NOTE: Even though it's possible that our BLAT results will only have found
     #       hits to a single chromosome, we'll use the chimeric search to cover all
     #       possible bizzare splicing patterns.
-    my $weaver_cmd = $srcdir."HitWeaver --allow-inconsistency \"$hwinfname\" > \"$hwoutfname\"";
+    my $weaver_cmd = $srcdir."ExonWeaver --allow-inconsistency \"$xwinfname\" > \"$xwoutfname\"";
     RunSystemCommand($weaver_cmd);
 
     # Begone, input file!
-    RunSystemCommand("rm \"$hwinfname\"");
+    RunSystemCommand("rm \"$xwinfname\"");
 
     # Did we get anything at all?
-    if (!(-s $hwoutfname)) {
-	RunSystemCommand("rm \"$hwoutfname\"") if (-e $hwoutfname);
+    if (!(-s $xwoutfname)) {
+	RunSystemCommand("rm \"$xwoutfname\"") if (-e $xwoutfname);
 	return 0;
     }
 
     # You know the way this goes
-    my $full_map = CheckForFullMaps($hwoutfname,$seq_len);
+    my $full_map = CheckForFullMaps($xwoutfname,$seq_len);
     if ($full_map) {
-	$full_map = ExtractChimericHWMap($hwoutfname,\@ChrsByExon,$seq_len,$seqname);
+	$full_map = ExtractChimericXWMap($xwoutfname,\@ChrsByExon,$seq_len,$seqname);
 	# Credit to BLAT!
 	$full_map =~ s/FastMap2/BLAT\+FastMap2/;
     }
     
     # That's all!
-    RunSystemCommand("rm \"$hwoutfname\"");
+    RunSystemCommand("rm \"$xwoutfname\"");
     return $full_map;
     
 }
