@@ -1624,7 +1624,7 @@ void ParseCommandArgs (HW_OPTS * Opts, int argc, char ** argv) {
     } else if (!strcmp(argv[i],"--report-singles")) {
       Opts->report_singles = 1;
     } else {
-      fprintf(stderr,"  HitWeaver Warning: Unrecognized option '%s' ignored\n",argv[i]);
+      fprintf(stderr,"  ExonWeaver Warning: Unrecognized option '%s' ignored\n",argv[i]);
     }
     i++;
   }
@@ -1640,7 +1640,7 @@ void ParseCommandArgs (HW_OPTS * Opts, int argc, char ** argv) {
  *
  */
 int PrintUsage () {
-  printf("\n  USAGE: ./HitWeaver {OPTS} [weaver-input-file]\n\n");
+  printf("\n  USAGE: ./ExonWeaver {OPTS} [weaver-input-file]\n\n");
   return 1;
 }
 
@@ -1697,7 +1697,7 @@ int main (int argc, char ** argv) {
   free(Opts);
   free(Seq);
 
-  // And that's called HitWeaver!
+  // And that's called ExonWeaver!
   return 0;
   
 }
