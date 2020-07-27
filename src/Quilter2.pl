@@ -78,6 +78,14 @@ $spaln =~ /^(.*)spaln$/;
 $ENV{'ALN_TAB'} = $1.'../table';
 $ENV{'ALN_DBS'} = $1.'../seqdb';
 
+# Since we use the same options for all spaln searches, let's just set those now
+# NOTE: I'm going to test out forcing forward-strand only (S1)
+#       as opposed to both strands (S3).  I'm also boosting the weight
+#       for coding potential (-yz=2 -> -yz=4) and lowering the weight
+#       for splice site signal (-yy=8 -> -yy=4).
+my $spaln_opts = ' -Q3 -O1 -S1 -ya3 -yz4 -yy4 ';
+$spaln = $spaln.$spaln_opts;
+
 # How many CPUs do we intend to use?
 my $ThreadGuide = OpenInputFile($seq_dirname.'Thread-Guide');
 my $num_cpus = <$ThreadGuide>;
@@ -144,7 +152,7 @@ if (scalar(@BlatFileNames)) {
     # telling us!
     GenBlatMaps($blat_outfname,\%BlatNameGuide,\%BlatGenes,$num_cpus);
 
-    # Cleanup on line 135! << CRITICAL: KEEP THIS LINE NUMBER CORRECT, FOR JOKE
+    # Cleanup on line 156! << CRITICAL: KEEP THIS LINE NUMBER CORRECT, FOR JOKE
     RunSystemCommand("rm \"$blat_outfname\"");
 
 }
@@ -1444,9 +1452,7 @@ sub AttemptSpalnFill
 	my $sfetch_cmd = $sfetch." -c $nucl_range \"$genome\" \"$chr\" > $nucl_fname";
 	RunSystemCommand($sfetch_cmd);
 
-	# NOTE: I'm going to test out forcing forward-strand only (S1)
-	# as opposed to both strands (S3)
-	my $spaln_cmd = $spaln." -Q3 -O1 -S1 -ya3 \"$nucl_fname\" \"$temp_fname\" 2>/dev/null";
+	my $spaln_cmd = $spaln."\"$nucl_fname\" \"$temp_fname\" 2>/dev/null";
 	my $SpalnOut  = OpenSystemCommand($spaln_cmd);
 
 	# Note that while the intuition is that a gap is a single wily
@@ -3116,11 +3122,14 @@ sub BlatToSpalnSearch
 
 	# First off, we'll try a spaln search on a range that assumes no funny business
 	# vis-a-vis splicing.
-	my ($starts_ref,$ends_ref,$num_ranges)
+	my ($starts_ref,$ends_ref,$num_ranges,$sum_len)
 	    = GetSpalnSfetchRanges(\@RangeStarts,\@RangeEnds,$chr_len,1);
 	my @SpalnStarts = @{$starts_ref};
 	my @SpalnEnds   = @{$ends_ref};
 	
+	# We won't do a search that would require pulling in >15Mb
+	next if ($sum_len > 15000000);
+
 	# Because we're using a function that plays friendly with a multiple-chromosome
 	# version of this index building, we'll need to note the chromosomes for each
 	# range
@@ -3183,10 +3192,14 @@ sub BlatToSpalnSearch
 
 	# Hmm, doesn't look like we got a solid hit the first time.
 	# Let's see if there's a funkiness to the order (weird splicing alert!)
-	my ($starts_ref,$ends_ref,$num_ranges)
+	my ($starts_ref,$ends_ref,$num_ranges,$sum_len)
 	    = GetSpalnSfetchRanges(\@RangeStarts,\@RangeEnds,$chr_len,0);
 	my @SpalnStarts = @{$starts_ref};
 	my @SpalnEnds   = @{$ends_ref};
+
+	# We still won't do a search that would require pulling in >15Mb
+	next if ($sum_len > 15000000);
+
 	my @SpalnChrs;
 	for (my $i=0; $i<$num_ranges; $i++) {
 	    $SpalnChrs[$i] = $chr;
@@ -3393,8 +3406,14 @@ sub GetSpalnSfetchRanges
 	
     }
 
+    # Compute the sum length of the ranges
+    my $sum_len = 0;
+    for (my $i=0; $i<$num_ranges; $i++) {
+	$sum_len += abs($RangeEnds[$i]-$RangeStarts[$i]);
+    }
+
     # Return the adjusted ranges
-    return (\@RangeStarts,\@RangeEnds,$num_ranges);
+    return (\@RangeStarts,\@RangeEnds,$num_ranges,$sum_len);
 
 }
 
@@ -3473,9 +3492,7 @@ sub SpalnSearch
     # Assemble the Spaln command!
     my $spaln_fname = $prot_fname;
     $spaln_fname =~ s/\.prot\.in/\.spaln\.out/;
-    # NOTE: I'm going to test out forcing forward-strand only (S1)
-    # as opposed to both strands (S3)
-    my $spaln_cmd = $spaln." -Q3 -O1 -S1 -ya3 \"$nucl_fname\" \"$prot_fname\" 1>\"$spaln_fname\" 2>/dev/null";
+    my $spaln_cmd = $spaln."\"$nucl_fname\" \"$prot_fname\" 1>\"$spaln_fname\" 2>/dev/null";
     RunSystemCommand($spaln_cmd);
     
     # Get that nucleotide file OUTTA HERE!
