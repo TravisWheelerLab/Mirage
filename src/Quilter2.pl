@@ -3219,37 +3219,47 @@ sub BlatToSpalnSearch
     ##########################
     
     # Hmmmmm.....
-    # Alright, let's go wild 'n' crazy and see if we can jumble our chromosomes together
-    # in some sort of pleasing fashion...
+    # Alright, let's go wild 'n' crazy and see if we can jumble our chromosomes
+    # together in some sort of pleasing fashion...
     my @RangeStarts;
     my @RangeEnds;
     my @RangeChrs;
+    my $sum_len = 0;
     foreach my $group (@GroupSorting) {
 
+	my @ChrStarts;
+	my @ChrEnds;
+	foreach my $range (split(/\,/,$GroupNuclRanges[$group])) {
+	    $range =~ /^(\d+)\.\.(\d+)$/;
+	    my $start = $1;
+	    my $end = $2;
+	    push(@ChrStarts,$start);
+	    push(@ChrEnds,$end);
+	}
+
+	# We'll organize groups on a per-chromosome basis
 	my $group_chr = $GroupChrs[$group];
 	my $true_chr = $group_chr;
 	$true_chr =~ s/\S$//;
 	my $chr_len = $ChrSizes{$true_chr};
 	
-	if ($group_chr =~ /\-$/) {
-	    foreach my $range (split(/\,/,$GroupNuclRanges[$group])) {
-		$range =~ /^(\d+)\.\.(\d+)$/;
-		my $start = $1;
-		my $end = $2;
-		push(@RangeStarts,Min($chr_len,$start+20000));
-		push(@RangeEnds,Max(1,$end-20000));
-		push(@RangeChrs,$group_chr);
-	    }
-	} else {
-	    foreach my $range (split(/\,/,$GroupNuclRanges[$group])) {
-		$range =~ /^(\d+)\.\.(\d+)$/;
-		my $start = $1;
-		my $end = $2;
-		push(@RangeStarts,Max(1,$start-20000));
-		push(@RangeEnds,Min($chr_len,$end+20000));
-		push(@RangeChrs,$group_chr);
-	    }
+	my ($starts_ref,$ends_ref,$num_ranges) =
+	    GetSpalnSfetchRanges(\@ChrStarts,\@ChrEnds,$chr_len,1);
+	@ChrStarts = @{$starts_ref};
+	@ChrEnds   = @{$ends_ref};
+
+	for (my $i=0; $i<$num_ranges; $i++) {
+	    $sum_len += abs($ChrEnds[$i]-$ChrStarts[$i]);
+	    push(@RangeStarts,$ChrStarts[$i]);
+	    push(@RangeEnds,$ChrEnds[$i]);
+	    push(@RangeChrs,$group_chr);
 	}
+    }
+
+    # Make sure we aren't pulling in an inordinate amount of sequence (15 Mb)...
+    if ($sum_len > 15000000) {
+	RunSystemCommand("rm \"$prot_fname\"");
+	return 0;
     }
 
     # Last call for Spaln-ohol!
