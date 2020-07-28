@@ -3820,11 +3820,11 @@ sub ParseSpalnOutput
 	    # case we'll assume that the skip was unnecessary.
 	    $nucl_line =~ /^\s*(\d+)/;
 	    my $line_nucl_pos = $1;
+	    $GroupNuclStarts[$num_groups] = $line_nucl_pos;
 
-	    # A catch for the first "skip"
-	    if ($recent_skip == -1) {
-		$GroupNuclStarts[$num_groups] = $line_nucl_pos;
-	    } elsif ($nucl_pos + $recent_skip != $line_nucl_pos) {
+	    # A catch for the possibility of the line's reported position
+	    # not matching our bookkeeping
+	    if ($recent_skip != -1 && $nucl_pos + $recent_skip != $line_nucl_pos) {
 		if ($recent_skip == 60 && $line_nucl_pos == $nucl_pos) {
 		    $GroupNuclStarts[$num_groups] = $nucl_pos;
 		} else {
