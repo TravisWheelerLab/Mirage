@@ -3904,6 +3904,7 @@ sub ParseSpalnOutput
 	    my $exon_prot_start  = $prot_pos;
 	    my $codon_center_str = '';
 
+	    my $start_prot_pos = $prot_pos;
 	    while ($scan < scalar(@Nucl) && $Nucl[$scan] eq uc($Nucl[$scan])) {
 		if ($Prot[$scan] =~ /[A-Z]/) {
 		    # Do we have a match?
@@ -3918,6 +3919,8 @@ sub ParseSpalnOutput
 		$nucl_pos++ if ($Nucl[$scan] =~ /[A-Z]/);
 		$scan++;
 	    }
+
+	    next if ($start_prot_pos == $prot_pos);
 
 	    my $exon_nucl_end = $nucl_pos-1;
 	    my $exon_prot_end = $prot_pos-1;
