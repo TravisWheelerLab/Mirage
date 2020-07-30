@@ -38,6 +38,7 @@ sub RunBlatOnFileSet;
 sub GenBlatMaps;
 sub AttemptBlatFill;
 sub BlatToSpalnSearch;
+sub GetSpalnSfetchRanges;
 sub SpalnSearch;
 sub ClusterNuclRanges;
 sub AdjustNuclCoord;
@@ -1436,6 +1437,8 @@ sub AttemptSpalnFill
     $temp_fname =~ s/\.fa$/\.spaln\.prot\.fa/;
     my $nucl_fname = $temp_fname;
     $nucl_fname =~ s/\.prot\.fa$/\.nucl\.fa/;
+    my $spaln_fname = $nucl_fname;
+    $spaln_fname =~ s/\.nucl\.fa$/\.spaln\.out/;
 
     my @GapHits;
     for (my $i=0; $i<$num_gaps; $i++) {
@@ -1452,8 +1455,11 @@ sub AttemptSpalnFill
 	my $sfetch_cmd = $sfetch." -c $nucl_range \"$genome\" \"$chr\" > $nucl_fname";
 	RunSystemCommand($sfetch_cmd);
 
-	my $spaln_cmd = $spaln."\"$nucl_fname\" \"$temp_fname\" 2>/dev/null";
-	my $SpalnOut  = OpenSystemCommand($spaln_cmd);
+	my $spaln_cmd = $spaln."\"$nucl_fname\" \"$temp_fname\" 1>\"$spaln_fname\" 2>/dev/null";
+
+	# Don't bail if Spaln does -- just move on to the next case
+	next if (system($spaln_cmd));
+	my $SpalnOut = OpenInputFile($spaln_fname);
 
 	# Note that while the intuition is that a gap is a single wily
 	# exon, it's possible for there to be multiple exons (enough to
@@ -1537,8 +1543,9 @@ sub AttemptSpalnFill
     }
 
     # A bit of cleanup and futility checking
-    RunSystemCommand("rm \"$temp_fname\"") if (-e $temp_fname);
-    RunSystemCommand("rm \"$nucl_fname\"") if (-e $nucl_fname);
+    RunSystemCommand("rm \"$temp_fname\"")  if (-e $temp_fname);
+    RunSystemCommand("rm \"$nucl_fname\"")  if (-e $nucl_fname);
+    RunSystemCommand("rm \"$spaln_fname\"") if (-e $spaln_fname);
     return 0 if (!scalar(@GapHits));
     
 
@@ -3493,7 +3500,13 @@ sub SpalnSearch
     my $spaln_fname = $prot_fname;
     $spaln_fname =~ s/\.prot\.in/\.spaln\.out/;
     my $spaln_cmd = $spaln."\"$nucl_fname\" \"$prot_fname\" 1>\"$spaln_fname\" 2>/dev/null";
-    RunSystemCommand($spaln_cmd);
+
+    # Sometimes Spaln doesn't like an input, so we don't bail if the
+    # system call goes badly
+    if (system($spaln_cmd)) {
+	RunSystemCommand("rm \"$nucl_fname\"");
+	next;
+    }
     
     # Get that nucleotide file OUTTA HERE!
     RunSystemCommand("rm \"$nucl_fname\"");
