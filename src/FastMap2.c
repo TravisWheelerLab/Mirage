@@ -731,23 +731,17 @@ int main (int argc, char ** argv) {
   // We'll start off by just pulling in the coordinates
   // (and expanding out a couple codons, for the hallibut!)
   j=4;
-  for (i=0; i<num_exons; i++) {
-    ExonStarts[i] = atoi(argv[j++]) - 3 * BLOCK_SIZE;
-    ExonEnds[i]   = atoi(argv[j++]) + 3 * BLOCK_SIZE;
-  }
-
-  // Are we in revcomp land?
   int revcomp = 0;
   if (nucl_start_index > nucl_end_index) {
     revcomp = 1;
     for (i=0; i<num_exons; i++) {
-      ExonStarts[i] = nucl_start_index - ExonStarts[i];
-      ExonEnds[i]   = nucl_start_index - ExonEnds[i];
+      ExonStarts[i] = nucl_start_index - atoi(argv[j++]) - 6 * BLOCK_SIZE;
+      ExonEnds[i]   = nucl_start_index - atoi(argv[j++]) + 6 * BLOCK_SIZE;
     }
   } else {
     for (i=0; i<num_exons; i++) {
-      ExonStarts[i] -= nucl_start_index;
-      ExonEnds[i]   -= nucl_start_index;
+      ExonStarts[i] = atoi(argv[j++]) - 6 * BLOCK_SIZE - nucl_start_index;
+      ExonEnds[i]   = atoi(argv[j++]) + 6 * BLOCK_SIZE - nucl_start_index;
     }
   }
   // We should now be able to index directly in / out of exons
