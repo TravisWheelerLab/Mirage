@@ -19,6 +19,7 @@ sub ParseArgs;
 sub ParseChromSizes;
 sub UseGTF;
 sub ParseGTF;
+sub CheckGeneAliases;
 sub UseFastMap;
 sub ParseFastMapOutput;
 sub GenSpliceGraph;
@@ -264,7 +265,7 @@ sub UseGTF
     my $species = $1;
 
     # UHHHHHH, how exactly did you plan on using a GTF without PARSING IT FIRST?!
-    my $gtf_ref = ParseGTF($gtfname,$species);
+    my $gtf_ref = ParseGTF($gtfname,$species,$seq_dirname.'../../../gene-aliases');
     my %GTF = %{$gtf_ref};
 
     # Go ahead and spin up them there CPUs!
@@ -335,10 +336,18 @@ sub UseGTF
 #
 sub ParseGTF
 {
-    my $gtfname = shift;
-    my $species = shift;
+    my $gtfname    = shift;
+    my $species    = shift;
+    my $aliasfname = shift;
 
     DispProgQuilter('parsing-gtf');
+
+    # First off, if there are any aliases, let's take notice!
+    my %GeneAliases;
+    if (-e $aliasfname) {
+	my $gene_aliases_ref = CheckGeneAliases($aliasfname);
+	%GeneAliases = %{$gene_aliases_ref};
+    }
     
     my $GTFile = OpenInputFile($gtfname);
 
@@ -348,7 +357,14 @@ sub ParseGTF
     my %DuplicateCheck;
     while (my $line = <$GTFile>) {
 
-        next if ($line =~ /^\#/ || lc($line) !~ /\S+\s+\S+\s+exon/);
+	my $entry_type = '';
+	if ($line =~ /^\S+\s+\S+\s+(\S+)/) {
+	    $entry_type = lc($1);
+	}
+	
+        if ($line =~ /^\#/ || ($entry_type ne 'exon' && $entry_type ne 'cds')) {
+	    next;
+	}
 
 	# Note that startPos is always less than endPos, even when we're
         # indexing into the reverse complement.
@@ -391,6 +407,13 @@ sub ParseGTF
 	if ($GTF{$gene}) { $GTF{$gene} = $GTF{$gene}.'#'.$entry; }
 	else             { $GTF{$gene} = $entry;                 }
 
+	# If this gene has any aliases, record to them, too!
+	next if (!$GeneAliases{$gene});
+	foreach my $alias (split(/\//,$GeneAliases{$gene})) {
+	    if ($GTF{$alias}) { $GTF{$alias} = $GTF{$alias}.'#'.$entry; }
+	    else              { $GTF{$alias} = $entry;                  }
+	}
+
     }
     close($GTFile);
 
@@ -407,6 +430,36 @@ sub ParseGTF
 
     return \%GTF;
     
+}
+
+
+
+
+
+############################################################
+#
+#  Function: CheckGeneAliases
+#
+sub CheckGeneAliases
+{
+    my $fname = shift;
+
+    my %Aliases;
+    my $inf = OpenInputFile($fname);
+    while (my $line = <$inf>) {
+
+	my @Genes = split(/\s/,$line);
+	my $gene  = $Genes[0];
+	for (my $i=1; $i<scalar(@Genes); $i++) {
+	    my $alias = $Genes[$i];
+	    if ($Aliases{$alias}) { $Aliases{$alias} = $Aliases{$alias}.'/'.$gene; }
+	    else                  { $Aliases{$alias} = $gene;                      }
+	}
+
+    }
+    close($inf);
+
+    return \%Aliases;
 }
 
 

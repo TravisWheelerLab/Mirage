@@ -167,16 +167,13 @@ DispProgMirage('db-speciation');
 my ($originalseqnames_ref) = GenerateSpeciesDBs($ProteinDB,$num_cpus,\%SpeciesSeqDir);
 my @OriginalSeqNames = @{$originalseqnames_ref};
 
-# DEBUGGING
 # I'm going to print off all the original sequence names to a file so
-# if things go wrong during testing I can look up the particular sequences
-# and zero in on them.
-my $debug_f = OpenOutputFile($ResultsDir.'seq-name-guide');
+# if things go wrong during a run we can actually figure out who's who
+my $seqnamef = OpenOutputFile($ResultsDir.'seq-name-guide');
 for (my $i=0; $i<scalar(@OriginalSeqNames); $i++) {
-    print $debug_f "$i: $OriginalSeqNames[$i]\n";
+    print $seqnamef "$i: $OriginalSeqNames[$i]\n";
 }
-close($debug_f);
-# DEBUGGING
+close($seqnamef);
 
 my $MinorSpeciesDBName;
 my @SpeciesDBNames;
@@ -1423,7 +1420,11 @@ sub ConfirmSSI
 # M2: To be a little bit more flexible, we'll accept sequence names to
 #     formatted either as:
 #
-# [1] >species|gene|iso_num 
+# [1] >species|gene|iso_num
+#
+#     Where 'gene' can be a list of /-separated gene names (the FIRST will be
+#     considered the "main" gene).  This allows the GTF to consider multiple
+#     gene families' coordinates when mapping.
 #
 #     or using the UniProt format:
 #
@@ -1486,6 +1487,10 @@ sub GenerateSpeciesDBs
     # both for species as wholes and specific genes within species
     my %CharCounts;
 
+    # We'll also hash 'aliases' for genes, if the user has provided
+    # a /-separated list in the 'gene' field
+    my %GeneAliases;
+
     #ConfirmSSI($ProteinDB_name); # We do this in 'ParseArgs'
     my $ProteinDB = OpenInputFile($ProteinDB_name);
     my $seq_num = 0;
@@ -1516,6 +1521,19 @@ sub GenerateSpeciesDBs
 		$parsename =~ /^([^\|]+)\|([^\|]+)\|/;
 		$species = lc($1);
 		$genefam = lc($2);
+
+		# Any aliases? NOTE: We'll allow redundancy in this stage
+		if ($genefam =~ /\//) {
+		    my @Aliases = split(/\//,$genefam);
+		    $genefam = $Aliases[0];
+		    for (my $i=0; $i<scalar(@Aliases); $i++) {
+			if ($GeneAliases{$genefam}) {
+			    $GeneAliases{$genefam} = $GeneAliases{$genefam}.'/'.$Aliases[$i];
+			} else {
+			    $GeneAliases{$genefam} = $Aliases[$i];
+			}
+		    }
+		}
 
 	    } elsif (ParseSeqNameAsUniProt($parsename)) {
 
@@ -1612,6 +1630,32 @@ sub GenerateSpeciesDBs
 	}
 	close($ThreadGuide);
 
+    }
+
+    # If there were any aliases being used by proteins, be sure to record them!
+    my @GenesWithAliases = sort keys %GeneAliases;
+    if (scalar @GenesWithAliases) {
+
+	# Invent a file to record alias information
+	my $aliasf = OpenOutputFile($ResultsDir.'gene-aliases');
+	foreach my $gene (@GenesWithAliases) {
+
+	    # We'll hash all of the aliases so we can avoid redundancy
+	    my %UniqueAliases;
+	    foreach my $alias (split(/\//,$GeneAliases{$gene})) {
+		$UniqueAliases{$alias} = 1 unless ($alias eq $gene);
+	    }
+
+	    # Write 'em out!
+	    print $aliasf "$gene";
+	    foreach my $alias (sort keys %UniqueAliases) {
+		print $aliasf " $alias";
+	    }
+	    print $aliasf "\n";
+	    
+	}
+	close($aliasf);
+	
     }
     
     # This is it, baby!
