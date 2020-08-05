@@ -365,6 +365,7 @@ void BlockScan
   int    rf_index,
   char * ORF,
   int    orf_len,
+  int    micro_exon,
   char * NuclSeq,
   int    rel_start_nucl,
   int    chr_start_nucl,
@@ -380,7 +381,11 @@ void BlockScan
   // a bad idea? -- prot_len * orf_len...), but too big and we
   // might miss something we don't really want to miss...
   int blocksize = BLOCK_SIZE;
-  if (blocksize > orf_len) blocksize = orf_len;
+  if (micro_exon)
+    blocksize = 2;
+  else if (blocksize > orf_len)
+    blocksize = orf_len;
+  
   int num_blocks = orf_len / blocksize; // OK to risk being one short
 
   // Rather than having a chart of blocks to look at, we'll highlight
@@ -578,8 +583,7 @@ void OriginalFastMap
   int prot_len = strlen(ProtSeq);
 
   // The maximimum number of acceptable misses
-  int max_misses = 0;
-  //int max_misses = orf_len / 15;
+  int max_misses = 1;
 
   // If we hit the maximum number of misses, but have a diagonal of this length
   // then we'll override and output the mapping anyways (set to prot_len to disable)
@@ -729,23 +733,38 @@ int main (int argc, char ** argv) {
   int * ExonEnds   = malloc(num_exons*sizeof(int));
 
   // We'll start off by just pulling in the coordinates
-  // (and expanding out a couple codons, for the hallibut!)
   j=4;
   int revcomp = 0;
   if (nucl_start_index > nucl_end_index) {
     revcomp = 1;
     for (i=0; i<num_exons; i++) {
-      ExonStarts[i] = nucl_start_index - atoi(argv[j++]) - 6 * BLOCK_SIZE;
-      ExonEnds[i]   = nucl_start_index - atoi(argv[j++]) + 6 * BLOCK_SIZE;
+      ExonStarts[i] = nucl_start_index - atoi(argv[j++]);
+      ExonEnds[i]   = nucl_start_index - atoi(argv[j++]);
     }
   } else {
     for (i=0; i<num_exons; i++) {
-      ExonStarts[i] = atoi(argv[j++]) - 6 * BLOCK_SIZE - nucl_start_index;
-      ExonEnds[i]   = atoi(argv[j++]) + 6 * BLOCK_SIZE - nucl_start_index;
+      ExonStarts[i] = atoi(argv[j++]) - nucl_start_index;
+      ExonEnds[i]   = atoi(argv[j++]) - nucl_start_index;
     }
   }
   // We should now be able to index directly in / out of exons
 
+  // Now we'll expand out a couple codons, for the hallibut!
+  // NOTE that we don't expand if the GTF is telling us that this is a really small
+  // exon -- in this case we do a much narrower search, which will be more expensive
+  // but guaranteed to be on a micro-exon-sized target
+  int exon_ext_len = 6 * BLOCK_SIZE;
+  int micro_thresh = 3 * (BLOCK_SIZE-1); // 5 aminos
+  for (i=0; i<num_exons; i++) {
+    if (ExonEnds[i] - ExonStarts[i] >= micro_thresh) {
+      ExonStarts[i] -= exon_ext_len;
+      ExonEnds[i]   += exon_ext_len;
+    } else {
+      ExonStarts[i] -= 2;
+      ExonEnds[i]   += 2;
+    }
+  }
+  
   // Moreover, since things are nice 'n' easy, let's figure out
   // how much space we'll need to store our ORFs.
   // Note that we're going to be one short of the actual length,
@@ -767,6 +786,11 @@ int main (int argc, char ** argv) {
     if (revcomp) chr_start_nucl -= ExonStarts[i];
     else         chr_start_nucl += ExonStarts[i];
     
+    // Is this a short exon?  This will impact the blocksize we use...
+    int micro_exon = 0;
+    if (abs(ExonStarts[i]-ExonEnds[i])-4 < micro_thresh)
+      micro_exon = 1;
+
     // Iterate through the reading frames
     int rf_index;
     for (rf_index=0; rf_index<3; rf_index++) {
@@ -803,7 +827,7 @@ int main (int argc, char ** argv) {
 
 	// If our ORF is long enough to be worth checking, run through our
 	// protein sequences and see if we have any mappings worth remarking on
-	if (orf_len >= min_orf_aminos) {
+	if (orf_len >= min_orf_aminos || (micro_exon && orf_len >= 2)) {
 
 	  // For reporting we'll need to know some more detailed intel about the
 	  // ORF's location, both relative to the sequence we have and the whole
@@ -830,7 +854,7 @@ int main (int argc, char ** argv) {
 	  // find internal parts of exons that match to our proteins.
 	  //
 	  for (j=0; j<num_seqs; j++)
-	    BlockScan(ProtSeqs[j],j,i,rf_index,&RF[orf_start_index],orf_len,
+	    BlockScan(ProtSeqs[j],j,i,rf_index,&RF[orf_start_index],orf_len,micro_exon,
 		      NuclSeq,orf_rel_nucl,orf_chr_nucl,revcomp);
 
 	  // [2]
