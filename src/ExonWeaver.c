@@ -70,7 +70,6 @@ typedef struct _HW_NODE_T_ {
   int   * IncomingID;
   float * InEdgeScore;       // What does this add to the scores of the nodes?
   int   * FirstCodingNucl;   // What position in 'Nucls' follows the splice signal?
-  int   * ReciprocalOutIndex;// Where are we in the connected node's Outgoing list?
   int num_incoming;
   int max_incoming; // For reallocing
 
@@ -78,7 +77,6 @@ typedef struct _HW_NODE_T_ {
   int   * OutgoingID;
   float * OutEdgeScore;     // What does this add to the scores of the nodes?
   int   * LastCodingNucl;   // What position in 'Nucls' precedes the splice signal?
-  int   * ReciprocalInIndex;// Where are we in the connected node's Incoming list?
   int num_outgoing;
   int max_outgoing; // For reallocing
 
@@ -146,7 +144,6 @@ void IncreaseInEdgeCapacity (HW_NODE * N) {
   HW_NODE ** TempNode = malloc(N->num_incoming * sizeof(HW_NODE *));
   int TempIID[N->num_incoming];
   int TempFCN[N->num_incoming];
-  int TempROI[N->num_incoming];
   float TempIES[N->num_incoming];
 
   int i;
@@ -154,7 +151,6 @@ void IncreaseInEdgeCapacity (HW_NODE * N) {
     TempNode[i] = N->Incoming[i];
     TempIID[i]  = N->IncomingID[i];
     TempFCN[i]  = N->FirstCodingNucl[i];
-    TempROI[i]  = N->ReciprocalOutIndex[i];
     TempIES[i]  = N->InEdgeScore[i];
   }
 
@@ -163,14 +159,12 @@ void IncreaseInEdgeCapacity (HW_NODE * N) {
   N->Incoming = realloc(N->Incoming, N->max_incoming * sizeof(HW_NODE *));
   N->IncomingID = realloc(N->IncomingID, N->max_incoming * sizeof(int));
   N->FirstCodingNucl = realloc(N->FirstCodingNucl, N->max_incoming * sizeof(int));
-  N->ReciprocalOutIndex = realloc(N->ReciprocalOutIndex, N->max_incoming * sizeof(int));
   N->InEdgeScore = realloc(N->InEdgeScore, N->max_incoming * sizeof(float));
   
   for (i=0; i<N->num_incoming; i++) {
     N->Incoming[i] = TempNode[i];
     N->IncomingID[i] = TempIID[i];
     N->FirstCodingNucl[i] = TempFCN[i];
-    N->ReciprocalOutIndex[i] = TempROI[i];
     N->InEdgeScore[i] = TempIES[i];
   }
 
@@ -184,7 +178,6 @@ void IncreaseOutEdgeCapacity (HW_NODE * N) {
   HW_NODE ** TempNode = malloc(N->num_outgoing * sizeof(HW_NODE *));
   int TempOID[N->num_outgoing];
   int TempLCN[N->num_outgoing];
-  int TempRII[N->num_outgoing];
   float TempOES[N->num_outgoing];
 
   int i;
@@ -192,7 +185,6 @@ void IncreaseOutEdgeCapacity (HW_NODE * N) {
     TempNode[i] = N->Outgoing[i];
     TempOID[i]  = N->OutgoingID[i];
     TempLCN[i]  = N->LastCodingNucl[i];
-    TempRII[i]  = N->ReciprocalInIndex[i];
     TempOES[i]  = N->OutEdgeScore[i];
   }
 
@@ -201,14 +193,12 @@ void IncreaseOutEdgeCapacity (HW_NODE * N) {
   N->Outgoing = realloc(N->Outgoing, N->max_outgoing * sizeof(HW_NODE *));
   N->OutgoingID = realloc(N->OutgoingID, N->max_outgoing * sizeof(int));
   N->LastCodingNucl = realloc(N->LastCodingNucl, N->max_outgoing * sizeof(int));
-  N->ReciprocalInIndex = realloc(N->ReciprocalInIndex, N->max_outgoing * sizeof(int));
   N->OutEdgeScore = realloc(N->OutEdgeScore, N->max_outgoing * sizeof(float));
   
   for (i=0; i<N->num_outgoing; i++) {
     N->Outgoing[i] = TempNode[i];
     N->OutgoingID[i] = TempOID[i];
     N->LastCodingNucl[i] = TempLCN[i];
-    N->ReciprocalInIndex[i] = TempRII[i];
     N->OutEdgeScore[i] = TempOES[i];
   }
 
@@ -235,12 +225,10 @@ void DestroyGraph (HW_NODE ** Graph, int num_exons) {
     free(N->IncomingID);
     free(N->InEdgeScore);
     free(N->FirstCodingNucl);
-    free(N->ReciprocalOutIndex);
     free(N->Outgoing);
     free(N->OutgoingID);
     free(N->OutEdgeScore);
     free(N->LastCodingNucl);
-    free(N->ReciprocalInIndex);
     free(N);
   }
   free(Graph);
@@ -312,20 +300,18 @@ void ReadNodesFromFile (HW_NODE ** Graph, int num_exons, FILE * inf) {
     int init_max_in    = 4;
     Node->num_incoming = 0;
     Node->max_incoming = init_max_in;
-    Node->Incoming           = malloc(init_max_in * sizeof(HW_NODE *));
-    Node->IncomingID         = malloc(init_max_in * sizeof(int));
-    Node->InEdgeScore        = malloc(init_max_in * sizeof(float));
-    Node->FirstCodingNucl    = malloc(init_max_in * sizeof(int));
-    Node->ReciprocalOutIndex = malloc(init_max_in * sizeof(int));
+    Node->Incoming        = malloc(init_max_in * sizeof(HW_NODE *));
+    Node->IncomingID      = malloc(init_max_in * sizeof(int));
+    Node->InEdgeScore     = malloc(init_max_in * sizeof(float));
+    Node->FirstCodingNucl = malloc(init_max_in * sizeof(int));
 
     int init_max_out   = 4;
     Node->num_outgoing = 0;
     Node->max_outgoing = init_max_out;
-    Node->Outgoing          = malloc(init_max_out * sizeof(HW_NODE *));
-    Node->OutgoingID        = malloc(init_max_out * sizeof(int));
-    Node->OutEdgeScore      = malloc(init_max_out * sizeof(float));
-    Node->LastCodingNucl    = malloc(init_max_out * sizeof(int));
-    Node->ReciprocalInIndex = malloc(init_max_out * sizeof(int));
+    Node->Outgoing       = malloc(init_max_out * sizeof(HW_NODE *));
+    Node->OutgoingID     = malloc(init_max_out * sizeof(int));
+    Node->OutEdgeScore   = malloc(init_max_out * sizeof(float));
+    Node->LastCodingNucl = malloc(init_max_out * sizeof(int));
 
   }
   
@@ -509,15 +495,6 @@ void AttemptConnection
   }
 
 
-  //
-  // !!!TO DO!!!
-  //
-  // WE NEED A SMARTER WAY TO APPROACH THIS IF THERE ARE STOP CODONS,
-  // SO WE CAN AVOID DOING WORK WHERE IT ISN'T USABLE
-  //
-  // AND, MORE IMPORTANTLY, WE NEED TO UNRAVEL THE SCORE, WHERE APPLICABLE!
-  //
-
   // Compute the cost of unraveling the aminos at each overlapping position
   float UnravelCost[overlap_len];
   if (overlapped) {
@@ -675,14 +652,12 @@ void AttemptConnection
   LeftNode->num_outgoing += 1;
   LeftNode->Outgoing[l_out_edges] = RightNode;
   LeftNode->OutgoingID[l_out_edges] = right_index;
-  LeftNode->ReciprocalInIndex[l_out_edges] = r_in_edges;
   LeftNode->LastCodingNucl[l_out_edges] = lx_lb_nucl + top_left_break;
   LeftNode->OutEdgeScore[l_out_edges] = top_score;
 
   RightNode->num_incoming += 1;
   RightNode->Incoming[r_in_edges] = LeftNode;
   RightNode->IncomingID[r_in_edges] = left_index;
-  RightNode->ReciprocalOutIndex[r_in_edges] = LeftNode->num_outgoing;
   RightNode->FirstCodingNucl[r_in_edges] = rx_lb_nucl + top_right_break;
   RightNode->InEdgeScore[r_in_edges] = top_score;
 
@@ -797,9 +772,6 @@ void OrganizeEdgeList (HW_NODE * N) {
   for (i=0; i<N->num_incoming; i++) TempInts[i] = N->IncomingID[i];
   for (i=0; i<N->num_incoming; i++) N->IncomingID[i] = TempInts[Index[i]];
 
-  for (i=0; i<N->num_incoming; i++) TempInts[i] = N->ReciprocalOutIndex[i];
-  for (i=0; i<N->num_incoming; i++) N->ReciprocalOutIndex[i] = TempInts[Index[i]];
-
   for (i=0; i<N->num_incoming; i++) TempInts[i] = N->FirstCodingNucl[i];
   for (i=0; i<N->num_incoming; i++) N->FirstCodingNucl[i] = TempInts[Index[i]];
 
@@ -815,25 +787,12 @@ void OrganizeEdgeList (HW_NODE * N) {
   for (i=0; i<N->num_outgoing; i++) TempInts[i] = N->OutgoingID[i];
   for (i=0; i<N->num_outgoing; i++) N->OutgoingID[i] = TempInts[Index[i]];
 
-  for (i=0; i<N->num_outgoing; i++) TempInts[i] = N->ReciprocalInIndex[i];
-  for (i=0; i<N->num_outgoing; i++) N->ReciprocalInIndex[i] = TempInts[Index[i]];
-  
   for (i=0; i<N->num_outgoing; i++) TempInts[i] = N->LastCodingNucl[i];
   for (i=0; i<N->num_outgoing; i++) N->LastCodingNucl[i] = TempInts[Index[i]];
 
   for (i=0; i<N->num_outgoing; i++) TempFloats[i] = N->OutEdgeScore[i];
   for (i=0; i<N->num_outgoing; i++) N->OutEdgeScore[i] = TempFloats[Index[i]];
 
-  // We'll need to correct the 'ReciprocalInIndex' values for the
-  // nodes receiving our outgoing edges...
-  // (we do this w.r.t. the outgoing node because we expect to traverse
-  // the graph according to order of start indices)
-  HW_NODE * R;
-  for (i=0; i<N->num_outgoing; i++) {
-    R = N->Outgoing[i];
-    R->ReciprocalOutIndex[N->ReciprocalInIndex[i]] = Index[i];
-  }
-  
   // SWEET RELEASE
   free(Index);
   free(TempNodes);
@@ -924,6 +883,7 @@ float RecursivePathEval
 (
  HW_NODE ** Graph,
  int node_id,
+ int source_id,
  float * TopScoreThroughNode,
  int * TopScoreSourceNode,
  int target_amino
@@ -949,12 +909,30 @@ float RecursivePathEval
   float top_score  = MBB_NINF;
   int   top_source = -1;
 
+  // We'll want to know what starting nucleotide we'd be using
+  // (according to the node we arrived from) so we can make sure
+  // that we contribute at least one codon.
+  int start_nucl;
+  if (source_id >= 0) {
+    int source_index = 0;
+    while (N->IncomingID[source_index] != source_id)
+      source_index++;
+    start_nucl = N->FirstCodingNucl[source_index];
+  } else {
+    start_nucl = 17; // *17*
+  }
+
   int i;
   for (i=0; i<N->num_outgoing; i++) {
 
+    // Confirm that this is a reasonable splice pairing (I'm a splice-mmelier)
+    int end_nucl = N->LastCodingNucl[i];
+    if (end_nucl - start_nucl < 2) continue; 
+    
     // Grab the next node's score
-    float next_score = RecursivePathEval(Graph,N->OutgoingID[i],TopScoreThroughNode,
-					 TopScoreSourceNode,target_amino);
+    float next_score =
+      RecursivePathEval(Graph,N->OutgoingID[i],node_id,TopScoreThroughNode,
+			TopScoreSourceNode,target_amino);
 
     // Don't forget the edge cost!
     next_score += N->OutEdgeScore[i];
@@ -1535,7 +1513,7 @@ void ReportMaximalPaths
     if (Graph[i]->start_amino == ComMinAmino[j]) {
 
       // Are you my dad?
-      float pathscore = RecursivePathEval(Graph,i,TopScoreThroughNode,
+      float pathscore = RecursivePathEval(Graph,i,-1,TopScoreThroughNode,
 					  TopScoreSourceNode,ComMaxAmino[j]);
       if (pathscore > ToppestScores[j]) {
 	ToppestScores[j]  = pathscore;
