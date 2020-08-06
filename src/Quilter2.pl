@@ -720,13 +720,20 @@ sub UseFastMap
 	    # Determine which camp we fall in
 	    my $top_chr_fname = 0;
 	    if ($SpliceGraphs[$i] =~ /([^\;]+\.$top_chr\.weaver\.out)/) {
+
 		$top_chr_fname = $1;
 		$TopChrMaps[$i] = $top_chr_fname;
+
+		# Because gene names can have parentheses, we need
+		# to do some very dumb explicitification
+		$top_chr_fname =~ s/\(/\\\(/g;
+		$top_chr_fname =~ s/\)/\\\)/g;
 		if ($FullMaps[$i] =~ /$top_chr_fname/) {
 		    $FullMaps[$i] = 1;
 		} else {
 		    $FullMaps[$i] = 0;
 		}
+		
 	    } else {
 		$FullMaps[$i] = 0;
 	    }
