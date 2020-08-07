@@ -1405,7 +1405,7 @@ sub AttemptSpalnFill
     # Figure out what chromosome we're dealing with
     $xw_outfname =~ /\/([^\/]+)$/;
     my $hitfname = $1;
-    $hitfname =~ /^[^\.]+\.([^\.]+)\./;
+    $hitfname =~ /\.([^\.]+)\.weaver\.out/;
     my $chr = $1;
     my $revcomp = 0;
     if ($chr =~ /\-revcomp$/) {
