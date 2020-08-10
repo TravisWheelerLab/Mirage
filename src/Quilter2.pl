@@ -749,6 +749,9 @@ sub UseFastMap
 		    ExtractCanonXWMap($TopChrMaps[$i],$seq_len,$SeqNames[$i],$top_chr);
 
 	    } elsif ($top_chr_fname) {
+		
+		$top_chr_fname =~ s/\\\(/\(/g;
+		$top_chr_fname =~ s/\\\)/\)/g;
 
 		# We know this sequence is at least partially hitting to the
 		# expected chromosome.  We'll see if we can use SPALN to find
@@ -1512,7 +1515,7 @@ sub AttemptSpalnFill
 	close($tempf);
 	
 	my $nucl_range = $NuclSearchRanges[$i];
-	my $sfetch_cmd = $sfetch." -c $nucl_range \"$genome\" \"$chr\" > $nucl_fname";
+	my $sfetch_cmd = $sfetch." -c $nucl_range \"$genome\" \"$chr\" > \"$nucl_fname\"";
 	RunSystemCommand($sfetch_cmd);
 
 	my $spaln_cmd = $spaln."\"$nucl_fname\" \"$temp_fname\" 1>\"$spaln_fname\" 2>/dev/null";
