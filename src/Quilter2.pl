@@ -1722,8 +1722,8 @@ sub AttemptChimericXWMap
 
     my @XWOutNames     = split(/\;/,$orig_xw_outf_str);
     my @XWInNames      = split(/\;/,$orig_xw_inf_str);
-    my @AminoGapStarts = split(/\,/,$amino_starts_ref);
-    my @AminoGapEnds   = split(/\,/,$amino_ends_ref);
+    my @AminoGapStarts = @{$amino_starts_ref};
+    my @AminoGapEnds   = @{$amino_ends_ref};
 
     # I'm going to build a list of all the exons we want to use as inputs to
     # ExonWeaver.  We'll need a method for sorting these by their starting aminos, too.

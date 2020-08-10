@@ -144,6 +144,7 @@ my $AllSpeciesDir = CreateDirectory($ResultsDir.'SpeciesMSAs');
 foreach my $species (@Species) {
     $SpeciesDir{$species}    = CreateDirectory($AllSpeciesDir.$species);
     $SpeciesSeqDir{$species} = CreateDirectory($SpeciesDir{$species}.'seqs');
+    $SpeciesSeqDir{$species} = CreateDirectory($SpeciesDir{$species}.'mappings');
 }
 
 # Create a temp directory in the results directory where we'll hide all of our secrets.
@@ -224,78 +225,6 @@ for ($i=0; $i<$numSpecies; $i++) {
     # Figure out how much time that took and record it
     $QuilterTimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
 
-
-    #################################################################### COUNTING DENSITY OF MICRO-EXONS
-    #
-    # We're interested in knowing how many of the alignments to
-    # the genome that quilter came up with have dense pockets
-    # of really small exons
-    #
-    my $max_splice_sites   = 3;
-    my $observed_max       = 0;
-    my $splice_window_size = 7;
-    my $num_reported_seqs  = 0;
-    my $total_num_seqs     = 0;
-    my $current_seq_name;
-    
-    my $WarningFileName = $SpeciesDir{$Species[$i]}.'/MicroExonWarnings.out';
-    
-    open(my $WarningFile,'>',$WarningFileName) || die "\n  ERROR:  Failed to open '$WarningFileName'\n\n";
-    open(my $CodonFile,'<',$SpeciesDir{$Species[$i]}.'/Hits.Quilter.out') || die "\n  NASTEEEEY\n\n";
-    
-    while (my $line = <$CodonFile>) {
-
-	$line =~ s/\n|\r//g;
-	if ($line =~ /^Match Pos\.s\:\s+(\S+)\s?$/) {
-
-	    my @Codons = split(',',$1);
-	    my @SpliceDensity = ();
-
-	    for (my $check = 0; $check < @Codons; $check++) {
-
-		if ($Codons[$check] eq '*') {
-
-		    for (my $fwd = 0; $check+$fwd < @Codons && $fwd <= $splice_window_size; $fwd++) {
-
-			if ($SpliceDensity[$check+$fwd]) { $SpliceDensity[$check+$fwd]++; }
-			else                             { $SpliceDensity[$check+$fwd]=1; }
-			
-			if ($SpliceDensity[$check+$fwd]==$max_splice_sites) {
-			    print $WarningFile "$current_seq_name\n";
-			    $observed_max = 1;
-			    last;
-			}
-		    }
-		}
-
-		if ($observed_max) {
-		    $num_reported_seqs++;
-		    $observed_max = 0;
-		    last;
-		}
-		
-	    }
-
-	    $total_num_seqs++;
-	    
-	} elsif ($line =~ /^Isoform\s+ID\s+\:\s+(\S+)\s?$/) {
-	    
-	    $current_seq_name = $1;
-
-	}
-	
-    }
-
-    if ($num_reported_seqs) { print $WarningFile "\n  $num_reported_seqs of $total_num_seqs\n\n"; }
-    
-    close($CodonFile);
-    close($WarningFile);
-
-    if (!$num_reported_seqs && -e $WarningFileName) { system("rm $WarningFileName"); }
-    #
-    #
-    #################################################################### END COUNTING STUFF
-
         
     # Now we want to check how long it takes to run MultiMSA
     $IntervalStart = [Time::HiRes::gettimeofday()];
@@ -307,7 +236,7 @@ for ($i=0; $i<$numSpecies; $i++) {
     #if (!(-e $HitFile)) { die "\n  Failed to locate Quilter output '$HitFile'\n\n"; }
 
     # Name the directory where we'll be putting the output from MultiMSA.pl
-    $MultiMSADir{$Species[$i]} = $SpeciesDir{$Species[$i]}.'/Alignments';
+    $MultiMSADir{$Species[$i]} = $SpeciesDir{$Species[$i]}.'/alignments';
 
     # Prepare to generate a file containing tallies for each gene with
     # disagreeing positions.
