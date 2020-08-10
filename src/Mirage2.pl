@@ -140,11 +140,12 @@ push(@Species,'Misc');
 # Make species-specific results folders
 my %SpeciesDir;
 my %SpeciesSeqDir;
+my %SpeciesMapDir;
 my $AllSpeciesDir = CreateDirectory($ResultsDir.'SpeciesMSAs');
 foreach my $species (@Species) {
     $SpeciesDir{$species}    = CreateDirectory($AllSpeciesDir.$species);
     $SpeciesSeqDir{$species} = CreateDirectory($SpeciesDir{$species}.'seqs');
-    $SpeciesSeqDir{$species} = CreateDirectory($SpeciesDir{$species}.'mappings');
+    $SpeciesMapDir{$species} = CreateDirectory($SpeciesDir{$species}.'mappings');
 }
 
 # Create a temp directory in the results directory where we'll hide all of our secrets.
