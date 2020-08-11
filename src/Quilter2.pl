@@ -482,9 +482,6 @@ sub UseFastMap
     $gene_fname =~ /\/([^\/]+)\.fa$/;
     my $gene = $1;
 
-    # If there isn't an entry for this gene, fuhget about it!
-    return if (!$GTF{$gene});
-
     # Before we get into the mapping business, let's load in the protein sequences,
     # since they might have something to say about how we build our graph...
     my $GeneFile = OpenInputFile($gene_fname);
@@ -502,6 +499,22 @@ sub UseFastMap
     }
     $num_seqs++;
     close($GeneFile);
+
+    # If there isn't an entry for this gene, fuhget about it!
+    # And, obviously, by 'fuhget about it' I mean 'add it to the Blat file'
+    if (!$GTF{$gene}) {
+	for (my $i=0; $i<$num_seqs; $i++) {
+	    print $BlatFile ">$gene\|$SeqNames[$i]\n";
+	    my @Seq = split(//,$Seqs[$i]);
+	    for (my $j=0; $j<scalar(@Seq); $j++) {
+		print $BlatFile "$Seq[$j]";
+		print $BlatFile "\n" if (($j+1) % 60 == 0);
+	    }
+	    print $BlatFile "\n" if (scalar(@Seq) % 60);
+	    print $BlatFile "\n";
+	}
+	return;
+    }
 
     # Break it down by chromosome (in case this gene is associated with multiple)    
     my %RangesByChr;
