@@ -750,11 +750,11 @@ int main (int argc, char ** argv) {
   // We should now be able to index directly in / out of exons
 
   // Now we'll expand out a couple codons, for the hallibut!
-  // NOTE that we don't expand if the GTF is telling us that this is a really small
+  // NOTE that we don't expand if the GTF is telling us that this is a smallish
   // exon -- in this case we do a much narrower search, which will be more expensive
-  // but guaranteed to be on a micro-exon-sized target
+  // but will help us pick up smaller bits
   int exon_ext_len = 6 * BLOCK_SIZE;
-  int micro_thresh = 3 * (BLOCK_SIZE-1); // 5 aminos
+  int micro_thresh = 3 * (3 * BLOCK_SIZE / 2); // 150% of block size
   for (i=0; i<num_exons; i++) {
     if (ExonEnds[i] - ExonStarts[i] >= micro_thresh) {
       ExonStarts[i] -= exon_ext_len;
