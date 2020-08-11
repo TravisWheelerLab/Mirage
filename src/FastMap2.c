@@ -518,7 +518,7 @@ void BlockScan
       // Check for mismatches (possibly jumping ship)
       if (ProtSeq[prot_start_index-1] != ORF[orf_start_index-1]) {
 	num_mismatches++;
-	if (num_mismatches == MAX_MISMATCH)
+	if (num_mismatches > MAX_MISMATCH)
 	  break;
       }
 
@@ -533,7 +533,7 @@ void BlockScan
       // Check for mismatches (possibly jumping ship)
       if (ProtSeq[prot_end_index+1] != ORF[orf_end_index+1]) {
 	num_mismatches++;
-	if (num_mismatches == MAX_MISMATCH)
+	if (num_mismatches > MAX_MISMATCH)
 	  break;
       }
 
