@@ -813,10 +813,6 @@ void ConnectGraph (HW_NODE ** Graph, int num_exons, char * Seq, HW_OPTS * Opts) 
 
   int i,j;
 
-  // We'll try to reconcile exons with shared aminos as best we
-  // can, but at a certain point too much unraveling is too much!
-  int max_overlap = 5;
-
   // If there's a short-ish gap between the two exons, we'll extend
   // into the putative intron to see if we can get a decent splicing.
   // We're currently assuming 17 nucleotides on either side for our
@@ -848,9 +844,8 @@ void ConnectGraph (HW_NODE ** Graph, int num_exons, char * Seq, HW_OPTS * Opts) 
       if (overlap_len < -1 * max_extension)
 	break;
 
-      // Is this too much overlap, even for us?
-      if (overlap_len > max_overlap
-	  || Graph[i]->start_amino == right_start_amino
+      // Is there a sensible splice to be found?
+      if (Graph[i]->start_amino == right_start_amino
 	  || left_end_amino == Graph[j]->end_amino)
 	continue;
       
