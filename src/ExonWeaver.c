@@ -846,7 +846,7 @@ void ConnectGraph (HW_NODE ** Graph, int num_exons, char * Seq, HW_OPTS * Opts) 
 
       // Is there a sensible splice to be found?
       if (Graph[i]->start_amino == right_start_amino
-	  || left_end_amino == Graph[j]->end_amino)
+	  || left_end_amino >= Graph[j]->end_amino)
 	continue;
       
       // Remember to make sure these hits are compatibly located on the chromosome!
