@@ -921,17 +921,11 @@ float RecursivePathEval
  int target_amino,
  char * MapNucls,
  int start_map_nucl_len,
- int start_amino_depth
+ int start_amino_depth,
+ float map_cum_score
 ){
 
   int i,j;
-
-  // Before anything, we'll do a really quick check to see if we've already
-  // seen that this node's best score has been derived from an identical path.
-  // NOTE that this isn't a perfect redundancy catch, but it should help...
-  if (TopScoreThroughNode[node_id] && TopScoreSourceNode[node_id] == source_id) {
-    return TopScoreThroughNode[node_id];
-  }
 
   HW_NODE * N = Graph[node_id];
 
@@ -959,21 +953,24 @@ float RecursivePathEval
 
     // We'll still need to get the score of the mapping under the
     // given splice position
-    float mapscore = ExtendTransMap(N,start_nucl,strlen(N->Nucls)-17,Seq,
-				    &start_amino_depth,MapNucls,&start_map_nucl_len);
+    int amino_depth = start_amino_depth;
+    int map_nucl_len = start_map_nucl_len;    
+    float map_score = ExtendTransMap(N,start_nucl,strlen(N->Nucls)-17,Seq,
+				     &amino_depth,MapNucls,&map_nucl_len);
+    map_score += map_cum_score + tp_score;
 
-    if (mapscore + tp_score > TopScoreThroughNode[node_id]) {
-      TopScoreThroughNode[node_id] = mapscore + tp_score;
+    if (map_score > TopScoreThroughNode[node_id]) {
+      TopScoreThroughNode[node_id] = map_score;
       TopScoreSourceNode[node_id]  = source_id;
     }
-    return TopScoreThroughNode[node_id];
+    return map_score;
     
   }
 
   // Rats!  Why can't life be easy all the time?
   // Oh well, let's get recursive with it...
   int top_target;
-  float top_score = TopScoreThroughNode[node_id];
+  float top_score = 0.0;
   for (i=0; i<N->num_outgoing; i++) {
 
     // Confirm that this is a reasonable splice pairing (I'm a splice-mmelier)
@@ -984,20 +981,20 @@ float RecursivePathEval
 
     int amino_depth = start_amino_depth;
     int map_nucl_len = start_map_nucl_len;
-    float mapscore = ExtendTransMap(N,start_nucl,end_nucl,Seq,&amino_depth,MapNucls,
-				    &map_nucl_len);
+    float map_score = ExtendTransMap(N,start_nucl,end_nucl,Seq,&amino_depth,MapNucls,
+				     &map_nucl_len);
+    map_score += map_cum_score + tp_score + fp_score + SPLICE_COST;
     
     // RECURSE!
-    float recurse_score =
+    map_score =
       RecursivePathEval(Graph,Seq,N->OutgoingID[i],node_id,TopScoreThroughNode,
 			TopScoreSourceNode,TopScoreTargetNode,target_amino,MapNucls,
-			map_nucl_len,amino_depth);
+			map_nucl_len,amino_depth,map_score);
 
 
     // Put it all together and what do you get? A score!
-    recurse_score += tp_score + mapscore + fp_score;
-    if (recurse_score > top_score) {
-      top_score  = recurse_score;
+    if (map_score > top_score) {
+      top_score  = map_score;
       top_target = N->OutgoingID[i];
     }
 
@@ -1005,7 +1002,6 @@ float RecursivePathEval
 
 
   // If this is where we're returning, we've spliced!
-  top_score += SPLICE_COST;
   if (top_score > TopScoreThroughNode[node_id]) {
     TopScoreThroughNode[node_id] = top_score;
     TopScoreSourceNode[node_id]  = source_id;
@@ -1583,7 +1579,8 @@ void ReportMaximalPaths
       // Are you my dad?
       float pathscore
 	= RecursivePathEval(Graph,Seq,i,-1,TopScoreThroughNode,TopScoreSourceNode,
-			    TopScoreTargetNode,ComMaxAmino[j],MapNucls,0,0);
+			    TopScoreTargetNode,ComMaxAmino[j],MapNucls,0,
+			    Graph[i]->start_amino,0.0);
 
       if (pathscore > ToppestScores[j]) {
 	ToppestScores[j]  = pathscore;
