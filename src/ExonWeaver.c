@@ -868,6 +868,41 @@ void ConnectGraph (HW_NODE ** Graph, int num_exons, char * Seq, HW_OPTS * Opts) 
 
 
 
+/*
+ *  Function: ExtendTransMap
+ *
+ */
+float ExtendTransMap
+(
+ HW_NODE * N,
+ int start_nucl,
+ int end_nucl,
+ char * Seq,
+ int * amino_depth,
+ char * MapNucls,
+ int * map_nucl_len
+){
+
+  float mapscore = 0.0;
+  
+  int i;
+  for (i=start_nucl; i<=end_nucl; i++) {
+    MapNucls[*map_nucl_len] = N->Nucls[i];
+    *map_nucl_len += 1;
+    if (*map_nucl_len % 3 == 0) {
+      mapscore += MBB_AminoAliScore(Seq[*amino_depth],
+				    MBB_TranslateCodon(&MapNucls[*map_nucl_len-3]));
+      *amino_depth += 1;
+    }
+  }
+
+  return mapscore;
+  
+}
+
+
+
+
 
 
 /*
@@ -877,71 +912,105 @@ void ConnectGraph (HW_NODE ** Graph, int num_exons, char * Seq, HW_OPTS * Opts) 
 float RecursivePathEval
 (
  HW_NODE ** Graph,
+ char * Seq,
  int node_id,
  int source_id,
  float * TopScoreThroughNode,
  int * TopScoreSourceNode,
- int target_amino
+ int * TopScoreTargetNode,
+ int target_amino,
+ char * MapNucls,
+ int start_map_nucl_len,
+ int start_amino_depth
 ){
 
-  // If we've already trekked through this node, we can
-  // take a shortcut!
-  if (TopScoreThroughNode[node_id])
-    return TopScoreThroughNode[node_id];
+  int i,j;
 
-  // Our second special catch is if this exon hits the target
-  // amino we know ahead of time that this is as far as we can
-  // go.
-  HW_NODE * N = Graph[node_id];
-  if (N->end_amino == target_amino) {
-    TopScoreThroughNode[node_id] = N->score;
-    TopScoreSourceNode[node_id]  = -1;
-    return N->score;
+  // Before anything, we'll do a really quick check to see if we've already
+  // seen that this node's best score has been derived from an identical path.
+  // NOTE that this isn't a perfect redundancy catch, but it should help...
+  if (TopScoreThroughNode[node_id] && TopScoreSourceNode[node_id] == source_id) {
+    return TopScoreThroughNode[node_id];
   }
 
-  // Rats!  Why can't life be easy all the time?
-  // Oh well, let's get recursive with it...
-  float top_score  = MBB_NINF;
-  int   top_source = -1;
+  HW_NODE * N = Graph[node_id];
 
   // We'll want to know what starting nucleotide we'd be using
-  // (according to the node we arrived from) so we can make sure
-  // that we contribute at least one codon.
+  // (according to the node we arrived from) so we can (a) ensure
+  // that we contribute at least one codon and (b) score the
+  // mapping
   int start_nucl;
   if (source_id >= 0) {
-    int source_index = 0;
-    while (N->IncomingID[source_index] != source_id)
-      source_index++;
-    start_nucl = N->FirstCodingNucl[source_index];
+    i=0;
+    while (N->IncomingID[i] != source_id)
+      i++;
+    start_nucl = N->FirstCodingNucl[i];
   } else {
     start_nucl = 17; // *17*
   }
 
-  int i;
+  // What score do we get from splicing in at this point?
+  float tp_score = SpliceProbToScore(N->TPSS[start_nucl-1]);
+
+  // Our second special catch is if this exon hits the target
+  // amino we know ahead of time that this is as far as we can
+  // go.
+  if (N->end_amino == target_amino) {
+
+    // We'll still need to get the score of the mapping under the
+    // given splice position
+    float mapscore = ExtendTransMap(N,start_nucl,strlen(N->Nucls)-17,Seq,
+				    &start_amino_depth,MapNucls,&start_map_nucl_len);
+
+    if (mapscore + tp_score > TopScoreThroughNode[node_id]) {
+      TopScoreThroughNode[node_id] = mapscore + tp_score;
+      TopScoreSourceNode[node_id]  = source_id;
+    }
+    return TopScoreThroughNode[node_id];
+    
+  }
+
+  // Rats!  Why can't life be easy all the time?
+  // Oh well, let's get recursive with it...
+  int top_target;
+  float top_score = TopScoreThroughNode[node_id];
   for (i=0; i<N->num_outgoing; i++) {
 
     // Confirm that this is a reasonable splice pairing (I'm a splice-mmelier)
     int end_nucl = N->LastCodingNucl[i];
-    if (end_nucl - start_nucl < 2) continue; 
-    
-    // Grab the next node's score
-    float next_score =
-      RecursivePathEval(Graph,N->OutgoingID[i],node_id,TopScoreThroughNode,
-			TopScoreSourceNode,target_amino);
+    if (end_nucl - start_nucl < 2) continue;
 
-    // Don't forget the edge cost!
-    next_score += N->OutEdgeScore[i];
-    if (next_score > top_score) {
-      top_score  = next_score;
-      top_source = N->OutgoingID[i];
+    float fp_score = SpliceProbToScore(N->FPSS[end_nucl+1]);
+
+    int amino_depth = start_amino_depth;
+    int map_nucl_len = start_map_nucl_len;
+    float mapscore = ExtendTransMap(N,start_nucl,end_nucl,Seq,&amino_depth,MapNucls,
+				    &map_nucl_len);
+    
+    // RECURSE!
+    float recurse_score =
+      RecursivePathEval(Graph,Seq,N->OutgoingID[i],node_id,TopScoreThroughNode,
+			TopScoreSourceNode,TopScoreTargetNode,target_amino,MapNucls,
+			map_nucl_len,amino_depth);
+
+
+    // Put it all together and what do you get? A score!
+    recurse_score += tp_score + mapscore + fp_score;
+    if (recurse_score > top_score) {
+      top_score  = recurse_score;
+      top_target = N->OutgoingID[i];
     }
 
   }
 
-  // Now we can factor ourselves in and pronounce our score / source for all to see
-  top_score += N->score;
-  TopScoreThroughNode[node_id] = top_score;
-  TopScoreSourceNode[node_id]  = top_source;
+
+  // If this is where we're returning, we've spliced!
+  top_score += SPLICE_COST;
+  if (top_score > TopScoreThroughNode[node_id]) {
+    TopScoreThroughNode[node_id] = top_score;
+    TopScoreSourceNode[node_id]  = source_id;
+    TopScoreTargetNode[node_id]  = top_target;
+  }
   return top_score;
 
 }
@@ -1193,6 +1262,7 @@ void ReportSplicing
  int  * ExonIDs,
  int num_exons,
  int num_aminos,
+ float score,
  HW_OPTS * Opts
  ){
 
@@ -1235,12 +1305,9 @@ void ReportSplicing
   int write_pos = 0;
   int amino_index = Graph[ExonIDs[0]]->start_amino;
   int last_ref_write; // In case we split a codon and need to write to a distant pos.
-  float score = 0.0;
   for (i=0; i<num_exons; i++) {
 
     N = Graph[ExonIDs[i]];
-
-    score += N->score;
 
     // NOTE that we want to friendly to biologists, so we'll index starting at '1'
     // Moreover, we'll keep this as '+1' so we can do a straight amino_count as the
@@ -1272,8 +1339,6 @@ void ReportSplicing
       RefSeqOut[write_pos]   = ' ';
       if (NuclSeqOut[write_pos] < 96) NuclSeqOut[write_pos] += 32;
       write_pos++;
-
-      score += N->InEdgeScore[InEdgeIndex[i]];
 
     }
 
@@ -1479,9 +1544,14 @@ void ReportMaximalPaths
   // of scores.
 
   float TopScoreThroughNode[num_exons];
-  int   TopScoreSourceNode[num_exons]; // the next node on the highest-scoring path
+  int   TopScoreSourceNode[num_exons]; // the prev node on the highest-scoring path
+  int   TopScoreTargetNode[num_exons]; // the next node on the highest-scoring path
   float ToppestScores[num_components+1];
   int   ToppestSources[num_components+1]; // the first node on the highest-scoring path
+
+  // We'll need to build up the nucleotide sequence as we examine splicings
+  // to determine the actual scores.
+  char MapNucls[strlen(Seq)*3];
 
   // Initialize!
   for (i=1; i<=num_components; i++)
@@ -1494,8 +1564,11 @@ void ReportMaximalPaths
   // mark nodes as not having gone through our search machinery
   // yet.
   //
-  for (i=0; i<num_exons; i++)
+  for (i=0; i<num_exons; i++) {
+    TopScoreSourceNode[i] = -1;
+    TopScoreTargetNode[i] = -1;
     TopScoreThroughNode[i] = 0.0;
+  }
 
   // Now run through our exons looking for possible starts, those
   // being exons whose start aminos equal ComMinAmino for their
@@ -1508,8 +1581,10 @@ void ReportMaximalPaths
     if (Graph[i]->start_amino == ComMinAmino[j]) {
 
       // Are you my dad?
-      float pathscore = RecursivePathEval(Graph,i,-1,TopScoreThroughNode,
-					  TopScoreSourceNode,ComMaxAmino[j]);
+      float pathscore
+	= RecursivePathEval(Graph,Seq,i,-1,TopScoreThroughNode,TopScoreSourceNode,
+			    TopScoreTargetNode,ComMaxAmino[j],MapNucls,0,0);
+
       if (pathscore > ToppestScores[j]) {
 	ToppestScores[j]  = pathscore;
 	ToppestSources[j] = i;
@@ -1530,11 +1605,11 @@ void ReportMaximalPaths
       continue;
 
     // How many exons are in this path?
-    j = TopScoreSourceNode[ToppestSources[i]];
+    j = TopScoreTargetNode[ToppestSources[i]];
     int num_com_exons = 1;
     while (j != -1) {
       num_com_exons++;
-      j = TopScoreSourceNode[j];
+      j = TopScoreTargetNode[j];
     }
 
     // While we may not be especially interested in single-exon outputs, we are
@@ -1548,15 +1623,15 @@ void ReportMaximalPaths
     int ComExons[num_com_exons];
     ComExons[0] = ToppestSources[i];
     for (j=1; j<num_com_exons; j++)
-      ComExons[j] = TopScoreSourceNode[ComExons[j-1]];
+      ComExons[j] = TopScoreTargetNode[ComExons[j-1]];
 
     // Also, how many aminos (not to pry)?
     int num_com_aminos = ComMaxAmino[i] - ComMinAmino[i] + 1;
 
     // To keep things a little bit cleaner than they'd be otherwise, let's offload
     // the next bit of work to a dedicated output prep. function.
-    ReportSplicing(Graph,Seq,ComExons,num_com_exons,num_com_aminos,Opts);
-    
+    ReportSplicing(Graph,Seq,ComExons,num_com_exons,num_com_aminos,ToppestScores[i],Opts);
+
   }
 
   // DONE!
