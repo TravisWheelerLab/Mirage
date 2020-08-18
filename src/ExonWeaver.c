@@ -202,7 +202,7 @@ void IncreaseOutEdgeCapacity (HW_NODE * N) {
     N->OutgoingID[i] = TempOID[i];
     N->LastCodingNucl[i] = TempLCN[i];
     N->OutEdgeScore[i] = TempOES[i];
-    N->CumScoreMemo[i] = MBB_NINF;
+    N->CumScoreMemo[i] = MBB_INF;
   }
 
   free(TempNode);
@@ -655,7 +655,7 @@ void AttemptConnection
   LeftNode->OutgoingID[l_out_edges] = right_index;
   LeftNode->LastCodingNucl[l_out_edges] = lx_lb_nucl + top_left_break;
   LeftNode->OutEdgeScore[l_out_edges] = top_score;
-  LeftNode->CumScoreMemo[l_out_edges] = MBB_NINF;
+  LeftNode->CumScoreMemo[l_out_edges] = MBB_INF;
 
   RightNode->num_incoming += 1;
   RightNode->Incoming[r_in_edges] = LeftNode;
@@ -988,7 +988,7 @@ float RecursivePathEval
     map_score += map_cum_score + tp_score + fp_score + SPLICE_COST;
 
     // Wait a minute there, fella -- I ain't seen you before, now, have I?
-    if (N->CumScoreMemo[i] == MBB_NINF) {
+    if (N->CumScoreMemo[i] == MBB_INF) {
       
       // RECURSE!
       float recur_score =
