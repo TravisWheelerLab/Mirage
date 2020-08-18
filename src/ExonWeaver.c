@@ -77,6 +77,7 @@ typedef struct _HW_NODE_T_ {
   int   * OutgoingID;
   float * OutEdgeScore;     // What does this add to the scores of the nodes?
   int   * LastCodingNucl;   // What position in 'Nucls' precedes the splice signal?
+  float * CumScoreMemo;     // Cumulative score memoization (avoid re-treading graph)
   int num_outgoing;
   int max_outgoing; // For reallocing
 
@@ -194,12 +195,14 @@ void IncreaseOutEdgeCapacity (HW_NODE * N) {
   N->OutgoingID = realloc(N->OutgoingID, N->max_outgoing * sizeof(int));
   N->LastCodingNucl = realloc(N->LastCodingNucl, N->max_outgoing * sizeof(int));
   N->OutEdgeScore = realloc(N->OutEdgeScore, N->max_outgoing * sizeof(float));
+  N->CumScoreMemo = realloc(N->CumScoreMemo, N->max_outgoing * sizeof(float));
   
   for (i=0; i<N->num_outgoing; i++) {
     N->Outgoing[i] = TempNode[i];
     N->OutgoingID[i] = TempOID[i];
     N->LastCodingNucl[i] = TempLCN[i];
     N->OutEdgeScore[i] = TempOES[i];
+    N->CumScoreMemo[i] = MBB_NINF;
   }
 
   free(TempNode);
@@ -229,6 +232,7 @@ void DestroyGraph (HW_NODE ** Graph, int num_exons) {
     free(N->OutgoingID);
     free(N->OutEdgeScore);
     free(N->LastCodingNucl);
+    free(N->CumScoreMemo);
     free(N);
   }
   free(Graph);
@@ -308,6 +312,7 @@ void ReadNodesFromFile (HW_NODE ** Graph, int num_exons, FILE * inf) {
     Node->OutgoingID     = malloc(init_max_out * sizeof(int));
     Node->OutEdgeScore   = malloc(init_max_out * sizeof(float));
     Node->LastCodingNucl = malloc(init_max_out * sizeof(int));
+    Node->CumScoreMemo   = malloc(init_max_out * sizeof(float));
 
   }
   
@@ -650,6 +655,7 @@ void AttemptConnection
   LeftNode->OutgoingID[l_out_edges] = right_index;
   LeftNode->LastCodingNucl[l_out_edges] = lx_lb_nucl + top_left_break;
   LeftNode->OutEdgeScore[l_out_edges] = top_score;
+  LeftNode->CumScoreMemo[l_out_edges] = MBB_NINF;
 
   RightNode->num_incoming += 1;
   RightNode->Incoming[r_in_edges] = LeftNode;
@@ -966,7 +972,7 @@ float RecursivePathEval
   // Rats!  Why can't life be easy all the time?
   // Oh well, let's get recursive with it...
   int top_target;
-  float top_score = 0.0;
+  float top_score = MBB_NINF;
   for (i=0; i<N->num_outgoing; i++) {
 
     // Confirm that this is a reasonable splice pairing (I'm a splice-mmelier)
@@ -980,13 +986,26 @@ float RecursivePathEval
     float map_score = ExtendTransMap(N,start_nucl,end_nucl,Seq,&amino_depth,MapNucls,
 				     &map_nucl_len);
     map_score += map_cum_score + tp_score + fp_score + SPLICE_COST;
-    
-    // RECURSE!
-    map_score =
-      RecursivePathEval(Graph,Seq,N->OutgoingID[i],node_id,TopScoreThroughNode,
-			TopScoreSourceNode,TopScoreTargetNode,target_amino,MapNucls,
-			map_nucl_len,amino_depth,map_score);
 
+    // Wait a minute there, fella -- I ain't seen you before, now, have I?
+    if (N->CumScoreMemo[i] == MBB_NINF) {
+      
+      // RECURSE!
+      float recur_score =
+	RecursivePathEval(Graph,Seq,N->OutgoingID[i],node_id,TopScoreThroughNode,
+			  TopScoreSourceNode,TopScoreTargetNode,target_amino,MapNucls,
+			  map_nucl_len,amino_depth,map_score);
+
+      // Phew, that was some hard work! Sure don't want to have to do it again!
+      N->CumScoreMemo[i] = recur_score - map_score;
+      map_score = recur_score;
+
+    } else {
+
+      // Aha! I thought you looked familiar!
+      map_score += N->CumScoreMemo[i];
+      
+    }
 
     // Put it all together and what do you get? A score!
     if (map_score > top_score) {
@@ -1547,19 +1566,13 @@ void ReportMaximalPaths
 
   // Initialize!
   for (i=1; i<=num_components; i++)
-    ToppestScores[i] = 0.0;
+    ToppestScores[i] = MBB_NINF;
 
   // Initialize more!
-  //
-  // NOTE that 0 should be safe because all nodes should have an
-  // inherent positive score, which allows us to use '0.0' to
-  // mark nodes as not having gone through our search machinery
-  // yet.
-  //
   for (i=0; i<num_exons; i++) {
     TopScoreSourceNode[i] = -1;
     TopScoreTargetNode[i] = -1;
-    TopScoreThroughNode[i] = 0.0;
+    TopScoreThroughNode[i] = MBB_NINF;
   }
 
   // Now run through our exons looking for possible starts, those
