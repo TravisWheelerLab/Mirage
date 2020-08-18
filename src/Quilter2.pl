@@ -571,8 +571,8 @@ sub UseFastMap
 	    }
 
 	    # Buff it up! Until you can feel it!
-	    $search_start += 50;
-	    $search_end   -= 50;
+	    $search_start += 1000;
+	    $search_end   -= 1000;
 	    
 	} else {
 
@@ -588,8 +588,8 @@ sub UseFastMap
 	    }
 
 	    # Buff it up! And you don't even need it!
-	    $search_start -= 50;
-	    $search_end   += 50;
+	    $search_start -= 1000;
+	    $search_end   += 1000;
 	    
 	}
 
