@@ -254,10 +254,6 @@ float SpliceProbToScore (float prob) {
  */
 void ReadNodesFromFile (HW_NODE ** Graph, int num_exons, FILE * inf) {
 
-  // A lil' buffer for pulling data down
-  int buffersize = 512;
-  char * buffer = malloc(buffersize*sizeof(char));
-
   // We already know how much reading we have assigned!
   int i,j;
   for (i=0; i<num_exons; i++) {
