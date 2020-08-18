@@ -940,7 +940,7 @@ float RecursivePathEval
   }
 
   // What score do we get from splicing in at this point?
-  float tp_score = SpliceProbToScore(N->TPSS[start_nucl-1]);
+  float tp_score = N->TPSS[start_nucl-1];
 
   // Our second special catch is if this exon hits the target
   // amino we know ahead of time that this is as far as we can
@@ -973,7 +973,7 @@ float RecursivePathEval
     int end_nucl = N->LastCodingNucl[i];
     if (end_nucl - start_nucl < 2) continue;
 
-    float fp_score = SpliceProbToScore(N->FPSS[end_nucl+1]);
+    float fp_score = N->FPSS[end_nucl+1];
 
     int amino_depth = start_amino_depth;
     int map_nucl_len = start_map_nucl_len;
