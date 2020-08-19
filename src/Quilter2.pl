@@ -3737,7 +3737,6 @@ sub SpalnSearch
 	# Sometimes Spaln doesn't like an input, so we don't bail if the
 	# system call goes badly
 	if (system($spaln_cmd)) {
-	    RunSystemCommand("rm \"$nucl_fname\"");
 	    push(@SpalnHitStrs,0);
 	    push(@SpalnPctIDs,0);
 	    next;
