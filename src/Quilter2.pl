@@ -997,7 +997,7 @@ sub UseFastMap
 	    if ($SpalnHitStrs[$i]) {
 
 		# I knew you had it in you!
-		$SpalnHitStrs =~ s/BLAT\+Spaln/Spaln/;
+		$SpalnHitStrs[$i] =~ s/BLAT\+Spaln/Spaln/;
 		$FullMaps[$prot_index] = $SpalnHitStrs[$i];
 		$num_unmapped--;
 
@@ -3741,9 +3741,6 @@ sub SpalnSearch
 	    next;
 	}
     
-	# Get that nucleotide file OUTTA HERE!
-	RunSystemCommand("rm \"$nucl_fname\"");
-    
 	# Don't tell me we did all that for NOTHING?!
 	if (!(-e $spaln_fname)) {
 	    push(@SpalnHitStrs,0);
@@ -3849,6 +3846,9 @@ sub SpalnSearch
 
     }
 
+    # Get that nucleotide file OUTTA HERE!
+    RunSystemCommand("rm \"$nucl_fname\"");
+    
     # DOUBLE WOOF
     return (\@SpalnHitStrs,\@SpalnPctIDs);
     
