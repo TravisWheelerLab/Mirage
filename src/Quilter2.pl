@@ -545,9 +545,20 @@ sub UseFastMap
 
     # Now we can go chromosome-by-chromosome and try to build the
     # best splice graph for our sequences we can on a single chromosome
+    #
+    # While we're doing this, we'll also build up a list of ranges to use
+    # in a potential Spaln search.
+    my @SpalnStarts;
+    my @SpalnEnds;
+    my @SpalnChrs;
     foreach my $chr (keys %RangesByChr) {
 
 	my @Ranges = split(/\//,$RangesByChr{$chr});
+
+	# We'll need to put our values into these arrays so we can make sure
+	# our Spaln ranges don't end up being too large
+	my @RangeStarts;
+	my @RangeEnds;
 
 	# Is this your *real* name, MR(S). DR. CHROMOSOME?!
 	my $revcomp = 0;
@@ -562,12 +573,18 @@ sub UseFastMap
 	    $search_start = 0;
 	    $search_end   = $ChrSizes{$chr};
 	    foreach my $range (@Ranges) {
+		
 		$range =~ /^(\d+)\.\.(\d+)$/;
 		my $high = $1;
 		my $low  = $2;
+		
 		if ($high > $search_start) { $search_start = $high; } 
 		if ($low  < $search_end)   { $search_end   = $low;  }
 		$exon_list_str = $exon_list_str.' '.$high.' '.$low;
+
+		push(@RangeStarts,$high);
+		push(@RangeEnds,$low);
+		
 	    }
 
 	    # Buff it up! Until you can feel it!
@@ -579,18 +596,38 @@ sub UseFastMap
 	    $search_start = $ChrSizes{$chr};
 	    $search_end   = 0;
 	    foreach my $range (@Ranges) {
+		
 		$range =~ /^(\d+)\.\.(\d+)$/;
 		my $low  = $1;
 		my $high = $2;
+		
 		if ($low  < $search_start) { $search_start = $low;  }
 		if ($high > $search_end)   { $search_end   = $high; }
 		$exon_list_str = $exon_list_str.' '.$low.' '.$high;
+
+		push(@RangeStarts,$low);
+		push(@RangeEnds,$high);
+		
 	    }
 
 	    # Buff it up! And you don't even need it!
 	    $search_start -= 1000;
 	    $search_end   += 1000;
 	    
+	}
+
+	# Get the ranges we'd use for sfetchery if push comes to Spaln
+	my ($starts_ref,$ends_ref,$num_spaln_ranges,$sum_len)
+	    = GetSpalnSfetchRanges(\@RangeStarts,\@RangeEnds,$ChrSizes{$chr},0);
+	@RangeStarts = @{$starts_ref};
+	@RangeEnds   = @{$ends_ref};
+
+	# Record the range for this chromosome
+	for (my $i=0; $i<$num_spaln_ranges; $i++) {
+	    push(@SpalnStarts,$RangeStarts[$i]);
+	    push(@SpalnEnds,$RangeEnds[$i]);
+	    if ($revcomp) { push(@SpalnChrs,$chr.'-'); }
+	    else          { push(@SpalnChrs,$chr.'+'); }
 	}
 
 	# Extract the appropriate genomic region for our search
@@ -672,6 +709,7 @@ sub UseFastMap
     # chromosome
     my @FullMaps;
     my %FullMapsByChr;
+    my $num_unmapped = 0;
     for (my $i=0; $i<$num_seqs; $i++) {
 	if ($SpliceGraphs[$i]) {
 
@@ -680,7 +718,10 @@ sub UseFastMap
 	    # If there weren't any full mappings, skip to the next sequence.
 	    # Otherwise, get the names of the chromosomes (from the file names)
 	    # that had full mappings
-	    next if (!$FullMaps[$i]);
+	    if (!$FullMaps[$i]) {
+		$num_unmapped++;
+		next;
+	    }
 
 	    foreach my $xw_fname (split(/\;/,$FullMaps[$i])) {
 
@@ -692,8 +733,9 @@ sub UseFastMap
 
 	    }
 	    
-	} else {
+	} else {	    
 	    $FullMaps[$i] = 0;
+	    $num_unmapped++;
 	}
     }
 
@@ -723,19 +765,13 @@ sub UseFastMap
 	# found to the canonical chromosome, and use a separate array
 	# to track the names of those output files.
 	#
-	my @TopChrMaps;
-	my @SeqHitStrs;
 	for (my $i=0; $i<$num_seqs; $i++) {
-
-	    # You gotta earn that hit string!
-	    $SeqHitStrs[$i] = 0;
 
 	    # Determine which camp we fall in
 	    my $top_chr_fname = 0;
 	    if ($SpliceGraphs[$i] =~ /([^\;]+\.$top_chr\.weaver\.out)/) {
 
 		$top_chr_fname = $1;
-		$TopChrMaps[$i] = $top_chr_fname;
 
 		# Because gene names can have parentheses, we need
 		# to do some very dumb explicitification
@@ -756,12 +792,23 @@ sub UseFastMap
 	    # Otherwise, we'll check if we can produce a chimeric mapping...
 	    my $seq_len = length($Seqs[$i]);
 	    if ($FullMaps[$i]) {
-
 		# TOO EASY!!!
-		$SeqHitStrs[$i] =
-		    ExtractCanonXWMap($TopChrMaps[$i],$seq_len,$SeqNames[$i],$top_chr);
-
-	    } elsif ($top_chr_fname) {
+		$FullMaps[$i] = ExtractCanonXWMap($top_chr_fname,$seq_len,
+						  $SeqNames[$i],$top_chr);
+	    }
+	    next;
+	    #
+	    #
+	    #
+	    # * * * * * * * * START UNUSED CODE BLOCK * * * * * * * * *
+	    #
+	    # NOTE: The above 'next' is essentially a way to block out the below code,
+	    #       at least for now.  I might re-activate it at some point, but I
+	    #       want to switch over to a different approach (without losing the
+	    #       currently available infrastructure)
+	    #
+	    #} elsif ($top_chr_fname) {
+	    if (!$FullMaps[$i] && $top_chr_fname) {
 		
 		$top_chr_fname =~ s/\\\(/\(/g;
 		$top_chr_fname =~ s/\\\)/\)/g;
@@ -788,15 +835,15 @@ sub UseFastMap
 		# run, since we want clean splice boundary delineation between our
 		# exons.
 		#
-		$SeqHitStrs[$i] =
+		$FullMaps[$i] =
 		    AttemptSpalnFill($top_chr_fname,$max_hits_str,\@GapStarts,\@GapEnds,
 				     $Seqs[$i],$SeqNames[$i],$genome,$gene_fname);
 
 		# At this point, if we still don't have a full mapping, it seems like
 		# something nonstandard could be going on, so we'll quickly check if
 		# the full set of hits (across chromosomes) could be useful...
-		if (!$SeqHitStrs[$i]) {
-		    $SeqHitStrs[$i] =
+		if (!$FullMaps[$i]) {
+		    $FullMaps[$i] =
 			AttemptChimericXWMap($XWInputNames[$i],$SpliceGraphs[$i],
 					     $top_chr_fname,$max_exon_str,\@GapStarts,
 					     \@GapEnds,$Seqs[$i],$SeqNames[$i],
@@ -811,7 +858,7 @@ sub UseFastMap
 		# the parts of the sequence that correspond to the gaps left by our
 		# partially mapping.
 		#
-		if (!$SeqHitStrs[$i]) {
+		if (!$FullMaps[$i]) {
 
 		    # First, write out the full sequence...
 		    print $BlatFile ">$gene\|$SeqNames[$i]\n";
@@ -871,37 +918,120 @@ sub UseFastMap
 		print $BlatFile "\n";
 
 	    }
+	    #
+	    #
+	    #
+	    # * * * * * * * * * END UNUSED CODE BLOCK * * * * * * * * * *
+	    #
+	}
+
+	# HERE'S SOME MORE UNUSED CODE
+    #} else {
+	#
+	## Straightforward copy of our sequences into the BLAT file.
+	## The only minor change is that we're going to change the names
+	## to be gene|seqname
+	#for (my $i=0; $i<$num_seqs; $i++) {
+	    #print $BlatFile ">$gene\|$SeqNames[$i]\n";
+	    #my @Seq = split(//,$Seqs[$i]);
+	    #for (my $j=0; $j<scalar(@Seq); $j++) {
+		#print $BlatFile "$Seq[$j]";
+		#print $BlatFile "\n" if (($j+1) % 60 == 0);
+	    #}
+	    #print $BlatFile "\n" if (scalar(@Seq) % 60 != 0);
+	    #print $BlatFile "\n";
+	#}
+
+    }
+
+    # If we have any unmapped sequences, we'll extract them from the protein
+    # sequence file (into individual files) and perform a Spaln search (informed
+    # by GTF coordinates)
+    #
+    if ($num_unmapped) {
+
+	# Write each unmapped sequence out to its own file
+	my @UnmappedSeqNames;
+	my @UnmappedSeqs;
+	my @ProtFnames;
+	my @ProtIndices;
+	for (my $i=0; $i<$num_seqs; $i++) {
+
+	    next if ($FullMaps[$i]);
+	    
+	    my $prot_fname = $gene_fname;
+	    $prot_fname =~ s/\.fa$/\.$SeqNames[$i]\.prot\.in/;
+
+	    my $ProtFile = OpenOutputFile($prot_fname);
+	    print $ProtFile ">$SeqNames[$i]\n";
+	    my @Seq = split(//,$Seqs[$i]);
+	    for (my $j=0; $j<scalar(@Seq); $j++) {
+		print $ProtFile "$Seq[$j]";
+		print $ProtFile "\n" if (($j+1) % 60 == 0);
+	    }
+	    print $ProtFile "\n";
+	    close($ProtFile);
+
+	    push(@UnmappedSeqNames,$SeqNames[$i]);
+	    push(@UnmappedSeqs,$Seqs[$i]);
+	    push(@ProtFnames,$prot_fname);
+	    push(@ProtIndices,$i);
 	    
 	}
 
-	# We can at least say that we got one sequence to fully map, so let's pop
-	# some champagne! Or, absent champagne, open up... [gene].quilter.out!
+	# Do that nasty Spaln searchin'!
+	my ($spaln_hits_ref,$spaln_pcts_id_ref)
+	    = SpalnSearch(\@UnmappedSeqNames,\@UnmappedSeqs,\@ProtFnames,
+			  \@SpalnStarts,\@SpalnEnds,\@SpalnChrs);
+	my @SpalnHitStrs = @{$spaln_hits_ref};
+	my @SpalnPctsID  = @{$spaln_pcts_id_ref};
+	    
+	# Run back through our proteins, and either (1) record full maps or
+	# (2) write the sequence out to our Blat file
+	for (my $i=0; $i<scalar(@ProtIndices); $i++) {
+
+	    # In any case, let's clean out the protein file
+	    RunSystemCommand("rm \"$ProtFnames[$i]\"");
+
+	    my $prot_index = $ProtIndices[$i];
+	    if ($SpalnHitStrs[$i]) {
+
+		# I knew you had it in you!
+		$SpalnHitStrs =~ s/BLAT\+Spaln/Spaln/;
+		$FullMaps[$prot_index] = $SpalnHitStrs[$i];
+		$num_unmapped--;
+
+	    } else {
+		
+		# TO BLAT WITH YOU, FOUL SEQUENCE!
+		print $BlatFile ">$gene\|$SeqNames[$prot_index]\n";
+		my @Seq = split(//,$Seqs[$prot_index]);
+		for (my $j=0; $j<scalar(@Seq); $j++) {
+		    print $BlatFile "$Seq[$j]";
+		    print $BlatFile "\n" if (($j+1) % 60 == 0);
+		}
+		print $BlatFile "\n" if (scalar(@Seq) % 60 != 0);
+		print $BlatFile "\n";
+
+	    }
+	    
+	}
+
+    }
+
+    # We can at least say that we got one sequence to fully map, so let's pop
+    # some champagne! Or, absent champagne, open up... [gene].quilter.out!
+    #
+    if ($num_unmapped < $num_seqs) {
 	my $outfname = $gene_fname;
 	$outfname =~ s/\.fa$/\.quilter\.out/;
 	my $OutFile = OpenOutputFile($outfname);
 	for (my $i=0; $i<$num_seqs; $i++) {
-	    if ($SeqHitStrs[$i]) {
-		print $OutFile "$SeqHitStrs[$i]\n";
+	    if ($FullMaps[$i]) {
+		print $OutFile "$FullMaps[$i]\n";
 	    }
 	}
 	close($OutFile);
-
-    } else {
-
-	# Straightforward copy of our sequences into the BLAT file.
-	# The only minor change is that we're going to change the names
-	# to be gene|seqname
-	for (my $i=0; $i<$num_seqs; $i++) {
-	    print $BlatFile ">$gene\|$SeqNames[$i]\n";
-	    my @Seq = split(//,$Seqs[$i]);
-	    for (my $j=0; $j<scalar(@Seq); $j++) {
-		print $BlatFile "$Seq[$j]";
-		print $BlatFile "\n" if (($j+1) % 60 == 0);
-	    }
-	    print $BlatFile "\n" if (scalar(@Seq) % 60 != 0);
-	    print $BlatFile "\n";
-	}
-
     }
 
     # Clear out the files -- if you need to save them, return
@@ -2972,6 +3102,15 @@ sub BlatToSpalnSearch
     print $ProtFile "\n";
     close($ProtFile);
 
+    # Because our search function needs a list of protein sequences to search,
+    # we have to do this dumb stuff
+    my @ProtFnames;
+    push(@ProtFnames,$prot_fname);
+    my @SeqNames;
+    push(@SeqNames,$seqname);
+    my @SeqStrs;
+    push(@SeqStrs,$seq_str);
+
 
     # Now we'll organize our hits into groups along the length of the protein.
     #
@@ -3222,8 +3361,10 @@ sub BlatToSpalnSearch
 	}
 
 	# Let's see what we see!
-	my ($hit_str,$hit_pct_id)
-	    = SpalnSearch($seqname,$seq_str,$prot_fname,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs);
+	my ($hit_strs_ref,$hit_pcts_id_ref)
+	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs);
+	my $hit_str = @{$hit_strs_ref}[0];
+	my $hit_pct_id = @{$hit_pcts_id_ref}[0];
 
 	# If we got a hit, then we'll be happy about that!
 	if ($hit_pct_id > $top_pct_id) {
@@ -3289,8 +3430,10 @@ sub BlatToSpalnSearch
 	}
 
 	# Let's try this again!
-	my ($hit_str,$hit_pct_id)
-	    = SpalnSearch($seqname,$seq_str,$prot_fname,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs);
+	my ($hit_strs_ref,$hit_pcts_id_ref)
+	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs);
+	my $hit_str = @{$hit_strs_ref}[0];
+	my $hit_pct_id = @{$hit_pcts_id_ref}[0];
 
 	# Last call for spaln-ohol!
 	if ($hit_pct_id > $top_pct_id) {
@@ -3359,8 +3502,10 @@ sub BlatToSpalnSearch
     }
 
     # Last call for Spaln-ohol!
-    my ($hit_str,$hit_pct_id)
-	= SpalnSearch($seqname,$seq_str,$prot_fname,\@RangeStarts,\@RangeEnds,\@RangeChrs);
+    my ($hit_strs_ref,$hit_pcts_id_ref)
+	= SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@RangeStarts,\@RangeEnds,\@RangeChrs);
+    my $hit_str = @{$hit_strs_ref}[0];
+    my $hit_pct_id = @{$hit_pcts_id_ref}[0];
 
     # However this breaks, it breaks with you in the bin!
     RunSystemCommand("rm \"$prot_fname\"");
@@ -3512,14 +3657,16 @@ sub GetSpalnSfetchRanges
 #
 sub SpalnSearch
 {
-    my $seqname = shift;
-    my $seq_str = shift;
-    my $prot_fname = shift;
+    my $seqnames_ref = shift;
+    my $seq_strs_ref = shift;
+    my $prot_fnames_ref = shift;
     my $range_starts_ref = shift;
     my $range_ends_ref = shift;
     my $range_chrs_ref = shift;
 
-    my @Seq = split(//,$seq_str);
+    my @SeqNames = @{$seqnames_ref};
+    my @SeqStrings = @{$seq_strs_ref};
+    my @ProtFnames = @{$prot_fnames_ref};
     
     my @RangeStarts = @{$range_starts_ref};
     my @RangeEnds = @{$range_ends_ref};
@@ -3547,10 +3694,10 @@ sub SpalnSearch
     
     # Wowee!  Time to pull in a bunch of nucleotides, concatenate them into one
     # great big sequence, and do a Spaln search!
-    my $nucl_fname = $prot_fname;
+    my $nucl_fname = $ProtFnames[0];
     $nucl_fname =~ s/\.prot\.in/\.nucl\.in/;
     my $NuclFile = OpenOutputFile($nucl_fname);
-    print $NuclFile ">$seqname\:nucls\n";
+    print $NuclFile ">nucls\n";
     
     for (my $i=0; $i<$num_ranges; $i++) {
 	
@@ -3571,115 +3718,139 @@ sub SpalnSearch
     
     # Ready, cap'n!
     close($NuclFile);
-    
-    # Assemble the Spaln command!
-    my $spaln_fname = $prot_fname;
-    $spaln_fname =~ s/\.prot\.in/\.spaln\.out/;
-    my $spaln_cmd = $spaln."\"$nucl_fname\" \"$prot_fname\" 1>\"$spaln_fname\" 2>/dev/null";
 
-    # Sometimes Spaln doesn't like an input, so we don't bail if the
-    # system call goes badly
-    if (system($spaln_cmd)) {
+    my @SpalnHitStrs;
+    my @SpalnPctIDs;
+    for (my $i=0; $i<scalar(@ProtFnames); $i++) {
+
+	my $seqname = $SeqNames[$i];
+	my @Seq = split(//,$SeqStrings[$i]);
+	my $prot_fname = $ProtFnames[$i];
+
+	# Assemble the Spaln command!
+	my $spaln_fname = $prot_fname;
+	$spaln_fname =~ s/\.prot\.in/\.spaln\.out/;
+	my $spaln_cmd = $spaln."\"$nucl_fname\" \"$prot_fname\" 1>\"$spaln_fname\" 2>/dev/null";
+
+	# Sometimes Spaln doesn't like an input, so we don't bail if the
+	# system call goes badly
+	if (system($spaln_cmd)) {
+	    RunSystemCommand("rm \"$nucl_fname\"");
+	    push(@SpalnHitStrs,0);
+	    push(@SpalnPctIDs,0);
+	    next;
+	}
+    
+	# Get that nucleotide file OUTTA HERE!
 	RunSystemCommand("rm \"$nucl_fname\"");
-	next;
-    }
     
-    # Get that nucleotide file OUTTA HERE!
-    RunSystemCommand("rm \"$nucl_fname\"");
+	# Don't tell me we did all that for NOTHING?!
+	if (!(-e $spaln_fname)) {
+	    push(@SpalnHitStrs,0);
+	    push(@SpalnPctIDs,0);
+	    next;
+	}
     
-    # Don't tell me we did all that for NOTHING?!
-    next if (!(-e $spaln_fname));
-    
-    # UGH, I wish I could quit you, Spaln parsing
-    # Note that we'll open the file here, just so it's easier to return
-    # if we run into parsing errors.
-    my $SpalnFile = OpenInputFile($spaln_fname);
-    my ($nucl_ranges_ref,$amino_ranges_ref,$centers_ref,$spaln_pct_id)
-	= ParseSpalnOutput($SpalnFile,\@Seq);
-    close($SpalnFile);
-    
-    # Get that spaln output file THE HECK OUTTA HERE!
-    RunSystemCommand("rm \"$spaln_fname\"") if (-e $spaln_fname);
-    
-    # If we didn't have a good return on investment, we're done-zo!
-    return (0,0) if ($spaln_pct_id < 90.0);
-    
-    # All of our nucleotide coordinates need to be adjusted...
-    my @UnadjNuclRanges = @{$nucl_ranges_ref};
-    my @UnadjCenters = @{$centers_ref};
-
-    my @HitChrs;
-    my %ChrsUsed;
-    my @NuclRanges;
-    my @AminoRanges = @{$amino_ranges_ref};
-    my @CodonCenters;
-    my $num_exons = 0;
-    while ($num_exons < scalar(@UnadjNuclRanges)) {
+	# UGH, I wish I could quit you, Spaln parsing
+	# Note that we'll open the file here, just so it's easier to return
+	# if we run into parsing errors.
+	my $SpalnFile = OpenInputFile($spaln_fname);
+	my ($nucl_ranges_ref,$amino_ranges_ref,$centers_ref,$spaln_pct_id)
+	    = ParseSpalnOutput($SpalnFile,\@Seq);
+	close($SpalnFile);
 	
-	$UnadjNuclRanges[$num_exons] =~ /^(\d+)\.\.(\d+)$/;
-	my $range_start = $1;
-	my $range_end   = $2;
-	my $start_chr;
-	my $end_chr;
+	# Get that spaln output file THE HECK OUTTA HERE!
+	RunSystemCommand("rm \"$spaln_fname\"") if (-e $spaln_fname);
 	
-	($range_start,$start_chr) = AdjustNuclCoord($range_start,\@JumpList);
-	($range_end,$end_chr) = AdjustNuclCoord($range_end,\@JumpList);
-	$NuclRanges[$num_exons] = $range_start.'..'.$range_end;
-
-	# Clean up the chromosome -- NOW WITH CHIMERIC EXON CAPABILITIES!
-	if ($start_chr ne $end_chr) {
-
-	    if ($end_chr =~ /\-$/) { $end_chr =~ s/\-$/\[revcomp\]/; }
-	    else                   { $end_chr =~ s/\+$//;            }
-	    if ($start_chr =~ /\-$/) { $start_chr =~ s/\-$/\[revcomp\]/; }
-	    else                     { $start_chr =~ s/\+$//;            }
-	    $HitChrs[$num_exons] = 'Chimeric('.$start_chr.'/'.$end_chr.')';
-	    $ChrsUsed{'Chimeric'} = 1;
-
-	} else {
+	# If we didn't have a good return on investment, we're done-zo!
+	if ($spaln_pct_id < 90.0) {
+	    push(@SpalnHitStrs,0);
+	    push(@SpalnPctIDs,0);
+	    next;
+	}
+	
+	# All of our nucleotide coordinates need to be adjusted...
+	my @UnadjNuclRanges = @{$nucl_ranges_ref};
+	my @UnadjCenters = @{$centers_ref};
+	
+	my @HitChrs;
+	my %ChrsUsed;
+	my @NuclRanges;
+	my @AminoRanges = @{$amino_ranges_ref};
+	my @CodonCenters;
+	my $num_exons = 0;
+	while ($num_exons < scalar(@UnadjNuclRanges)) {
 	    
-	    if ($end_chr =~ /\-$/) { $end_chr =~ s/\-$/\[revcomp\]/; }
-	    else                   { $end_chr =~ s/\+$//;            }
-	    $HitChrs[$num_exons] = $end_chr;
-	    $ChrsUsed{$end_chr} = 1;
-
-	}
-
-	# Acquire the actual codon centers
-	my $codon_center_str = '';
-	foreach my $coord (split(/\,/,$UnadjCenters[$num_exons])) {
-	    my ($codon_center,$codon_chr) = AdjustNuclCoord($coord,\@JumpList);
-	    $codon_center_str = $codon_center_str.','.$codon_center;
-	}
-	$codon_center_str =~ s/^\,//;
-	$CodonCenters[$num_exons] = $codon_center_str;
+	    $UnadjNuclRanges[$num_exons] =~ /^(\d+)\.\.(\d+)$/;
+	    my $range_start = $1;
+	    my $range_end   = $2;
+	    my $start_chr;
+	    my $end_chr;
+	    
+	    ($range_start,$start_chr) = AdjustNuclCoord($range_start,\@JumpList);
+	    ($range_end,$end_chr) = AdjustNuclCoord($range_end,\@JumpList);
+	    $NuclRanges[$num_exons] = $range_start.'..'.$range_end;
+	    
+	    # Clean up the chromosome -- NOW WITH CHIMERIC EXON CAPABILITIES!
+	    if ($start_chr ne $end_chr) {
+		
+		if ($end_chr =~ /\-$/) { $end_chr =~ s/\-$/\[revcomp\]/; }
+		else                   { $end_chr =~ s/\+$//;            }
+		if ($start_chr =~ /\-$/) { $start_chr =~ s/\-$/\[revcomp\]/; }
+		else                     { $start_chr =~ s/\+$//;            }
+		$HitChrs[$num_exons] = 'Chimeric('.$start_chr.'/'.$end_chr.')';
+		$ChrsUsed{'Chimeric'} = 1;
+		
+	    } else {
+		
+		if ($end_chr =~ /\-$/) { $end_chr =~ s/\-$/\[revcomp\]/; }
+		else                   { $end_chr =~ s/\+$//;            }
+		$HitChrs[$num_exons] = $end_chr;
+		$ChrsUsed{$end_chr} = 1;
+		
+	    }
+	    
+	    # Acquire the actual codon centers
+	    my $codon_center_str = '';
+	    foreach my $coord (split(/\,/,$UnadjCenters[$num_exons])) {
+		my ($codon_center,$codon_chr) = AdjustNuclCoord($coord,\@JumpList);
+		$codon_center_str = $codon_center_str.','.$codon_center;
+	    }
+	    $codon_center_str =~ s/^\,//;
+	    $CodonCenters[$num_exons] = $codon_center_str;
 	
-	$num_exons++;
-
-    }
-
-    my $chr;
-    if (scalar(keys %ChrsUsed) > 1) {
-	$chr = 'Chimeric';
-    } else {
-	# There's just one, but how else are we going to access it?
-	foreach my $used_chr (keys %ChrsUsed) {
-	    $chr = $used_chr;
+	    $num_exons++;
+	    
 	}
+	
+	my $chr;
+	if (scalar(keys %ChrsUsed) > 1) {
+	    $chr = 'Chimeric';
+	} else {
+	    # There's just one, but how else are we going to access it?
+	    foreach my $used_chr (keys %ChrsUsed) {
+		$chr = $used_chr;
+	    }
+	}
+	
+	# Build up the hit string for this chromosome
+	my $hitstr = "Sequence ID: $seqname\n";
+	$hitstr    = $hitstr."Map Method : BLAT+Spaln\n";
+	$hitstr    = $hitstr."Chromosome : $chr\n";
+	$hitstr    = $hitstr."Num Exons  : $num_exons\n";
+	for (my $i=0; $i<$num_exons; $i++) {
+	    $hitstr= $hitstr."* Aminos $AminoRanges[$i], $HitChrs[$i]:$NuclRanges[$i]\n";
+	    $hitstr= $hitstr."$CodonCenters[$i]\n";
+	}
+	
+	# WOOF
+	push(@SpalnHitStrs,$hitstr);
+	push(@SpalnPctIDs,$spaln_pct_id);
+
     }
-    
-    # Build up the hit string for this chromosome
-    my $hitstr = "Sequence ID: $seqname\n";
-    $hitstr    = $hitstr."Map Method : BLAT+Spaln\n";
-    $hitstr    = $hitstr."Chromosome : $chr\n";
-    $hitstr    = $hitstr."Num Exons  : $num_exons\n";
-    for (my $i=0; $i<$num_exons; $i++) {
-	$hitstr= $hitstr."* Aminos $AminoRanges[$i], $HitChrs[$i]:$NuclRanges[$i]\n";
-	$hitstr= $hitstr."$CodonCenters[$i]\n";
-    }
-    
-    # WOOF
-    return ($hitstr,$spaln_pct_id);
+
+    # DOUBLE WOOF
+    return (\@SpalnHitStrs,\@SpalnPctIDs);
     
 }
 
