@@ -793,6 +793,8 @@ sub UseFastMap
 	    my $seq_len = length($Seqs[$i]);
 	    if ($FullMaps[$i]) {
 		# TOO EASY!!!
+		$top_chr_fname =~ s/\\\(/\(/g;
+		$top_chr_fname =~ s/\\\)/\)/g;
 		$FullMaps[$i] = ExtractCanonXWMap($top_chr_fname,$seq_len,
 						  $SeqNames[$i],$top_chr);
 	    }
