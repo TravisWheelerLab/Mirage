@@ -106,6 +106,17 @@ while ($tg_line = <$ThreadGuide>) {
     }
     close($SeqFile);
 
+    # If there isn't a mapping file, then we write out the whole family
+    # as unmapped.
+    if (!(-s $mapfname)) {
+	my $missf = OpenOutputFile($dirname.$gene.'.misses');
+	foreach my $seqname (@SeqNames) {
+	    print $missf "$seqname: Unmapped\n";
+	}
+	close($missf);
+	next;
+    }
+
     # Next up, read in the mappings from our mapping file
     my $MapFile = OpenInputFile($mapfname);
     my %Mapping;
