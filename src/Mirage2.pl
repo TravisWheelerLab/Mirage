@@ -80,7 +80,7 @@ my $IntervalStart;
 my $IntervalEnd;
 my $FinalTime;
 my @QuilterTimeStats;
-my @MultiMSATimeStats;
+my @MapsToMSAsTimeStats;
 my $MultiSeqNWTime;
 my $AvgNWTime;
 my $TotalRuntime;
@@ -181,7 +181,7 @@ my $MinorSpeciesDBName;
 my @SpeciesDBNames;
 
 # Run Quilter
-my %MultiMSADir;
+my %MapsToMSAsDir;
 my %GroupsBySpecies;
 for ($i=0; $i<$numSpecies; $i++) {
 
@@ -227,7 +227,7 @@ for ($i=0; $i<$numSpecies; $i++) {
     $QuilterTimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
 
         
-    # Now we want to check how long it takes to run MultiMSA
+    # Now we want to check how long it takes to run MapsToMSAs
     $IntervalStart = [Time::HiRes::gettimeofday()];
 
     # Grab a hold of your toys (confirming that they're where they should be)
@@ -236,42 +236,42 @@ for ($i=0; $i<$numSpecies; $i++) {
     my $NearFileName = $SpeciesDir{$Species[$i]}.'/NearHits.Quilter.out';
     #if (!(-e $HitFile)) { die "\n  Failed to locate Quilter output '$HitFile'\n\n"; }
 
-    # Name the directory where we'll be putting the output from MultiMSA.pl
-    $MultiMSADir{$Species[$i]} = $SpeciesDir{$Species[$i]}.'/alignments';
+    # Name the directory where we'll be putting the output from MapsToMSAs.pl
+    $MapsToMSAsDir{$Species[$i]} = $SpeciesDir{$Species[$i]}.'/alignments';
 
     # Prepare to generate a file containing tallies for each gene with
     # disagreeing positions.
     my $DisFilename = $SpeciesDir{$Species[$i]}.'/CandidateARFs.txt';
     
-    # Assembling the MultiMSA command.
-    my $MultiMSACmd;
-    $MultiMSACmd = 'perl '.$location.'MultiMSA.pl '; # base call
-    $MultiMSACmd = $MultiMSACmd.$HitFileName.' ';    # Quilter output
-    $MultiMSACmd = $MultiMSACmd.$SpeciesDBNames[$i]; # isoform file
+    # Assembling the MapsToMSAs command.
+    my $MapsToMSAsCmd;
+    $MapsToMSAsCmd = 'perl '.$location.'MapsToMSAs.pl '; # base call
+    $MapsToMSAsCmd = $MapsToMSAsCmd.$HitFileName.' ';    # Quilter output
+    $MapsToMSAsCmd = $MapsToMSAsCmd.$SpeciesDBNames[$i]; # isoform file
     
     # Guiding output towards our desired directory
-    $MultiMSACmd = $MultiMSACmd.' -folder '.$MultiMSADir{$Species[$i]};
+    $MapsToMSAsCmd = $MapsToMSAsCmd.' -folder '.$MapsToMSAsDir{$Species[$i]};
 
-    # Tell MultiMSA how many CPUs we want it to work with
-    $MultiMSACmd = $MultiMSACmd.' -n '.$num_cpus;
+    # Tell MapsToMSAs how many CPUs we want it to work with
+    $MapsToMSAsCmd = $MapsToMSAsCmd.' -n '.$num_cpus;
 
     # Give it reference to the quilter output folder, so we can scoop
     # up any of those tasty multi-chromosomal gene families.
-    $MultiMSACmd = $MultiMSACmd.' -misses '.$MissFileName;
+    $MapsToMSAsCmd = $MapsToMSAsCmd.' -misses '.$MissFileName;
 
     # If we want to stack ARFs in the output alignment files, now is
     # the time to communicate our desires
-    $MultiMSACmd = $MultiMSACmd.' -stack-arfs' if ($stack_arfs);
+    $MapsToMSAsCmd = $MapsToMSAsCmd.' -stack-arfs' if ($stack_arfs);
     
     # Display the call and/or make it
     if ($verbose) {
 	print "  Generating MSAs for all identified $Species[$i] genes\n";
-	print "  $MultiMSACmd\n";
+	print "  $MapsToMSAsCmd\n";
     }
 
-    if (system($MultiMSACmd)) {
+    if (system($MapsToMSAsCmd)) {
 	# HAMSTERS!
-	die "\n  *  ERROR:  MultiMSA.pl failed during execution  *\n\n";
+	die "\n  *  ERROR:  MapsToMSAs.pl failed during execution  *\n\n";
     }
 
 
@@ -279,7 +279,7 @@ for ($i=0; $i<$numSpecies; $i++) {
     # species.  We also count how many isoforms each group had within the species.
     # Because we might be editing the contents of the directory, we begin by
     # storing the filenames in an array, rather than doing it on-the-fly.
-    opendir(my $dir,$MultiMSADir{$Species[$i]}) || die "\n  Failed to open directory '$MultiMSADir{$Species[$i]}'\n\n";
+    opendir(my $dir,$MapsToMSAsDir{$Species[$i]}) || die "\n  Failed to open directory '$MapsToMSAsDir{$Species[$i]}'\n\n";
     open(my $DisFile,'>',$DisFilename);
     my @DirContents;
     while (my $filename = readdir($dir)) {
@@ -292,7 +292,7 @@ for ($i=0; $i<$numSpecies; $i++) {
 	    
 	    # Check if there's a disagreement file
 	    $filename =~ s/\.afa$/\_ARFs/;
-	    $filename =  $MultiMSADir{$Species[$i]}.'/'.$filename;
+	    $filename =  $MapsToMSAsDir{$Species[$i]}.'/'.$filename;
 
 	    # Open it up and record the first line to our big disagreement file
 	    if (-e $filename) {
@@ -396,15 +396,15 @@ for ($i=0; $i<$numSpecies; $i++) {
     # Figure out which groups have MSAs in this species
     foreach my $filename (@DirContents) {
 
-	if (-s $MultiMSADir{$Species[$i]}.'/'.$filename) {
+	if (-s $MapsToMSAsDir{$Species[$i]}.'/'.$filename) {
 
 	    # Count '>'s (number of sequences)
-	    open(my $MultiMSAFile,'<',$MultiMSADir{$Species[$i]}.'/'.$filename);
+	    open(my $MapsToMSAsFile,'<',$MapsToMSAsDir{$Species[$i]}.'/'.$filename);
 	    my $countedIsos = 0;
-	    while (my $line = <$MultiMSAFile>) {
+	    while (my $line = <$MapsToMSAsFile>) {
 		$countedIsos++ if ($line =~ /^\>/);
 	    }
-	    close($MultiMSAFile);
+	    close($MapsToMSAsFile);
 
 	    # Do we know this sequence?
 	    if ($GroupsBySpecies{$filename}) {
@@ -415,9 +415,9 @@ for ($i=0; $i<$numSpecies; $i++) {
 		${$GroupsBySpecies{$filename}}[1] = $countedIsos;
 	    }
 
-	} elsif (-e $MultiMSADir{$Species[$i]}.'/'.$filename) {
+	} elsif (-e $MapsToMSAsDir{$Species[$i]}.'/'.$filename) {
 	    # Wipe out any files that are only nominally present
-	    my $clearMSACmd = 'rm '.$MultiMSADir{$Species[$i]}.'/'.$filename;
+	    my $clearMSACmd = 'rm '.$MapsToMSAsDir{$Species[$i]}.'/'.$filename;
 	    system($clearMSACmd);
 	}
 
@@ -432,7 +432,7 @@ for ($i=0; $i<$numSpecies; $i++) {
     foreach my $missedgroup (keys %QuilterMisses) {
 	my @MissedSeqs = split('&',$QuilterMisses{$missedgroup});
 	foreach my $seq (@MissedSeqs) {
-	    my $GBSref = AttachSeqToMSA($seq,$MultiMSADir{$Species[$i]},$missedgroup,
+	    my $GBSref = AttachSeqToMSA($seq,$MapsToMSAsDir{$Species[$i]},$missedgroup,
 					$SpeciesDBNames[$i],\%GroupsBySpecies,$i+1,
 					$singleseqfilename,$singleseqresults);
 	    %GroupsBySpecies = %{$GBSref};
@@ -443,7 +443,7 @@ for ($i=0; $i<$numSpecies; $i++) {
     system("rm $singleseqresults")  if (-e $singleseqresults);
 
     # Knock it off with that darn timing!
-    $MultiMSATimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
+    $MapsToMSAsTimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
 
     # Species[i] over and out!
     ClearProgress();
@@ -459,10 +459,10 @@ my $GBSref;
 my $MMSAref;
 ($speciesref,$numSpecies,$GBSref,$MMSAref)
     = CoverMinorSpecies(\@Species,$ProteinDB,$numSpecies,
-			\%GroupsBySpecies,$AllSpeciesDir,\%MultiMSADir);
+			\%GroupsBySpecies,$AllSpeciesDir,\%MapsToMSAsDir);
 @Species         = @{$speciesref};
 %GroupsBySpecies = %{$GBSref};
-%MultiMSADir     = %{$MMSAref};
+%MapsToMSAsDir     = %{$MMSAref};
 
 
 # Generate first progress message
@@ -627,7 +627,7 @@ for (my $groupindex = $startpoint; $groupindex < $endpoint; $groupindex++) {
 	if ($cleanMSA) {
 
 	    # still want to remove any splice site characters
-	    my $FinalMSACmd = 'perl '.$location.'FinalMSA.pl "'.$MultiMSADir{$GroupSpecies[0]}.'/'.$groupfile.'"';
+	    my $FinalMSACmd = 'perl '.$location.'FinalMSA.pl "'.$MapsToMSAsDir{$GroupSpecies[0]}.'/'.$groupfile.'"';
 	    $FinalMSACmd    = $FinalMSACmd." '".$ResultFile."'";
 	    
 	    # Print the command and execute
@@ -640,8 +640,8 @@ for (my $groupindex = $startpoint; $groupindex < $endpoint; $groupindex++) {
 	} else {
 	
 	    # Just copy it over
-	    if (system("cp '$MultiMSADir{$GroupSpecies[0]}/$groupfile' '$ResultFile'")) {		
-		die "\n  Failed to move '$MultiMSADir{$GroupSpecies[0]}/$groupfile' to '$ResultFile'\n\n";
+	    if (system("cp '$MapsToMSAsDir{$GroupSpecies[0]}/$groupfile' '$ResultFile'")) {		
+		die "\n  Failed to move '$MapsToMSAsDir{$GroupSpecies[0]}/$groupfile' to '$ResultFile'\n\n";
 	    }
 
 	}
@@ -651,9 +651,9 @@ for (my $groupindex = $startpoint; $groupindex < $endpoint; $groupindex++) {
 
     }
 
-    my $fileA     = $MultiMSADir{$GroupSpecies[0]}.'/'.$groupfile;
+    my $fileA     = $MapsToMSAsDir{$GroupSpecies[0]}.'/'.$groupfile;
     my $fileAsize = $GroupSeqs[0];
-    my $fileB     = $MultiMSADir{$GroupSpecies[1]}.'/'.$groupfile;
+    my $fileB     = $MapsToMSAsDir{$GroupSpecies[1]}.'/'.$groupfile;
     my $fileBsize = $GroupSeqs[1];
 
     my $MultiSeqNWCmd = $location."MultiSeqNW '$fileA' $fileAsize"; # First species
@@ -671,7 +671,7 @@ for (my $groupindex = $startpoint; $groupindex < $endpoint; $groupindex++) {
 	else        { $fileA = $tempfileA; }
 
 	$fileAsize += $fileBsize;
-	$fileB      = $MultiMSADir{$GroupSpecies[$i]}.'/'.$groupfile;
+	$fileB      = $MapsToMSAsDir{$GroupSpecies[$i]}.'/'.$groupfile;
 	$fileBsize  = $GroupSeqs[$i];
 	$MultiSeqNWCmd = $location."MultiSeqNW '$fileA' $fileAsize"; # First species
 	$MultiSeqNWCmd = $MultiSeqNWCmd." '$fileB' $fileBsize";      # Second species
@@ -784,7 +784,7 @@ if ($verbose || $timed) {
 	$formattedTime = sprintf("%.3f",$QuilterTimeStats[$i]);
 	print "    Hit Stitching  : $formattedTime seconds\n";
 	
-	$formattedTime = sprintf("%.3f",$MultiMSATimeStats[$i]);
+	$formattedTime = sprintf("%.3f",$MapsToMSAsTimeStats[$i]);
 	print "    MSA Generation : $formattedTime seconds\n";
 	print "\n";
 	
@@ -962,7 +962,7 @@ sub CheckInstall
     my @RequiredFiles;
     push(@RequiredFiles,$location.'Quilter2.pl');
     push(@RequiredFiles,$location.'FastMap2.c');
-    push(@RequiredFiles,$location.'MultiMSA.pl');
+    push(@RequiredFiles,$location.'MapsToMSAs.pl');
     push(@RequiredFiles,$location.'MultiSeqNW.c');
     push(@RequiredFiles,$location.'MultiSeqNW.h');
     push(@RequiredFiles,$location.'FinalMSA.pl');
@@ -998,7 +998,7 @@ sub CheckSourceFiles
 {
     my @RequiredFiles;
     push(@RequiredFiles,$location.'Quilter2.pl');
-    push(@RequiredFiles,$location.'MultiMSA.pl');
+    push(@RequiredFiles,$location.'MapsToMSAs.pl');
     push(@RequiredFiles,$location.'FinalMSA.pl');
     push(@RequiredFiles,$location.'FastMap2');
     push(@RequiredFiles,$location.'ExonWeaver');
@@ -1635,8 +1635,8 @@ sub CoverMinorSpecies
     $speciesDir    =~ s/\/$//;
 
     # The hash of intra-species MSA file locations within species
-    my $MultiMSAref = shift;
-    my %MultiMSADir = %{$MultiMSAref};
+    my $MapsToMSAsref = shift;
+    my %MapsToMSAsDir = %{$MapsToMSAsref};
 
     # A temporary "GroupsBySpecies"-like hash
     my %MinorGroupsBySpecies;
@@ -1680,7 +1680,7 @@ sub CoverMinorSpecies
 
 	    # Oo la la! A brand new one, at that!
 	    if (!$SpeciesIDs{$species}) {
-		$MultiMSADir{$species} = $speciesDir.'/'.$species;
+		$MapsToMSAsDir{$species} = $speciesDir.'/'.$species;
 		$SpeciesIDs{$species}  = $num_species;
 		$Species[$num_species] = $species;
 		$num_species++;
@@ -1756,7 +1756,7 @@ sub CoverMinorSpecies
 
 
     # Return the minor species
-    return (\@Species,$numSpecies,\%GroupsBySpecies,\%MultiMSADir);
+    return (\@Species,$numSpecies,\%GroupsBySpecies,\%MapsToMSAsDir);
     
     
 }

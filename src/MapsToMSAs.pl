@@ -15,9 +15,16 @@ use strict;
 use POSIX;
 use Cwd;
 
+# YUCKITY YUCK YUCK
+sub GetThisDir { my $lib = $0; $lib =~ s/\/MultiMSA\.pl$//; return $lib; }
+use lib GetThisDir();
+use BureaucracyMirage;
+use DisplayProgress;
 
-sub MIN;                # Get the minimum of two values
-sub MAX;                # Get the maximum of two values
+
+sub WriteMSAToFile;
+
+
 sub GetNextExonRange;   # Identify the start and end points of the next exon (nucleotide values)
 sub UniteARFSegments;   # When we have adjacent ARF segments, group them by sequence
 sub MatrixRecurse;      # Used by UniteARFSegments during clustering
@@ -27,388 +34,297 @@ sub ResolveExon;        # When an error has been detected in an exon, try to adj
 sub CheckColumnProfile; # Build a profile of an MSA column
 
 
-if (@ARGV < 2) { die "\n  USAGE:  ./MultiMSA.pl [Quilter output] [Protein database] {Opt.s}\n\n"; }
 
-my $location = $0;
-$location =~ s/MultiMSA\.pl$//;
+if (@ARGV < 1) { die "\n  USAGE:  ./MapsToMSAs.pl [SpeciesMSAs/species/seqs]\n\n"; }
 
-my $eslsfetch = $location.'../inc/easel/miniapps/esl-sfetch';
 
-my ($i,$j,$k);
+# We should be able to work entirely from the directory with Quilter output
+my $dirname = ConfirmDirectory($ARGV[0]);
 
-# Marks the ends of exons
-my $specialChar = '*';
+# Let's figure out what our species' name is
+$dirname =~ /\/([^\/]+)\/seqs\/$/;
+my $species = $1;
 
-my $FinalMisses = 'MultiMSA.misses.out';
-my $printConsensus = 0;
-my $verbose  = 0;
-my $specific = 0;
-my $outputfolder = 'multimsa_output';
-my $CPUs = 2;
-my $canonical_species;
-my $mask_arfs = 1;
+# How many threads do we want to use?
+my $ThreadGuide = OpenInputFile($dirname.'Thread-Guide');
+my $num_cpus = <$ThreadGuide>;
+close($ThreadGuide);
+$num_cpus =~ /Num CPUs\: (\d+)/;
+$num_cpus = $1;
 
-$i = 2;
-while ($i < @ARGV) {
-    if ($ARGV[$i] eq '-species') {
-	$i++;
-	$specific = $ARGV[$i];
-    } elsif ($ARGV[$i] eq '-folder') {
-	$i++;
-	$outputfolder = $ARGV[$i];
-    } elsif ($ARGV[$i] eq '-misses') {
-	$i++;
-	$FinalMisses = $ARGV[$i];
-    } elsif ($ARGV[$i] eq '-stack-arfs') {
-	$mask_arfs = 0;
-    } elsif ($ARGV[$i] eq '-v') {
-	$verbose = 1;
-    } elsif ($ARGV[$i] eq '-n') {
-	$i++;
-	$CPUs = int($ARGV[$i]);
-	if ($CPUs <= 0) {
-	    print "\n  Unsupported number of CPUs requested ($CPUs)\n";
-	    print "  Reverting to default (2)\n\n";
-	    $CPUs = 2;
-	}
-    } else {
-	print "\n  Unrecognized option '$ARGV[$i]' ignored\n\n";
-    }
-    $i++;
-}
+# Spawn your friends and get to work!
+my $threadID = SpawnProcesses($num_cpus);
 
-my %Hits;
-my %NumFamHits;
+# Ugh, do we *really* have to reopen that stinky old Thread-Guide?
+$ThreadGuide = OpenInputFile($dirname.'Thread-Guide');
+my $tg_line = <$ThreadGuide>; # Num CPUs line
+while ($tg_line = <$ThreadGuide>) {
 
-if (-e $outputfolder) {
-    $i = 2;
-    while (-e $outputfolder.'_'.$i) {
-	$i++;
-    }
-    $outputfolder = $outputfolder.'_'.$i;
-}
-system("mkdir $outputfolder");
+    # We only want the finest sequences, hand-selected for this thread
+    next if ($tg_line !~ /(\d+) (\S+)/);
+    my $req_thread = $1;
+    my $gene = $2;
 
-my $tempdirname = $outputfolder.'/multimsa_temp/';
-if (system("mkdir \"$tempdirname\"")) { die "\n  ERROR:  Failed to create temporary directory '$tempdirname'\n\n"; }
+    next if ($req_thread != $threadID);
 
-open(my $infile,'<',$ARGV[0]) || die "\n  Failed to open input file '$ARGV[0]'\n\n";
-my %ChrsByFam;
+    my $mapfname = $dirname.$gene.'.quilter.out';
+    my $seqfname = $dirname.$gene.'.fa';
 
-# New thing -- we'll move the hits to family-specific files in the output directory,
-# so that future accesses to the mappings (either inside or outside of Mirage) can be
-# quicker.
-my %FamHitFiles;
-while (!eof($infile)) {
+    # Read in the sequences, both in their original case-sensitive forms
+    # and an all-uppercase format for internal use.
+    my @OrigSeqs;
+    my @Seqs;
+    my @SeqNames;
+    my @SeqLengths;
+    my %SeqNameToIndex;
+    my $num_seqs = -1;
+    my $SeqFile = OpenInputFile($seqfname);
+    while (my $line = <$SeqFile>) {
 
-    my $line = <$infile>;
+	$line =~ s/\n|\r//g;
+	next if (!$line);
 
-    if ($line =~ /Isoform ID/) {
+	if ($line =~ /\>(\d+)/) {
 
-	my $name_line     = $line;
-	my $method_line   = <$infile>;
-	my $chr_name_line = <$infile>;
-	my $pos_line      = <$infile>;
-    
-	# (1.) Strip down ID line into components
-	#  v2: Simplified! (Reminder: species|gene|iso_id|mirage_id)
-	#     -> We don't really need this "db_entry" as anything separate from the name
-	$name_line =~ /Isoform ID \: (\S+)$/;
-	my $seq_name = $1;
+	    $SeqNames[++$num_seqs] = $1;
+	    $SeqLengths[$num_seqs] = 0;
+	    $OrigSeqs[$num_seqs] = '';
+	    $Seqs[$num_seqs] = '';
 
-	$seqname =~ /^[^\|]+\|([^\|]+)\|/;
-	my $gene_fam = $1;
+	    # Because things go poorly if this is a zero, we need to
+	    # have the index be one higher than the actual index.
+	    $SeqNameToIndex{$SeqNames[$num_seqs]} = $num_seqs+1;
 
-	# Do we have a file open for this family?  If not, pop the top brah.
-	my $famhitfilename = $outputfolder.'/'.$gene_fam.'.hits.tmp'; # Call this tmp because we might pull some out (if they mapped to the wrong chr)
-	open(my $famhitfile,'>>',$famhitfilename);
-	print $famhitfile "$name_line\n";
-	print $famhitfile "$method_line";
-	print $famhitfile "$chr_name_line";
-	print $famhitfile "$pos_line\n"; # Extra newline for presentation's sake
-	close($famhitfile);
-	$FamHitFiles{$gene_fam} = $famhitfilename;
-	
-	# (2.) Rip out chromosome name
-	$chr_name_line =~ s/\n|\r//g;
-	if (!($chr_name_line =~ /Chromosome \: (\S+)/)) {
-	    die "\n  ERROR:  Unexpected Chromosome line:  $chr_name_line\n\n";
-	}
-	my $chr_name = $1;
-	
-	# (3.) Rip out how we matched to this chromosome
-	# V2: We're going to need to somewhat significantly change this parsing.
-	$pos_line =~ s/\n|\r//g;
-	if (!($pos_line =~ /Match Pos\.s: (.*+)/)) {
-	    die "\n  ERROR:  Unexpected Match Pos.s line:  $pos_line\n\n";
-	}
-	$pos_line = $1;
-	
-	# Stuff our new entry down the chimney
-	my $hash_entry = $chr_name.'#'.$seq_name.'#'.$pos_line;
-	if ($Hits{$gene_fam}) {
-	    $hash_entry = $Hits{$gene_fam}.'&'.$hash_entry;
-	    $NumFamHits{$gene_fam}++;
 	} else {
-	    $NumFamHits{$gene_fam}=1;
-	}
-	$Hits{$gene_fam} = $hash_entry;
 
-	if ($ChrsByFam{$gene_fam}) { $ChrsByFam{$gene_fam} = $ChrsByFam{$gene_fam}.'|'.$chr_name; }
-	else                       { $ChrsByFam{$gene_fam} = $chr_name;                           }
+	    $SeqLengths[$num_seqs] += length($line);
+	    $OrigSeqs[$num_seqs] = $OrigSeqs[$num_seqs].$line;
+	    $Seqs[$num_seqs] = $Seqs[$num_seqs].uc($line);
+
+	}
 	
     }
-    
-}
-close($infile);
+    close($SeqFile);
 
+    # Next up, read in the mappings from our mapping file
+    my $MapFile = OpenInputFile($mapfname);
+    my %Mapping;
+    my @Unmapped;
 
-# First progress message
-my $progmsg;
-if ($canonical_species) {
-    $progmsg = '  MultiMSA.pl: Preparing to generate MSAs for '.$canonical_species;
-} else {
-    $progmsg = '  MultiMSA.pl: Preparing to generate MSAs';
-}
-while (length($progmsg) < 63) { $progmsg = $progmsg.' '; }
-print "$progmsg\r" if (!$verbose);
+    # What's the canonical chromosome for this gene family?
+    my $canon_chr = <$MapFile>;
+    $canon_chr =~ /^Canonical Chromosome\: (\S+)/;
+    $canon_chr = $1;
 
+    # Are we on the reverse strand?
+    my $revcomp = 0;
+    $revcomp = 1 if ($canon_chr =~ /\[revcomp\]/);
 
-# Naming convention for progress file
-my $progressbase = $tempdirname.'MultiMSA.thread_progress.';
+    # We'll need to be prepared for some sequences to not have usable mappings
+    my $num_mapped = 0;
 
+    # Read in those dang mappings!
+    while (my $line = <$MapFile>) {
 
-# We'll be breaking up the dataset based on gene names
-my @AllGroupIDs  = sort keys %Hits;
-my $TotNumGroups = @AllGroupIDs;
-exit(0) if (!$TotNumGroups);
-if ($TotNumGroups < $CPUs) { $CPUs = $TotNumGroups; }
-my $portion;
-if ($CPUs) { $portion = int($TotNumGroups / $CPUs); }
-else       { exit(0);                               } # decline gracefully
+	$line =~ s/\n|\r//g;
+	next if (!$line);
 
+	$line =~ /Sequence ID\: (\d+)/;
+	my $seqname = $1;
+	my $seq_id  = $SeqNameToIndex{$seqname}-1;
 
-# Split into the requested number of (default 2) processes
-my $processes = 1;
-my $ThreadID  = 0; # In case we only have one process
-my $pid;
-while ($processes < $CPUs) {
-    
-    # Create new thread
-    if ( $pid = fork ) {
-	# Bail if we fail (nice rhyme!)
-	if (not defined $pid) { die "\n\tFork failed\n\n"; }    
-	# Giving the 'master' thread an ID of '0'
-        $ThreadID = 0;
-    } else {
-        $ThreadID = $processes;
-        last;
-    }
+	$line = <$MapFile>;
+	$line =~ /Map Method \: (\S+)/;
+	my $map_method = $1;
 
-    $processes++;
-
-}
-
-
-# Status printing stuff
-my $progtime = time();
-my $progfilename = $progressbase.$ThreadID;
-my $num_complete = 0;
-
-
-# Open up the file for writing misses (i.e., multi-chromosome hitting sequence groups) to.
-# These files will all get appended into the same missfile generated by Quilter.
-my $missbase = $tempdirname.'MultiMSA.misses.';
-my $missfilename = $missbase.$ThreadID;
-open(my $missfile,'>',$missfilename) ||  die "\n  ERROR:  Failed to open file '$missfilename'\n\n";
-
-# We'll enjoy the sweet knowledge of knowing who hit to the wrong chromosome
-my %FamBadHits; 
-
-# Now we can generate our MSAs (sorted for progress vis.)
-my $startpoint = $ThreadID * $portion;
-my $endpoint   = ($ThreadID+1) * $portion;
-if ($ThreadID == $CPUs-1) { $endpoint = $TotNumGroups; }
-foreach my $group_index ($startpoint..$endpoint-1) {
-    
-    my $group_id = $AllGroupIDs[$group_index];
-    print "  $group_id\n" if ($verbose);
-    
-    my $outfilename = $outputfolder.'/'.$group_id;
-    if ($specific) {
-	$outfilename = $outfilename.'_'.$specific;
-    }
-    $outfilename = $outfilename.'.afa';
-
-    my $numhits = $Nums{$group_id};
-
-    # Figure out the dominant chromosome for this family
-    my @ChrList = split(/\|/,$ChrsByFam{$group_id});
-    my %TopChr;
-    foreach my $chr (@ChrList) {
-	if ($TopChr{$chr}) { $TopChr{$chr}++; }
-	else               { $TopChr{$chr}=1; }
-    }
-    my $curr_chr = 0;
-    my $curr_chr_counts = -1;
-    foreach my $chr (keys %TopChr) {
-	if ($TopChr{$chr} > $curr_chr_counts) {
-	    $curr_chr = $chr;
-	    $curr_chr_counts = $TopChr{$chr};
-	}
-    }
-
-    my $revcomp;
-    if ($curr_chr =~ /\[revcomp\]/) { $revcomp = 1; }
-    else                            { $revcomp = 0; }
-
-    
-    my $ChrName;
-    my @GeneNames;
-    my @IsoNames;
-    my @Species;
-    my @DBEntries;
-    my @PosStrings;
-    my @ProteinSeqs;
-    my @ProteinLens;
-    my @IsoIDs;
-    my @ExtraInfo;
-    my @GroupField; # Because there's the possibility of case varying
-    
-    my ($NuclStart,$NuclEnd);
-    my $hash_entry = $Hits{$group_id};
-    my @each_entry = split('&',$hash_entry);
-
-    $i = 0;
-    my $chr_hits = 0;
-    foreach $i (0..$numhits-1) {
-
-	my @this_entry  = split('#',$each_entry[$i]);
-	$ChrName        = $this_entry[0];
-
-	if ($ChrName ne $curr_chr) {
-
-	    # Take note that we need to review this family's hitfile
-	    $this_entry[1] =~ /\|([^\|]+)$/;
-	    my $fam = lc($1);
-	    if ($FamBadHits{$fam}) { $FamBadHits{$fam} = $FamBadHits{$fam}.'&'.$this_entry[1]; }
-	    else                   { $FamBadHits{$fam} = $this_entry[1];                       }
-
-	    # Write this guy out for future alignment using translated
-	    # Needleman-Wunsch
-	    print $missfile "$this_entry[1]\n";	    
+	if ($map_method eq 'Unmapped') {
+	    push(@Unmapped,$seqname.': Unmapped');
 	    next;
-
 	}
 
-	$PosStrings[$chr_hits] = $this_entry[2];
-	$DBEntries[$chr_hits]  = $this_entry[1];
-	
-	# Some entries might have additional data fields before the
-	# group identifier, so we'll have to pay attention to how
-	# many fields there are.
-	if ($DBEntries[$chr_hits]  =~ /([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|(\S*\|)([^\|]+)\s*$/) {
-	    $GeneNames[$chr_hits]  = $1;
-	    $IsoNames[$chr_hits]   = $2;
-	    $Species[$chr_hits]    = $3;
-	    $IsoIDs[$chr_hits]     = $4;
-	    $ExtraInfo[$chr_hits]  = $5;
-	    $GroupField[$chr_hits] = $6;
-	} elsif ($DBEntries[$chr_hits]  =~ /([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\s*$/) {
-	    $GeneNames[$chr_hits]  = $1;
-	    $IsoNames[$chr_hits]   = $2;
-	    $Species[$chr_hits]    = $3;
-	    $IsoIDs[$chr_hits]     = $4;
-	    $ExtraInfo[$chr_hits]  = 0;
-	    $GroupField[$chr_hits] = $5;
+	$line = <$MapFile>;
+	$line =~ /Chromosome \: (\S+)/;
+	my $chr = $1;
+
+	# If we have a match between the chromosomes, we're incorporating this sequence
+	# right into our MSA!
+	my @SeqChars;
+	if ($chr eq $canon_chr) {
+	    $SeqNames[$num_mapped] = $SeqNames[$seq_id];
+	    $SeqLengths[$num_mapped] = $SeqLengths[$seq_id];
+	    $OrigSeqs[$num_mapped] = $OrigSeqs[$seq_id];
+	    $Seqs[$num_mapped] = $Seqs[$seq_id];
+	    @SeqChars = split(//,$Seqs[$seq_id]);
+	    $seq_id = $num_mapped;
+	    $num_mapped++;
 	} else {
-	    die "\n  ERROR:  Failed to parse sequence name '$DBEntries[$chr_hits]'\n\n";
+	    push(@Unmapped,$seqname,': Noncanonical Chromosome');
+	}
+
+	$line = <$MapFile>;
+	$line =~ /Num Exons  \: (\d+)/;
+	my $num_exons = $1;
+
+	# Read in the actual mappings! Note that we don't really need
+	# to use the first line, since that just gives metadata about
+	# the exon.
+	my $seq_pos = 0;
+	for (my $i=0; $i<$num_exons; $i++) {
+
+	    $line = <$MapFile>;
+	    $line = <$MapFile>;
+	    next if ($chr ne $canon_chr);
+
+	    foreach my $map_pos (split(/\,/,$line)) {
+		my $entry = $seq_id.':'.$SeqChars[$seq_pos++];
+		if ($Mapping{$map_pos}) { $Mapping{$map_pos} = $Mapping{$map_pos}.','.$entry; }
+		else                    { $Mapping{$map_pos} = $entry;                        }
+	    }
+	    
 	}
 	
-	# Get a hold of the proteins and record them as strings
-	my $eslsfetchCmd = $eslsfetch." $ARGV[1] \"$DBEntries[$chr_hits]\" \|";
-	open(my $eslinput,$eslsfetchCmd) || die "\n  esl-sfetch failed to grab $DBEntries[$chr_hits] from $ARGV[1]\n\n";
 	
-	# Eat header line <- could be used for sanity check
-	my $line = <$eslinput>;
+    }
+    close($MapFile);
+
+    # Next up, if we had any unmapped sequences, we'll sing about them reverently in
+    # the form of a little dirge called file I/O
+    if (scalar(@Unmapped)) {
+	my $MissFile = OpenOutputFile($dirname.$gene.'.misses');
+	foreach my $unmapped_seq (@Unmapped) {
+	    print $MissFile "$unmapped_seq\n";
+	}
+	close($MissFile);
+    }
+
+    # Did this entire family miss? That would make me very sad :(
+    $num_seqs = $num_mapped;
+    next if ($num_seqs == 0);
+
+    # Excellent! Let's kick things off by drafting our spliced MSA!
+    # First up, get your list of coordinates ready
+    my @MapCoords;
+    if ($revcomp) { @MapCoords = sort { $b <=> $a } keys %Mapping; }
+    else          { @MapCoords = sort { $a <=> $b } keys %Mapping; }
+
+    # Now we'll actually draft that MSA! We'll also store the mapping coordinates
+    # in a top-secret final row, but don't go telling about it
+    my @MSA;
+    my $msa_len = 0;
+    my $last_coord = -1;
+    my @ExonStarts;
+    my @ExonEnds;
+    my $num_exons = -1;
+    my %IndelColumns;
+    foreach my $coord (@MapCoords) {
+
+	# Is this the start of a new exon?
+	if (abs($coord-$last_coord)>4) {
+	    $ExonEnds[$num_exons] = $msa_len-1 if ($num_exons >= 0);
+	    for (my $i=0; $i<=$num_seqs; $i++) {
+		$MSA[$i][$msa_len] = '*';
+	    }
+	    $msa_len++;
+	    $ExonStarts[++$num_exons] = $msa_len;
+	}
+	$last_coord = $coord;
+
+	# Initialize a list to represent the column
+	my @Column;
+	for (my $i=0; $i<$num_seqs; $i++) {
+	    $Column[$i] = 0;
+	}
+
+	# Now we'll check that coordinate to see who's representing this column
+	# NOTE that we need to be careful about possible indels
+	foreach my $entry (split(/\,/,$Mapping{$coord})) {
+	    $entry =~ /(\d+)\:(\S)/;
+	    my $seq_id = $1;
+	    my $char = $2;
+	    if ($Column[$seq_id]) {
+		$Column[$seq_id] = $Column[$seq_id].$char;
+		$IndelColumns{$msa_len} = 1;
+	    } else {
+		$Column[$seq_id] = $char;
+	    }
+	}
+
+	# MSA time, baby!
+	for (my $i=0; $i<$num_seqs; $i++) {
+	    $MSA[$i][$msa_len] = $Column[$i];
+	}
+	$MSA[$num_seqs][$msa_len] = $coord;
+	$msa_len++;
 	
-	# Read in the protein sequence
-	my $Protein = '';
-	while ($line = <$eslinput>) {
+    }
+    $ExonEnds[$num_exons] = $msa_len-1;
+    $num_exons++;
+
+
+
+    # AND FINALLY
+    my $outfname = $dirname.$gene.'.afa';
+    WriteMSAToFile(\@MSA,\@SeqNames,\@OrigSeqs,$num_seqs,$msa_len,$outfname);
+    
+}
+
+close($ThreadGuide);
+
+if ($threadID) { exit(0); }
+while (wait() != -1) {}
+
+
+# Now that it's just you 'n' me, Master Thread, let's concatenate all of our
+# missed sequences into a single file.
+my $Dir = OpenDirectory($dirname);
+my @MissFiles;
+while (my $fname = readdir($Dir)) {
+    if ($fname =~ /\.misses$/) {
+	push(@MissFiles,$dirname.$fname);
+    }
+}
+closedir($Dir);
+
+# Oh, how nice it would be not to enter this conditional...
+if (scalar(@MissFiles)) {
+    my $BigMissFile = OpenOutputFile($dirname.'../'.$species.'.misses');
+    foreach my $missfname (sort @MissFiles) {
+	my $missf =  OpenInputFile($missfname);
+	while (my $line = <$missf>) {
 	    $line =~ s/\n|\r//g;
 	    next if (!$line);
-	    $Protein = $Protein.$line;
+	    print $BigMissFile "$line\n";
 	}
-	close($eslinput);
-	
-	# Store the protein
-	$Protein =~ s/\s//g;
-	$ProteinSeqs[$chr_hits] = $Protein;
-	$ProteinLens[$chr_hits] = length($Protein);
-	$chr_hits++;
-	
+	close($missf);
     }
-    
-    # Hash each codon to a designated nucleotide position
+    close($BigMissFile);
+}
+
+
+
+# CALLIN' IT
+1;
+
+
+
+
+
+
+
+
+#
+# OLD STUFF BELOW
+#
+
+# NOTE: This stuff is just so that we can run the new script without getting
+#       a billion warnings.
+if (0) {
+    my ($i,$j,$k,$chr_hits,);
+    my @PositionIndex;
     my %MSA;
-    my %MultiAminos; # Indicates where we've seen indels (multiple aminos on one codon)
-    foreach $i (0..$chr_hits-1) {
-
-	# Converting the string of positions into individual codon centers
-	my @Codons = split(/\,/,$PosStrings[$i]);
-	my @Seq    = split(//,$ProteinSeqs[$i]);
-
-	# Walking through the position indices, filling in our hash of
-	# chromosome positions to amino acids
-	my $amino_pos = 0;
-	my $last_codon = -1;
-	foreach my $codon_pos (@Codons) {
-
-	    next if ($codon_pos =~ /\*/);
-
-	    my $amino = $Seq[$amino_pos];
-	    $amino_pos++;
-
-	    if ($MSA{$codon_pos}) {
-
-		if ($last_codon == $codon_pos) { 
-
-		    # Indel ahoy!
-		    $MSA{$codon_pos} = $MSA{$codon_pos}.$amino;
-		    $MultiAminos{$codon_pos} = 1;
-
-		} else {
-		    $MSA{$codon_pos} = $MSA{$codon_pos}.','.$i.':'.$amino; 
-		}
-
-	    } else {
-		$MSA{$codon_pos} = $i.':'.$amino;
-	    }
-
-	    $last_codon = $codon_pos;
-
-	}
-
-    }
-
+    my @ProteinLens;
     
-    # Generate a sorted list of our hash entries (positions in the table)
-    my @PositionIndex = keys %MSA;
-    if ($revcomp) { @PositionIndex = sort {$b <=> $a} @PositionIndex; }
-    else          { @PositionIndex = sort {$a <=> $b} @PositionIndex; }
-
-
-
-    ###############################################################################
-    #                                                                             #
-    #  From here, we're doing the actual MSA assembly work for this gene family.  #
-    #  A couple things worth mentioning: (1.) The 'FinalMSA' isn't actually the   #
-    #  final MSA at the end of this 'foreach' loop, since a little bit of work    #
-    #  is required to make sure that any insertions get handled correctly.        #
-    #                                                                             #
-    ###############################################################################
-
-
+    
     my @FinalMSA = ();
     for ($i=0; $i<$chr_hits; $i++) { $FinalMSA[$i][0] = '*'; }
     my $msa_len  = 1;
@@ -442,7 +358,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 	my @MultiFrameStarts;
 	my @MultiFrameEnds;
 	my $num_segs = 0;
-
+	
 	# Because we may need to combine ARFs within some segments, we
 	# need a temporary place to record the positions of ARFs.
 	my @TempARFNameField;
@@ -451,7 +367,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 		$TempARFNameField[$seq_id][$seg_id] = 0;
 	    }
 	}
-
+	
 	foreach my $segment (@SegmentList) {
 
 	    my @SegmentParts = split(/\,/,$segment);
@@ -475,7 +391,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 		    $non_arf_frame_size = $frame_size;
 		}
 	    }
-
+	    
 	    # It's probably easiest to just do this here, rather than on a
 	    # conditional
 	    my @ContentStarts;
@@ -507,7 +423,7 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 		    my @SeqsAndChars = split(/\,/,$MSA{$genome_pos});
 		    my @Seqs;
 		    my @Chars;
-
+		    
 		    # If we have a longest entry >1 then we use our quick N-W like
 		    # thing to generate an alignment for the whole column.
 		    my @Column;
@@ -879,220 +795,8 @@ foreach my $group_index ($startpoint..$endpoint-1) {
 
 	}
     }
-
-
-    # Now that we have our clean and tidy MSA we can go
-    # ahead and write it out!
-    open(my $outfile,'>',$outfilename);
-    for ($i=0; $i<$chr_hits; $i++) {
-
-	$IsoNames[$i] =~ s/\s//g;
-	if ($ExtraInfo[$i]) {
-	    if ($ARFNameField[$i]) {
-		print $outfile ">$GeneNames[$i]|$IsoNames[$i]|$Species[$i]|$ARFNameField[$i]|$IsoIDs[$i]|$ExtraInfo[$i]$GroupField[$i]\n";
-	    } else {
-		print $outfile ">$GeneNames[$i]|$IsoNames[$i]|$Species[$i]|$IsoIDs[$i]|$ExtraInfo[$i]$GroupField[$i]\n";
-	    }
-	} else {
-	    if ($ARFNameField[$i]) {
-		print $outfile ">$GeneNames[$i]|$IsoNames[$i]|$Species[$i]|$ARFNameField[$i]|$IsoIDs[$i]|$GroupField[$i]\n";
-	    } else {
-		print $outfile ">$GeneNames[$i]|$IsoNames[$i]|$Species[$i]|$IsoIDs[$i]|$GroupField[$i]\n";
-	    }
-	}
-	    
-	$j = 0;
-	$k = 0;
-	while ($j < $final_len) {
-	    
-	    print $outfile "$FinalMSA[$i][$j]";
-
-	    $k++;
-	    $j++;
-	    
-	    if ($k == 50) {
-		print $outfile "\n";
-		$k = 0;
-	    }
-
-	}
-
-	print $outfile "\n";
-	print $outfile "\n" if ($k);
-	
-    }
-    close($outfile);
-    
-
-    ## If we had any disagreements let the user know
-    #if (@Disagreements) {
-    #
-    #my $numdisagreements = @Disagreements;
-    #my $disfilename = $outfilename;
-    #
-    #$disfilename =~ s/\.afa/\_ARFs/;
-    ##print "  > WARNING: $numdisagreements positions did not reach unanimous consensus (see $disfilename)\n" if ($verbose);
-    #
-    #open(my $disfile,'>',$disfilename);
-    #print $disfile "$numdisagreements mismatched sites\n";
-    #print $disfile "$Disagreements[0]-";
-    #foreach $j (1..$numdisagreements-1) {
-    #if ($Disagreements[$j] != $Disagreements[$j-1]+1) {
-    #print $disfile "$Disagreements[$j-1],$Disagreements[$j]-";
-    #}
-    #}
-    #print $disfile "$Disagreements[$numdisagreements-1]\n";
-    #close($disfile);
-    #
-    #}
-
-
-    # Status reporting stuff:
-    if (!$verbose) {
-	$num_complete++;
-	if (time()-$progtime > 2) {
-	    
-	    if ($ThreadID) {
-		open(my $progfile,'>',$progfilename);
-		print $progfile "$num_complete\n";
-		close($progfile);
-		
-	    } else {
-		
-		# Generate call to ProgressTimer
-		my $progressCmd = $location.'ProgressTimer.pl '.$progressbase.' '.$CPUs;
-		$progressCmd    = $progressCmd.' '.$num_complete.' |';
-		if ($location !~ /^\//) { $progressCmd = './'.$progressCmd; }
-		
-		# Make the call and read the results
-		open(my $progfile,$progressCmd);
-		my $overall_progress = readline($progfile);
-		close($progfile);
-		$overall_progress =~ s/\n|\r//g;
-		
-		# Pull together the message
-		my $progmsg = '  MultiMSA.pl: '.$overall_progress.' gene families aligned ('.$canonical_species.')';
-		while (length($progmsg) < 63) { $progmsg = $progmsg.' '; }
-		print "$progmsg\r";
-		
-	    }
-	    
-	    # Set new prog timer
-	    $progtime = time();
-	    
-	}
-    }
-}
-
-
-# Close up individual missfiles
-close($missfile);
-
-
-# Now that we know whose mappings weren't used, we can give them a special indication.
-# NOTE: For downstream analysis, be sure to look for the '[unused-mapping]' indicator on the chromosome
-foreach my $fam (keys %FamBadHits) {
-
-    my $tmphitfname = $outputfolder.'/'.$fam.'.hits.tmp';
-    my $outhitfname = $outputfolder.'/'.$fam.'.hits.out';
-    open(my $tmphitf,'<',$tmphitfname);
-    open(my $outhitf,'>',$outhitfname);
-
-    # Make a hash of the specific sequences we're dumping.
-    my %DemappedSequences;
-    foreach my $seqname (split(/\&/,$FamBadHits{$fam})) { $DemappedSequences{$seqname} = 1; }
-
-    # If we see a true hit, just transfer it over immediately.
-    # Otherwise, store it (so all of the unused mappings are grouped together)
-    while (my $line = <$tmphitf>) {
-	$line =~ s/\n|\r//g;
-	if ($line =~ /Isoform ID \: (\S+)/) {
-
-	    my $seqname = $1;
-	    my $nameline = $line."\n";
-
-	    $line = <$tmphitf>; # method
-	    my $methodline = $line;
-
-	    $line = <$tmphitf>; # chromosome
-	    my $chrline = $line;
-	    if ($DemappedSequences{$seqname}) {
-		$chrline =~ s/\n|\r//g;
-		$chrline = $chrline."[unused-mapping]\n";
-	    }
-
-	    $line = <$tmphitf>; # mapping
-	    my $mapline = $line;
-	    
-	    my $full_info = $nameline.$methodline.$chrline.$mapline."\n";
-	    if ($DemappedSequences{$seqname}) {
-		$DemappedSequences{$seqname} = $full_info;
-	    } else {
-		print $outhitf "$full_info";
-	    }
-	}
-    }
-    close($tmphitf);
-    system("rm \"$tmphitfname\"");
-
-    # Write out all of the mappings that we've abandoned (annotated with '[unused-mapping]')
-    print $outhitf "------------------------ UNUSED MAPPINGS ------------------------\n\n";
-    foreach my $demappedseq (keys %DemappedSequences) { print $outhitf "$DemappedSequences{$demappedseq}"; }
-    close($outhitf);
-
-    $FamHitFiles{$fam} = 0;
     
 }
-
-
-# For any families that didn't have nasty sleeper-agents (i.e., sequences that didn't map to the same chr)
-# just move the original hit files from '.tmp' to '.out'
-#
-# Note that FamHitFiles is defined outside of the parallel part of the script,
-# so we need to be careful that we're only considering the families that we've
-# personally sworn to protect.
-#
-for (my $fam_index=$startpoint; $fam_index<$endpoint; $fam_index++) {
-    my $fam = $AllGroupIDs[$fam_index];
-    my $tmphitfname = $FamHitFiles{$fam};
-    if (-e $tmphitfname) {
-	my $outhitfname = $tmphitfname;
-	$outhitfname =~ s/\.tmp$/\.out/;
-	if (system("mv \"$tmphitfname\" \"$outhitfname\"")) {
-	    die "\n  ERROR:  Failed to move \"$tmphitfname\" to \"$outhitfname\"\n\n";
-	}
-    }
-}
-
-
-# de-fork
-if ($ThreadID) { exit(0); }
-while (wait() != -1) {}
-
-
-# Clean up progress files and concatenate all missfiles into 'FinalMisses'
-for ($i = 0; $i < $CPUs; $i++) {
-
-    $progfilename = $progressbase.$i;
-    if (-e $progfilename && system("rm $progfilename")) { die "\n  Failed to remove file $progfilename\n\n"; }
-
-    $missfilename = $missbase.$i;
-    if (-e $missfilename) {
-	system("cat $missfilename >> $FinalMisses");
-	system("rm $missfilename");
-    }
-    
-}
-
-
-# Burn the temporary directory to the ground!
-system("rm -rf \"$tempdirname\"");
-
-
-# Final report
-$progmsg = '  MultiMSA.pl: '.$canonical_species.' complete';
-while (length($progmsg) < 63) { $progmsg = $progmsg.' '; }
-print "$progmsg\r" if (!$verbose);
 
 
 # Mad phresh stylez 4 lyfe
@@ -1116,33 +820,84 @@ print "$progmsg\r" if (!$verbose);
 
 
 
+
+
 ################################################################
 #
-# FUNCTION: MAX
+#  Function: ConvertToOrigSeqs
 #
-sub MAX
+sub ConvertToOrigSeqs
 {
-    my $a = shift;
-    my $b = shift;
-    return $a if ($a >= $b);
-    return $b;
+    my $msa_ref = shift;
+    my $orig_seqs_ref = shift;
+    my $num_seqs = shift;
+
+    my @MSA = @{$msa_ref};
+    my @OrigSeqs = @{$orig_seqs_ref};
+
+    for (my $i=0; $i<$num_seqs; $i++) {
+
+	my @Seq = split(//,$OrigSeqs[$i]);
+	my $seq_len = length($OrigSeqs[$i]);
+
+	my $seq_pos = 0;
+	my $msa_pos = 0;
+	while ($seq_pos < $seq_len) {
+	    if ($MSA[$i][$msa_pos] && $MSA[$i][$msa_pos] =~ /[A-Za-z]/) {
+		$MSA[$i][$msa_pos] = $Seq[$seq_pos++];
+	    }
+	    $msa_pos++;
+	}
+
+    }
+
+    return \@MSA;
+    
 }
 
 
 
 
 
+
+
+
 ################################################################
 #
-# FUNCTION: MIN
+#  Function: WriteMSAToFile
 #
-sub MIN
+sub WriteMSAToFile
 {
-    my $a = shift;
-    my $b = shift;
-    return $a if ($a <= $b);
-    return $b;
+    my $msa_ref = shift;
+    my $seqnames_ref = shift;
+    my $orig_seqs_ref = shift;
+    my $num_seqs = shift;
+    my $msa_len = shift;
+    my $fname = shift;
+
+    my @MSA = @{$msa_ref};
+    my @OrigSeqs = @{$orig_seqs_ref};
+    $msa_ref = ConvertToOrigSeqs(\@MSA,\@OrigSeqs,$num_seqs);
+    @MSA = @{$msa_ref};
+    
+    my @SeqNames = @{$seqnames_ref};
+
+    my $outf = OpenOutputFile($fname);
+    for (my $i=0; $i<$num_seqs; $i++) {
+	print $outf ">$SeqNames[$i]\n";
+	for (my $j=0; $j<$msa_len; $j++) {
+	    if ($MSA[$i][$j]) { print $outf "$MSA[$i][$j]"; }
+	    else              { print $outf '-';            }
+	    print $outf "\n" if (($j+1) % 60 == 0);
+	}
+	print $outf "\n" if ($msa_len % 60);
+	print $outf "\n";
+    }
+    close($outf);
+    
 }
+
+
 
 
 

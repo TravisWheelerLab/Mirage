@@ -21,8 +21,6 @@ sub CreateDirectory;
 
 # More bio-specific functions
 sub ParseMirageSeqName;
-sub ParseFASTA; # NOTE: Takes a filename or a command (e.g., esl-sfetch)
-sub WriteMSAToFile;
 sub TranslateCodon;
 
 # Global codon table
@@ -280,97 +278,6 @@ sub ParseMirageSeqname
     
 }
 
-
-
-###################################################################
-#
-#  BIO. FUNCTION:  ParseFASTA
-#
-#  INPUT : filename or command
-#  OUTPUT: \@SeqNames,\@Seqs,$num_seqs
-#
-sub ParseFASTA
-{
-    my $fname_or_cmd = shift;
-
-    my @SeqNames;
-    my @Seqs;
-    my $num_seqs = -1;
-
-    # Are we being given a command or a file?
-    #
-    # We assume that any command (e.g., esl-sfetch) will have 2 or more
-    # fields.
-    #
-    my $inf;
-    if (scalar(split(/\s+/,$fname_or_cmd))) {
-	$inf = OpenSystemCOmmand($fname_or_cmd);
-    } else {
-	$inf = OpenInputFile($fname_or_cmd);
-    }
-
-    while (my $line = <$inf>) {
-
-	$line =~ s/\n|\r//g;
-	next if (!$line || $line =~ /^\#|^\;/);
-	
-	if ($line =~ /\>(.+)$/) {
-
-	    push(@SeqNames,$1);
-	    $num_seqs++;
-	    $Seqs[$num_seqs] = '';
-
-	} else {
-
-	    $Seqs[$num_seqs] = $Seqs[$num_seqs].$line;
-
-	}
-
-    }
-
-    $num_seqs++;
-    close($inf);
-
-    return (\@SeqNames,\@Seqs,$num_seqs);
-
-}
-
-
-###################################################################
-#
-#  BIO. FUNCTION:  WriteMSAToFile
-#
-#  INPUTS: \@SeqNames,\@MSA,$num_seqs,$msa_len,$filename
-#  OUTPUT: $outfname
-#
-sub WriteMSAToFile
-{
-    my $seqnames_ref = shift;
-    my $msa_ref      = shift;
-    my $num_seqs     = shift;
-    my $msa_len      = shift;
-    my $filename     = shift;
-
-    my @SeqNames = @{$seqnames_ref};
-    my @MSA = @{$msa_ref};
-    my ($outf,$outfname) = OpenOutputFile($filename);
-
-    my $line_len = 60;
-
-    for (my $i=0; $i<$num_seqs; $i++) {
-	print $outf ">$SeqNames[$i]\n";
-	for (my $j=0; $j<$msa_len; $j++) {
-	    print $outf "$MSA[$i][$j]";
-	    print $outf "\n" if (($j+1) % $line_len == 0);
-	}
-	print $outf "\n" if ($msa_len % $line_len);
-	print $outf "\n";
-    }
-
-    close($outf);
-    return $outfname;
-
-}
 
 
 ###################################################################

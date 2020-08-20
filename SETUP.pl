@@ -62,7 +62,7 @@ push(@srcFiles,'src/FinalMSA.pl');
 push(@srcFiles,'src/Mirage2.pl');
 push(@srcFiles,'src/MultiSeqNW.c');
 push(@srcFiles,'src/MultiSeqNW.h');
-push(@srcFiles,'src/MultiMSA.pl');
+push(@srcFiles,'src/MapsToMSAs.pl');
 push(@srcFiles,'src/Quilter2.pl');
 push(@srcFiles,'src/run_mirage2.sh');
 foreach my $file (@srcFiles) {
