@@ -272,8 +272,13 @@ while ($tg_line = <$ThreadGuide>) {
     $num_exons++;
 
 
-
+    
     # AND FINALLY
+    #
+    # NOTE: Currently, we have indels stacked as multiple characters in the
+    #       MSA, which can cause infinite looping in this function -- not a
+    #       functional construction!
+    #
     my $outfname = $dirname.$gene.'.afa';
     WriteMSAToFile(\@MSA,\@SeqNames,\@OrigSeqs,$num_seqs,$msa_len,$outfname);
     
@@ -890,7 +895,7 @@ sub WriteMSAToFile
     my @OrigSeqs = @{$orig_seqs_ref};
     $msa_ref = ConvertToOrigSeqs(\@MSA,\@OrigSeqs,$num_seqs);
     @MSA = @{$msa_ref};
-    
+
     my @SeqNames = @{$seqnames_ref};
 
     my $outf = OpenOutputFile($fname);
