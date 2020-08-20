@@ -16,7 +16,7 @@ use POSIX;
 use Cwd;
 
 # YUCKITY YUCK YUCK
-sub GetThisDir { my $lib = $0; $lib =~ s/\/MultiMSA\.pl$//; return $lib; }
+sub GetThisDir { my $lib = $0; $lib =~ s/\/MapsToMSAs\.pl$//; return $lib; }
 use lib GetThisDir();
 use BureaucracyMirage;
 use DisplayProgress;
