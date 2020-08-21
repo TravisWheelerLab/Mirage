@@ -1,6 +1,7 @@
 #!/usr/bin/env perl
 #
-# MultiMSA.pl - Alex Nord - 2016
+# Was: MultiMSA.pl   - Alex Nord - 2016
+# Is : MapsToMSAs.pl - "       " - 2020
 #
 # ABOUT: In the mirage pipeline, this script is used to convert the exon-
 #        aware hits produced by 'Quilter' into intra-species gene-family
@@ -187,9 +188,17 @@ while ($tg_line = <$ThreadGuide>) {
 	    next if ($chr ne $canon_chr);
 
 	    foreach my $map_pos (split(/\,/,$line)) {
-		my $entry = $seq_id.':'.$SeqChars[$seq_pos++];
-		if ($Mapping{$map_pos}) { $Mapping{$map_pos} = $Mapping{$map_pos}.','.$entry; }
-		else                    { $Mapping{$map_pos} = $entry;                        }
+		my $entry = $seq_id.':'.$SeqChars[$seq_pos];
+		if ($Mapping{$map_pos}) {
+		    if ($Mapping{$map_pos} =~ /^$seq_id\:|\,$seq_id\:/) {
+			$Mapping{$map_pos} = $Mapping{$map_pos}.$SeqChars[$seq_pos];
+		    } else {
+			$Mapping{$map_pos} = $Mapping{$map_pos}.','.$entry;
+		    }
+		} else {
+		    $Mapping{$map_pos} = $entry;
+		}
+		$seq_pos++;
 	    }
 	    
 	}
@@ -212,66 +221,11 @@ while ($tg_line = <$ThreadGuide>) {
     $num_seqs = $num_mapped;
     next if ($num_seqs == 0);
 
-    # Excellent! Let's kick things off by drafting our spliced MSA!
-    # First up, get your list of coordinates ready
-    my @MapCoords;
-    if ($revcomp) { @MapCoords = sort { $b <=> $a } keys %Mapping; }
-    else          { @MapCoords = sort { $a <=> $b } keys %Mapping; }
 
-    # Now we'll actually draft that MSA! We'll also store the mapping coordinates
-    # in a top-secret final row, but don't go telling about it
-    my @MSA;
-    my $msa_len = 0;
-    my $last_coord = -1;
-    my @ExonStarts;
-    my @ExonEnds;
-    my $num_exons = -1;
-    my %IndelColumns;
-    foreach my $coord (@MapCoords) {
-
-	# Is this the start of a new exon?
-	if (abs($coord-$last_coord)>4) {
-	    $ExonEnds[$num_exons] = $msa_len-1 if ($num_exons >= 0);
-	    for (my $i=0; $i<=$num_seqs; $i++) {
-		$MSA[$i][$msa_len] = '*';
-	    }
-	    $msa_len++;
-	    $ExonStarts[++$num_exons] = $msa_len;
-	}
-	$last_coord = $coord;
-
-	# Initialize a list to represent the column
-	my @Column;
-	for (my $i=0; $i<$num_seqs; $i++) {
-	    $Column[$i] = 0;
-	}
-
-	# Now we'll check that coordinate to see who's representing this column
-	# NOTE that we need to be careful about possible indels
-	foreach my $entry (split(/\,/,$Mapping{$coord})) {
-	    $entry =~ /(\d+)\:(\S)/;
-	    my $seq_id = $1;
-	    my $char = $2;
-	    if ($Column[$seq_id]) {
-		$Column[$seq_id] = $Column[$seq_id].$char;
-		$IndelColumns{$msa_len} = 1;
-	    } else {
-		$Column[$seq_id] = $char;
-	    }
-	}
-
-	# MSA time, baby!
-	for (my $i=0; $i<$num_seqs; $i++) {
-	    $MSA[$i][$msa_len] = $Column[$i];
-	}
-	$MSA[$num_seqs][$msa_len] = $coord;
-	$msa_len++;
-	
-    }
-    $ExonEnds[$num_exons] = $msa_len-1;
-    $num_exons++;
-
-
+    my ($msa_ref,$msa_len,$arfs_ref)
+	= ComposeMSA(\%Mapping,$num_seqs,$revcomp,\@SeqLengths);
+    my @MSA  = @{$msa_ref};
+    my @ARFs = @{$arfs_ref};
     
     # AND FINALLY
     #
@@ -280,7 +234,7 @@ while ($tg_line = <$ThreadGuide>) {
     #       functional construction!
     #
     my $outfname = $dirname.$gene.'.afa';
-    WriteMSAToFile(\@MSA,\@SeqNames,\@OrigSeqs,$num_seqs,$msa_len,$outfname);
+    WriteMSAToFile(\@MSA,\@ARFs,\@SeqNames,\@OrigSeqs,$num_seqs,$msa_len,$outfname);
     
 }
 
@@ -325,31 +279,55 @@ if (scalar(@MissFiles)) {
 
 
 
+#########################
+#########################
+###                   ###
+###    SUBROUTINES    ###
+###                   ###
+#########################
+#########################
 
 
 
+
+
+
+
+
+################################################################
 #
-# OLD STUFF BELOW
+#  Function: ComposeMSA
 #
+#  NOTE: This is primarily a dump from the original 'MultiMSA'
+#        and could probably benefit from some amount of cleanup
+#        (especially once we replace Spaln).
+#
+sub ComposeMSA
+{
 
-# NOTE: This stuff is just so that we can run the new script without getting
-#       a billion warnings.
-if (0) {
-    my ($i,$j,$k,$chr_hits,);
-    my @PositionIndex;
-    my %MSA;
-    my @ProteinLens;
+    my $mapping_ref = shift;
+    my $num_seqs = shift;
+    my $revcomp = shift;
+    my $seq_lens_ref = shift;
+
+    my %Mapping = %{$mapping_ref};
+    my @SeqLens = @{$seq_lens_ref};
+
+    my @NuclCoords;
+    if ($revcomp) { @NuclCoords = sort { $b <=> $a } keys %Mapping; }
+    else          { @NuclCoords = sort { $a <=> $b } keys %Mapping; }
     
-    
-    my @FinalMSA = ();
-    for ($i=0; $i<$chr_hits; $i++) { $FinalMSA[$i][0] = '*'; }
+    my @MSA;
+    for (my $i=0; $i<$num_seqs; $i++) {
+	$MSA[$i][0] = '*';
+    }
     my $msa_len  = 1;
 
     # In order to log ARF positions, we need to keep track of where we are in
     # a given sequence.
     my @ARFNameField;
     my @ContentPositions;
-    for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) { 
+    for (my $seq_id = 0; $seq_id < $num_seqs; $seq_id++) { 
 	$ARFNameField[$seq_id] = 0; 
 	$ContentPositions[$seq_id] = 0;
     }
@@ -359,11 +337,11 @@ if (0) {
     my $last_arf_seqs = 'X'; # Since 0 could be a valid last sequence to see an ARF in
 
     my $pos_index = 0;
-    while ($pos_index < scalar(@PositionIndex)) {
+    while ($pos_index < scalar(@NuclCoords)) {
 
-	# Figuring out the range of indices in our PositionIndex
+	# Figuring out the range of indices in our NuclCoords
 	# corresponding to the exon we're currently building.
-	my ($next_index,$segment_ref) = GetNextExonRange($pos_index,\@PositionIndex,\%MSA);
+	my ($next_index,$segment_ref) = GetNextExonRange($pos_index,\@NuclCoords,\%Mapping);
 	my @SegmentList = @{$segment_ref};
 
 	# We need to know where segments with multiple frames
@@ -378,7 +356,7 @@ if (0) {
 	# Because we may need to combine ARFs within some segments, we
 	# need a temporary place to record the positions of ARFs.
 	my @TempARFNameField;
-	for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) {
+	for (my $seq_id = 0; $seq_id < $num_seqs; $seq_id++) {
 	    for (my $seg_id = 0; $seg_id < scalar(@SegmentList); $seg_id++) {
 		$TempARFNameField[$seq_id][$seg_id] = 0;
 	    }
@@ -391,17 +369,19 @@ if (0) {
 	    my $end_index    = $SegmentParts[1];
 	    my $num_frames   = $SegmentParts[2];
 
-	    # If there are multiple frames, but none start/end the protein, we'll do a quick
-	    # check to see which frame is the most common and designate that the non-ARF.
+	    # If there are multiple frames, but none start/end the protein,
+	    # we'll do a quick check to see which frame is the most common
+	    # and designate that the non-ARF.
 	    #
-	    # NOTE: This is our ad-hoc selection -- later on, we'll do a check to see if there
-	    # are any sequences that begin or end in a DCE region, and if so we'll call them the
-	    # ARF (since we suspect they're providing signal for NMD).
+	    # NOTE: This is our ad-hoc selection -- later on, we'll do a
+	    # check to see if there are any sequences that begin or end in
+	    # a DCE region, and if so we'll call them the ARF (since we
+	    # suspect they're providing signal for NMD).
 	    #
 	    my $non_arf_frame = 0;
-	    my $non_arf_frame_size = scalar(split(/\,/,$MSA{$PositionIndex[$start_index]}));
+	    my $non_arf_frame_size = scalar(split(/\,/,$Mapping{$NuclCoords[$start_index]}));
 	    for (my $frame=1; $frame<$num_frames; $frame++) {
-		my $frame_size = scalar(split(/\,/,$MSA{$PositionIndex[$start_index+$frame]}));
+		my $frame_size = scalar(split(/\,/,$Mapping{$NuclCoords[$start_index+$frame]}));
 		if ($frame_size > $non_arf_frame_size) {
 		    $non_arf_frame = $frame;
 		    $non_arf_frame_size = $frame_size;
@@ -411,7 +391,7 @@ if (0) {
 	    # It's probably easiest to just do this here, rather than on a
 	    # conditional
 	    my @ContentStarts;
-	    for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) {
+	    for (my $seq_id = 0; $seq_id < $num_seqs; $seq_id++) {
 		# Note that we do a '+1' for non-CS enumeration
 		$ContentStarts[$seq_id] = $ContentPositions[$seq_id]+1;
 	    }
@@ -431,25 +411,25 @@ if (0) {
 
 		# We benefit from knowing which sequences we've seen in this frame
 		my @SeqsInFrame;
-		for (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) { $SeqsInFrame[$seq_id] = 0; }
+		for (my $seq_id=0; $seq_id<$num_seqs; $seq_id++) { $SeqsInFrame[$seq_id] = 0; }
 
 		for (my $index=$start_index+$frame; $index<$end_index; $index+=$num_frames) {
 
-		    my $genome_pos   = $PositionIndex[$index];
-		    my @SeqsAndChars = split(/\,/,$MSA{$genome_pos});
+		    my $genome_pos   = $NuclCoords[$index];
+		    my @SeqsAndChars = split(/\,/,$Mapping{$genome_pos});
 		    my @Seqs;
 		    my @Chars;
 		    
 		    # If we have a longest entry >1 then we use our quick N-W like
 		    # thing to generate an alignment for the whole column.
 		    my @Column;
-		    for ($i=0; $i<$chr_hits; $i++) { $Column[$i] = '-'; }
+		    for (my $i=0; $i<$num_seqs; $i++) { $Column[$i] = '-'; }
 
 		    # We'll need to check the lengths of the characters at
 		    # this entry to see if we're in the land of indels
 		    my $longest_entry_len = 0;
 		    my $longest_entry_seq = -1;
-		    for ($i=0; $i<scalar(@SeqsAndChars); $i++) {
+		    for (my $i=0; $i<scalar(@SeqsAndChars); $i++) {
 
 			$SeqsAndChars[$i] =~ /(\d+)\:(\S+)/;
 			my $seq_id = $1;
@@ -471,8 +451,8 @@ if (0) {
 			    # If the second character is what more than half of the
 			    # entries at the upcoming position have, then we'll move
 			    # our indel content that-a-way
-			    my $check_pos    = $PositionIndex[$index+$num_frames];
-			    my $check_entry  = uc($MSA{$check_pos});
+			    my $check_pos    = $NuclCoords[$index+$num_frames];
+			    my $check_entry  = uc($Mapping{$check_pos});
 			    my $num_elements = scalar(split(/\,/,$check_entry));
 			    my $num_matches  = scalar(split(/\:$second_char/,$check_entry));
 			    if ($num_matches > $num_elements/2) {
@@ -482,12 +462,12 @@ if (0) {
 
 				# We'll need to be careful, in case this sequence
 				# already has an entry at that position.
-				if ($MSA{$check_pos} =~ /^$seq_id\:/) {
-				    $MSA{$check_pos} =~ s/^$seq_id\:/$seq_id\:$next_entry/;
-				} elsif ($MSA{$check_pos} =~ /\,$seq_id\:/) {
-				    $MSA{$check_pos} =~ s/\,$seq_id\:/\,$seq_id\:$next_entry/;
+				if ($Mapping{$check_pos} =~ /^$seq_id\:/) {
+				    $Mapping{$check_pos} =~ s/^$seq_id\:/$seq_id\:$next_entry/;
+				} elsif ($Mapping{$check_pos} =~ /\,$seq_id\:/) {
+				    $Mapping{$check_pos} =~ s/\,$seq_id\:/\,$seq_id\:$next_entry/;
 				} else {
-				    $MSA{$check_pos} = $MSA{$check_pos}.','.$seq_id.':'.$next_entry;
+				    $Mapping{$check_pos} = $Mapping{$check_pos}.','.$seq_id.':'.$next_entry;
 				}
 
 				$chars = $first_char;
@@ -512,15 +492,15 @@ if (0) {
 		    # If we had a column with more than one character in it, then
 		    # we'll need to do a quick little bit of alignment work.
 		    if ($longest_entry_len > 1) {
-			my $column_ref = QuickAlign(\@Column,$longest_entry_seq,$longest_entry_len,$chr_hits);
+			my $column_ref = QuickAlign(\@Column,$longest_entry_seq,$longest_entry_len,$num_seqs);
 			@Column = @{$column_ref};
 		    }
 
 		    # And, finally, load up the MSA!
-		    for ($i=0; $i<$chr_hits; $i++) {
+		    for (my $i=0; $i<$num_seqs; $i++) {
 			my @RowItems = split(//,$Column[$i]);
-			for ($j=0; $j<$longest_entry_len; $j++) {
-			    $FinalMSA[$i][$msa_len+$j] = $RowItems[$j];
+			for (my $j=0; $j<$longest_entry_len; $j++) {
+			    $MSA[$i][$msa_len+$j] = $RowItems[$j];
 			}
 		    }
 
@@ -586,13 +566,13 @@ if (0) {
 			# Recall that these are from '1..seq_len'
 			my $start_pos = $ContentStarts[$seq_id];
 			my $end_pos   = $ContentPositions[$seq_id];
-			if ($start_pos > 1 && $end_pos < $ProteinLens[$seq_id]) {
+			if ($start_pos > 1 && $end_pos < $SeqLens[$seq_id]) {
 			    push(@TrueInteriors,$seq_id);
 			} else {
 			    # We'll allow sequences to be both starting and ending, since
 			    # that's conceivable.
 			    if ($start_pos == 1) { push(@CoversStartExon,$seq_id); }
-			    if ($end_pos == $ProteinLens[$seq_id]) { push(@CoversEndExon,$seq_id); }
+			    if ($end_pos == $SeqLens[$seq_id]) { push(@CoversEndExon,$seq_id); }
 			}
 		    }
 		    
@@ -683,8 +663,8 @@ if (0) {
 	    if ($seg_run_start) {
 		$line_up = 1;
 		my $last_seg_end = $MultiFrameStarts[$seg_run_start]-1;
-		for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) {
-		    if ($FinalMSA[$seq_id][$last_seg_end] =~ /[A-Za-z]/) {
+		for (my $seq_id = 0; $seq_id < $num_seqs; $seq_id++) {
+		    if ($MSA[$seq_id][$last_seg_end] =~ /[A-Za-z]/) {
 			$LineUpWithSeqs[$seq_id] = 1;
 		    } else {
 			$LineUpWithSeqs[$seq_id] = 0;
@@ -693,8 +673,8 @@ if (0) {
 	    } elsif ($MultiFrameSegs[$seg_run_end]+1 < $num_segs) {
 		$line_up = 2;
 		my $next_seg_start = $MultiFrameEnds[$seg_run_end]+1;
-		for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) {
-		    if ($FinalMSA[$seq_id][$next_seg_start] =~ /[A-Za-z]/) {
+		for (my $seq_id = 0; $seq_id < $num_seqs; $seq_id++) {
+		    if ($MSA[$seq_id][$next_seg_start] =~ /[A-Za-z]/) {
 			$LineUpWithSeqs[$seq_id] = 1;
 		    } else {
 			$LineUpWithSeqs[$seq_id] = 0;
@@ -703,11 +683,11 @@ if (0) {
 	    }
 
 	    # Correct the MSA
-	    my $final_msa_ref = UniteARFSegments(\@FinalMSA,$chr_hits,$MultiFrameStarts[$seg_run_start],$MultiFrameEnds[$seg_run_end],\@LineUpWithSeqs,$line_up);
-	    @FinalMSA         = @{$final_msa_ref};
+	    my $msa_ref = UniteARFSegments(\@MSA,$num_seqs,$MultiFrameStarts[$seg_run_start],$MultiFrameEnds[$seg_run_end],\@LineUpWithSeqs,$line_up);
+	    @MSA = @{$msa_ref};
 	    
 	    # Correct our ARF annotation
-	    for (my $seq_id = 0; $seq_id < $chr_hits; $seq_id++) {
+	    for (my $seq_id = 0; $seq_id < $num_seqs; $seq_id++) {
 		my $new_annotation;
 		for (my $scan1 = $seg_run_start; $scan1 <= $seg_run_end; $scan1++) {
 		    if ($TempARFNameField[$seq_id][$scan1] =~ /^(\d+)\.\./) {
@@ -731,7 +711,7 @@ if (0) {
 
 	}
 	
-	for (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) {
+	for (my $seq_id=0; $seq_id<$num_seqs; $seq_id++) {
 	    for (my $seg_id=0; $seg_id<$num_segs; $seg_id++) {
 		if ($TempARFNameField[$seq_id][$seg_id]) {
 		    if ($ARFNameField[$seq_id]) {
@@ -745,7 +725,7 @@ if (0) {
 	}
 
 	# EXON DONE BABY!!!!
-	for($i=0; $i<$chr_hits; $i++) { $FinalMSA[$i][$msa_len] = '*'; }
+	for(my $i=0; $i<$num_seqs; $i++) { $MSA[$i][$msa_len] = '*'; }
 	$msa_len++;
 
 	$pos_index = $next_index;
@@ -764,9 +744,9 @@ if (0) {
     #
     my @Disagreements = ();
     my $final_len = $msa_len;
-    if ($chr_hits > 1) {
-	my ($FinalMSARef,$DisagreementsRef,$tmp_len) = MinorClean(\@FinalMSA,$chr_hits,$msa_len);
-	@FinalMSA = @{$FinalMSARef};
+    if ($num_seqs > 1) {
+	my ($msa_ref,$DisagreementsRef,$tmp_len) = MinorClean(\@MSA,$num_seqs,$msa_len);
+	@MSA = @{$msa_ref};
 	@Disagreements = @{$DisagreementsRef};
 	$final_len = $tmp_len;
     }
@@ -778,7 +758,7 @@ if (0) {
     # of exon boundaries... Probably still better in the long-run to concatenate these
     # multi-exon ARFs, but just a thought.
     #
-    for (my $seq_id=0; $seq_id<$chr_hits; $seq_id++) {
+    for (my $seq_id=0; $seq_id<$num_seqs; $seq_id++) {
 	if ($ARFNameField[$seq_id] =~ /\:(.*)$/) {
 
 	    my $arf_range_str = $1;
@@ -805,34 +785,16 @@ if (0) {
 	    # We now have the full comma-separated coordinate list, now
 	    # we just need the 'ARF(s)' bit...
 	    @ARFRangeList = split(/\,/,$final_arf_str);
-	    if (scalar(@ARFRangeList) > 1) { $final_arf_str = 'ARFs:'.$final_arf_str; }
-	    else                           { $final_arf_str = 'ARF:'.$final_arf_str;  }
+	    if (scalar(@ARFRangeList) > 1) { $final_arf_str = '#ARFs:'.$final_arf_str; }
+	    else                           { $final_arf_str = '#ARF:'.$final_arf_str;  }
 	    $ARFNameField[$seq_id] = $final_arf_str;
 
 	}
     }
+
+    return (\@MSA,$msa_len,\@ARFNameField);
     
 }
-
-
-# Mad phresh stylez 4 lyfe
-1;
-
-
-
-
-
-
-#########################
-#########################
-###                   ###
-###    SUBROUTINES    ###
-###                   ###
-#########################
-#########################
-
-
-
 
 
 
@@ -885,22 +847,24 @@ sub ConvertToOrigSeqs
 sub WriteMSAToFile
 {
     my $msa_ref = shift;
+    my $arfs_ref = shift;
     my $seqnames_ref = shift;
     my $orig_seqs_ref = shift;
     my $num_seqs = shift;
     my $msa_len = shift;
     my $fname = shift;
 
+    my @ARFs = @{$arfs_ref};
+    $msa_ref = ConvertToOrigSeqs($msa_ref,$orig_seqs_ref,$num_seqs);
     my @MSA = @{$msa_ref};
-    my @OrigSeqs = @{$orig_seqs_ref};
-    $msa_ref = ConvertToOrigSeqs(\@MSA,\@OrigSeqs,$num_seqs);
-    @MSA = @{$msa_ref};
 
     my @SeqNames = @{$seqnames_ref};
 
     my $outf = OpenOutputFile($fname);
     for (my $i=0; $i<$num_seqs; $i++) {
-	print $outf ">$SeqNames[$i]\n";
+	print $outf ">$SeqNames[$i]";
+	print $outf " $ARFs[$i]" if ($ARFs[$i]);
+	print $outf "\n";
 	for (my $j=0; $j<$msa_len; $j++) {
 	    if ($MSA[$i][$j]) { print $outf "$MSA[$i][$j]"; }
 	    else              { print $outf '-';            }
@@ -910,7 +874,7 @@ sub WriteMSAToFile
 	print $outf "\n";
     }
     close($outf);
-    
+
 }
 
 
@@ -925,11 +889,11 @@ sub WriteMSAToFile
 #
 sub GetNextExonRange
 {
-    my $start_index   = shift;
-    my $position_ref  = shift;
-    my $msa_hash_ref  = shift;
-    my @PositionIndex = @{$position_ref};
-    my %MSA           = %{$msa_hash_ref};
+    my $start_index  = shift;
+    my $position_ref = shift;
+    my $mapping_ref  = shift;
+    my @NuclCoords   = @{$position_ref};
+    my %Mapping      = %{$mapping_ref};
 
     #  NOTE:  We need access to the MSA hash because we need to track
     #         which sequences are involved in which reading frames of
@@ -940,10 +904,10 @@ sub GetNextExonRange
     # First, we just want to know how far we go from the start of this
     # exon before we hit an intron
     my $next_index = $start_index;
-    my $last_nucl  = $PositionIndex[$start_index];
+    my $last_nucl  = $NuclCoords[$start_index];
     $next_index++;
-    while ($next_index < scalar(@PositionIndex) && abs($PositionIndex[$next_index]-$last_nucl)<4) {
-	$last_nucl = $PositionIndex[$next_index];
+    while ($next_index < scalar(@NuclCoords) && abs($NuclCoords[$next_index]-$last_nucl)<4) {
+	$last_nucl = $NuclCoords[$next_index];
 	$next_index++;
     }
 
@@ -963,8 +927,8 @@ sub GetNextExonRange
 	    last;
 	}
 
-	my $last_nucl    = $PositionIndex[$index-1];
-	my $current_nucl = $PositionIndex[$index];
+	my $last_nucl    = $NuclCoords[$index-1];
+	my $current_nucl = $NuclCoords[$index];
 
 	# Peeking around super carefully for arfs
 	if (abs($last_nucl-$current_nucl)==3) {
@@ -973,7 +937,7 @@ sub GetNextExonRange
 	    $index++;
 	    while ($index < $next_index && abs($last_nucl-$current_nucl)==3) {
 		$last_nucl = $current_nucl;
-		$current_nucl = $PositionIndex[$index];
+		$current_nucl = $NuclCoords[$index];
 		$index++;
 	    }
 
@@ -988,7 +952,7 @@ sub GetNextExonRange
 	    # Uh-oh!  Better start keeping track of which reading frame each sequence
 	    # belongs to...
 	    my %SeqToFrame;
-	    foreach my $seq_char_pair (split(/\,/,$MSA{$PositionIndex[$index]})) {
+	    foreach my $seq_char_pair (split(/\,/,$Mapping{$NuclCoords[$index]})) {
 		$seq_char_pair =~ /^(\d+)\:/;
 		my $seq_id = $1;
 		$SeqToFrame{$seq_id} = 1;		
@@ -1002,13 +966,13 @@ sub GetNextExonRange
 	    $index++;
 
 	    # Could this be... a... TRIPLE ARF?!
-	    if ($index+1 < $next_index && abs($PositionIndex[$index+1]-$last_nucl)==3) {
+	    if ($index+1 < $next_index && abs($NuclCoords[$index+1]-$last_nucl)==3) {
 
 		# IMPOSSIBLE!!!
 		while ($index < $next_index && abs($last_nucl-$current_nucl)==1) {
 
 		    # Looking out for trouble
-		    foreach my $seq_char_pair (split(/\,/,$MSA{$PositionIndex[$index]})) {
+		    foreach my $seq_char_pair (split(/\,/,$Mapping{$NuclCoords[$index]})) {
 			$seq_char_pair =~ /^(\d+)\:/;
 			my $seq_id = $1;
 			if (!$SeqToFrame{$seq_id}) {
@@ -1023,7 +987,7 @@ sub GetNextExonRange
 		    else                { $frame_num=1; }
 
 		    $last_nucl = $current_nucl;
-		    $current_nucl = $PositionIndex[$index];
+		    $current_nucl = $NuclCoords[$index];
 		    $index++;
 
 		}
@@ -1049,7 +1013,7 @@ sub GetNextExonRange
 		while ($index < $next_index && abs($last_nucl-$current_nucl) == $expected_jump) {
 
 		    # Looking out for trouble
-		    foreach my $seq_char_pair (split(/\,/,$MSA{$PositionIndex[$index]})) {
+		    foreach my $seq_char_pair (split(/\,/,$Mapping{$NuclCoords[$index]})) {
 			$seq_char_pair =~ /^(\d+)\:/;
 			my $seq_id = $1;
 			if (!$SeqToFrame{$seq_id}) {
@@ -1064,7 +1028,7 @@ sub GetNextExonRange
 		    else                 { $frame_num=1; }
 
 		    $last_nucl = $current_nucl;
-		    $current_nucl = $PositionIndex[$index];
+		    $current_nucl = $NuclCoords[$index];
 		    if ($expected_jump == 2) { $expected_jump = 1; }
 		    else                     { $expected_jump = 2; }
 		    $index++;
