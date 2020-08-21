@@ -154,7 +154,7 @@ if (scalar(@BlatFileNames)) {
     # telling us!
     GenBlatMaps($blat_outfname,\%BlatNameGuide,\%BlatGenes,$num_cpus);
 
-    # Cleanup on line 158! << CRITICAL: KEEP THIS LINE NUMBER CORRECT, FOR JOKE
+    # Cleanup on line 156! << CRITICAL: KEEP THIS LINE NUMBER CORRECT, FOR JOKE
     RunSystemCommand("rm \"$blat_outfname\"");
 
 }
@@ -4203,6 +4203,9 @@ sub ParseSpalnOutput
 
     # If we don't have *any* matches, something's gone very wrong
     return(0,0,0,0) if ($num_matches == 0);
+
+    # Something's also gone wrong if we don't have full coverage
+    return(0,0,0,0) if ($num_matches+$num_mismatches != scalar(@Seq));
 
     # For curious minds, what was our percent identity?
     my $pct_id = int(1000.0 * $num_matches / ($num_matches + $num_mismatches)) / 10.0;

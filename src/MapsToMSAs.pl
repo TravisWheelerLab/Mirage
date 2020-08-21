@@ -66,6 +66,8 @@ while ($tg_line = <$ThreadGuide>) {
     my $req_thread = $1;
     my $gene = $2;
 
+    print "  + $gene\n"; # DEBUGGING
+
     next if ($req_thread != $threadID);
 
     my $mapfname = $dirname.$gene.'.quilter.out';
@@ -226,7 +228,7 @@ while ($tg_line = <$ThreadGuide>) {
 	= ComposeMSA(\%Mapping,$num_seqs,$revcomp,\@SeqLengths);
     my @MSA  = @{$msa_ref};
     my @ARFs = @{$arfs_ref};
-    
+
     # AND FINALLY
     #
     # NOTE: Currently, we have indels stacked as multiple characters in the
