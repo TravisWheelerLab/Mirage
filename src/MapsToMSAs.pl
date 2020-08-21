@@ -66,8 +66,6 @@ while ($tg_line = <$ThreadGuide>) {
     my $req_thread = $1;
     my $gene = $2;
 
-    print "  + $gene\n"; # DEBUGGING
-
     next if ($req_thread != $threadID);
 
     my $mapfname = $dirname.$gene.'.quilter.out';
@@ -1751,7 +1749,7 @@ sub QuickAlign
 		    if (lc($BigSeq[$x]) eq lc($CompSeq[$y])) { $score = $match_score;    }
 		    else                                     { $score = $mismatch_score; }
 
-		    $NWMatrix[$x+1][$y+1] = MAX($NWMatrix[$x][$y]+$score,
+		    $NWMatrix[$x+1][$y+1] = Max($NWMatrix[$x][$y]+$score,
 						$NWMatrix[$x+1][$y]+$score+$gap_cost);
 		    
 		}
