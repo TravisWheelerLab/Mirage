@@ -140,8 +140,10 @@ my %SpeciesSeqDir;
 my %SpeciesMapDir;
 my $AllSpeciesDir = CreateDirectory($ResultsDir.'SpeciesMSAs');
 foreach my $species (@Species) {
-    $SpeciesDir{$species}    = CreateDirectory($AllSpeciesDir.$species);
-    $SpeciesSeqDir{$species} = CreateDirectory($SpeciesDir{$species}.'seqs');
+    $SpeciesDir{$species} = CreateDirectory($AllSpeciesDir.$species);
+    CreateDirectory($SpeciesDir{$species}.'seqs');
+    CreateDirectory($SpeciesDir{$species}.'alignments');
+    CreateDirectory($SpeciesDir{$species}.'mappings');
 }
 
 # Create a temp directory in the results directory where we'll hide all of our secrets.
@@ -180,7 +182,7 @@ close($seqnamef);
 for (my $i=0; $i<$num_species; $i++) {
 
     my $species_dirname = $SpeciesDir{$Species[$i]};
-    my $species_seqdir  = $SpeciesSeqDir{$Species[$i]};
+    my $species_seqdir  = $species_dirname.'seqs/';
 
     #
     #  Q U I L T E R
@@ -211,7 +213,7 @@ for (my $i=0; $i<$num_species; $i++) {
     $QuilterTimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
 
     #
-    #  M A P s   T O   M S A s
+    #  M A P s   t o   M S A s
     #
 
     # Now we want to check how long it takes to run MapsToMSAs
@@ -219,17 +221,22 @@ for (my $i=0; $i<$num_species; $i++) {
 
     # As easy as it gets!
     my $MapsToMSAsCmd = 'perl '.$location.'MapsToMSAs.pl '.$species_seqdir;
-    if (system($MapsToMSAsCmd)) {
-	# HAMSTERS!
-	die "\n  *  ERROR:  MapsToMSAs.pl failed during execution  *\n\n";
-    }
 
+    # Rock 'n' roll 'n' align!
+    RunSystemCommand($MapsToMSAsCmd);
+
+    # Knock it off with that darn timing!
+    $MapsToMSAsTimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
+
+    
+    #  M u l t i S e q N W  (less exciting, so less fanfare)
+    
     # Align any sequences that didn't fully map by getting all Needleman-Wunsch-y
     my $missesbygene_ref = AggregateMappingMisses($species_dirname);
     AlignUnmappedSeqs($missesbygene_ref,$species_seqdir);
-    
-    # Knock it off with that darn timing!
-    $MapsToMSAsTimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
+
+    # #SaveTheMappings #MappingsArePeopleToo!
+    SaveSpeciesMappings($species_dirname,\@OriginalSeqNames);
 
     # Species[i] over and out!
     ClearProgress();
@@ -240,7 +247,7 @@ for (my $i=0; $i<$num_species; $i++) {
 
 # HOLY COW! You just made a heckin' ton of MSAs!
 # But don't forget about the 'Misc' sequences...
-AlignMiscSeqs($SpeciesSeqDir{'Misc'});
+AlignMiscSeqs($SpeciesDir{'Misc'});
 
 
 # We're now going to track how long the whole final-MSA-generating
@@ -1158,6 +1165,99 @@ sub ParseSeqNameAsUniProt
 
 ########################################################################
 #
+#  Function: SaveSpeciesMappings
+#
+sub SaveSpeciesMappings
+{
+    my $species_dirname = shift;
+    my $orig_seqnames_ref = shift;
+
+    my @OrigSeqNames = @{$orig_seqnames_ref};
+    
+    my $seqdirname = $species_dirname.'seqs/';
+    my $mapdirname = $species_dirname.'mappings/';
+
+    # First off, we'll make a list of files to check out, so we can get all
+    # thready with it
+    my $SeqDir = OpenDirectory($seqdirname);
+    my @MappedGenes;
+    while (my $fname = readdir($SeqDir)) {
+	if ($fname =~ /^(\S+)\.quilter\.out/) {
+	    push(@MappedGenes,$1);
+	}
+    }
+    closedir($SeqDir);
+
+    # Gettin' thready with it!
+    my $num_threads = Min($num_cpus,scalar(@MappedGenes));
+    return if ($num_threads == 0);
+
+    my $threadID = SpawnProcesses($num_threads);
+    my $start =  $threadID    * int(scalar(@MappedGenes)/$num_threads);
+    my $end   = ($threadID+1) * int(scalar(@MappedGenes)/$num_threads);
+    $end = scalar(@MappedGenes) if ($threadID == $num_threads-1);
+
+    # Go through your assigned families and move them into their permanent residences
+    for (my $i=$start; $i<$end; $i++) {
+    
+	my $gene = $MappedGenes[$i];
+	my $infname = $seqdirname.$gene.'.quilter.out';
+	my $inf = OpenInputFile($infname);
+	my $outf = OpenOutputFile($mapdirname.$gene.'.out');
+	
+	while (my $line = <$inf>) {
+	    $line =~ s/\n|\r//g;
+	    if ($line =~ /Sequence ID\: (\d+)/) {
+		my $seq_id = $1;
+		my $seqname = $OrigSeqNames[$seq_id];
+		print $outf "Sequence ID: $seqname\n";
+	    } else {
+		print $outf "$line\n";
+	    }
+	}
+	
+	close($inf);
+	close($outf);
+	
+	RunSystemCommand("rm \"$infname\"");
+
+	# If this family had any misses, move those over too
+	my $missfname = $seqdirname.$gene.'.misses.out';
+	if (-e $missfname) {
+
+	    $inf = OpenInputFile($missfname);
+	    $outf = OpenOutputFile($mapdirname.$gene.'.misses');
+
+	    while (my $line = <$inf>) {
+		$line =~ s/\n|\r//g;
+		if ($line =~ /^(.*)\: (\d+)$/) {
+		    my $details = $1;
+		    my $seq_id = $2;
+		    my $seqname = $OrigSeqNames[$seq_id];
+		    print $outf "$details\: $seqname\n";
+		}
+	    }
+
+	    close($inf);
+	    close($outf);
+
+	    RunSystemCommand("rm \"$missfname\"");
+	    
+	}
+	
+    }
+
+    if ($threadID) { exit(0); }
+    while (wait() != -1) {}
+    
+}
+
+
+
+
+
+########################################################################
+#
 #  Function: AggregateMappingMisses
 #
 sub AggregateMappingMisses
@@ -1289,6 +1389,7 @@ sub AlignUnmappedSeqs
 	while ($i<$num_unaligned) {
 	    RunSystemCommand($location."MultiSeqNW \"$UnalignedSeqFiles[$i]\" 1 \"$msa_fname\" $num_aligned -igBase 0 > \"$tmp_outfname\"");
 	    RunSystemCommand("mv \"$tmp_outfname\" \"$msa_fname\"");
+	    RunSystemCommand("rm \"$UnalignedSeqFiles[$i]\"");
 	    $num_aligned++;
 	    $i++;
 	}
@@ -1307,6 +1408,7 @@ sub AlignUnmappedSeqs
 
 
 
+
 ########################################################################
 #
 #  Function:  AlignMiscSeqs
@@ -1314,6 +1416,7 @@ sub AlignUnmappedSeqs
 sub AlignMiscSeqs
 {
     my $dirname = shift;
+    $dirname = $dirname.'seqs/';
 
     # We'll make a hash of all sequence names by gene, so we can take advantage
     # of the infrastructure of 'AlignUnmappedSeqs'
