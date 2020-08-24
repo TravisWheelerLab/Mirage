@@ -56,6 +56,9 @@ $num_cpus = $1;
 # Spawn your friends and get to work!
 my $threadID = SpawnProcesses($num_cpus);
 
+# We'll write out which sequences had ARFs to a file
+my $ARFfile = OpenOutputFile($dirname.$threadID.'-ARFs');
+
 # Ugh, do we *really* have to reopen that stinky old Thread-Guide?
 $ThreadGuide = OpenInputFile($dirname.'Thread-Guide');
 my $tg_line = <$ThreadGuide>; # Num CPUs line
@@ -150,7 +153,7 @@ while ($tg_line = <$ThreadGuide>) {
 	my $map_method = $1;
 
 	if ($map_method eq 'Unmapped') {
-	    push(@Unmapped,$seqname.': Unmapped');
+	    push(@Unmapped,$gene.' '.$seqname.': Unmapped');
 	    next;
 	}
 
@@ -170,7 +173,7 @@ while ($tg_line = <$ThreadGuide>) {
 	    $seq_id = $num_mapped;
 	    $num_mapped++;
 	} else {
-	    push(@Unmapped,$seqname,': Noncanonical Chromosome');
+	    push(@Unmapped,$gene.' '.$seqname.': Noncanonical Chromosome');
 	}
 
 	$line = <$MapFile>;
@@ -227,6 +230,13 @@ while ($tg_line = <$ThreadGuide>) {
     my @MSA  = @{$msa_ref};
     my @ARFs = @{$arfs_ref};
 
+    # If we had any ARFs, record them to our ARF file
+    for (my $i=0; $i<$num_seqs; $i++) {
+	if ($ARFs[$i]) {
+	    print $ARFfile "$SeqNames[$i] $ARFs[$i]\n";
+	}
+    }
+
     # AND FINALLY
     #
     # NOTE: Currently, we have indels stacked as multiple characters in the
@@ -234,11 +244,12 @@ while ($tg_line = <$ThreadGuide>) {
     #       functional construction!
     #
     my $outfname = $dirname.$gene.'.afa';
-    WriteMSAToFile(\@MSA,\@ARFs,\@SeqNames,\@OrigSeqs,$num_seqs,$msa_len,$outfname);
+    WriteMSAToFile(\@MSA,\@SeqNames,\@OrigSeqs,$num_seqs,$msa_len,$outfname);
     
 }
 
 close($ThreadGuide);
+close($ARFfile);
 
 if ($threadID) { exit(0); }
 while (wait() != -1) {}
@@ -257,7 +268,7 @@ closedir($Dir);
 
 # Oh, how nice it would be not to enter this conditional...
 if (scalar(@MissFiles)) {
-    my $BigMissFile = OpenOutputFile($dirname.'../'.$species.'.misses');
+    my $BigMissFile = OpenOutputFile($dirname.'../mapping-misses');
     foreach my $missfname (sort @MissFiles) {
 	my $missf =  OpenInputFile($missfname);
 	while (my $line = <$missf>) {
@@ -270,6 +281,14 @@ if (scalar(@MissFiles)) {
     close($BigMissFile);
 }
 
+# We'll also concatenate all of our ARFs into a single file
+my $all_arfs_fname = $dirname.'../arfs';
+for (my $i=0; $i<$num_cpus; $i++) {
+    my $thread_arfs = $dirname.$i.'-ARFs';
+    if (-e $thread_arfs) {
+	RunSystemCommand("cat \"$thread_arfs\" >> \"$all_arfs_fname\"");
+    }
+}
 
 
 # CALLIN' IT
@@ -847,14 +866,12 @@ sub ConvertToOrigSeqs
 sub WriteMSAToFile
 {
     my $msa_ref = shift;
-    my $arfs_ref = shift;
     my $seqnames_ref = shift;
     my $orig_seqs_ref = shift;
     my $num_seqs = shift;
     my $msa_len = shift;
     my $fname = shift;
 
-    my @ARFs = @{$arfs_ref};
     $msa_ref = ConvertToOrigSeqs($msa_ref,$orig_seqs_ref,$num_seqs);
     my @MSA = @{$msa_ref};
 
@@ -862,9 +879,7 @@ sub WriteMSAToFile
 
     my $outf = OpenOutputFile($fname);
     for (my $i=0; $i<$num_seqs; $i++) {
-	print $outf ">$SeqNames[$i]";
-	print $outf " $ARFs[$i]" if ($ARFs[$i]);
-	print $outf "\n";
+	print $outf ">$SeqNames[$i]\n";
 	for (my $j=0; $j<$msa_len; $j++) {
 	    if ($MSA[$i][$j]) { print $outf "$MSA[$i][$j]"; }
 	    else              { print $outf '-';            }

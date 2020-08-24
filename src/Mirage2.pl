@@ -36,10 +36,11 @@ sub VerifiedClean;
 sub ParseSpeciesGuide;
 sub ConfirmSSI;
 sub GenerateSpeciesDBs;
-sub CoverMinorSpecies;
 sub ParseSeqNameAsMirage;
 sub ParseSeqNameAsUniProt;
-sub AttachSeqToMSA;
+sub AggregateMappingMisses;
+sub AlignUnmappedSeqs;
+sub AlignMiscSeqs;
 
 
 # VERSION INFO
@@ -59,9 +60,6 @@ my $mirage_version = 'Version 2.0.0a';
 # In case the minimum number of arguments hasn't been provided,
 # assist the user
 if (@ARGV == 0) { PrintUsage(); }
-
-# Generics
-my ($i,$j,$k);
 
 
 # Figure out what the location of the Mirage src directory is
@@ -117,11 +115,10 @@ DispProgMirage('init');
 # We'll ignore any species that don't show up
 # in our protein database.
 my ($speciesref,$gtfsref,$genomesref) = ParseSpeciesGuide($SpeciesGuide,$ProteinDB);
-my @Species    = @{$speciesref};
-my $numSpecies = scalar(@Species);
-my @GTFs       = @{$gtfsref};
-my @Genomes    = @{$genomesref};
-
+my @Species = @{$speciesref};
+my @GTFs    = @{$gtfsref};
+my @Genomes = @{$genomesref};
+my $num_species = scalar(@Species);
 
 # Make a directory to store results
 $ResultsDir = CreateDirectory($ResultsDir);
@@ -145,7 +142,6 @@ my $AllSpeciesDir = CreateDirectory($ResultsDir.'SpeciesMSAs');
 foreach my $species (@Species) {
     $SpeciesDir{$species}    = CreateDirectory($AllSpeciesDir.$species);
     $SpeciesSeqDir{$species} = CreateDirectory($SpeciesDir{$species}.'seqs');
-    $SpeciesMapDir{$species} = CreateDirectory($SpeciesDir{$species}.'mappings');
 }
 
 # Create a temp directory in the results directory where we'll hide all of our secrets.
@@ -166,8 +162,10 @@ foreach my $species (@Species) {
 #              against (e.g., "nord_pseudo_fam1: obscn titin fgfr2") -- synonyms
 
 DispProgMirage('db-speciation');
-my ($originalseqnames_ref) = GenerateSpeciesDBs($ProteinDB,$num_cpus,\%SpeciesSeqDir);
+my ($originalseqnames_ref,$genestospecies_ref)
+    = GenerateSpeciesDBs($ProteinDB,$num_cpus,\%SpeciesSeqDir);
 my @OriginalSeqNames = @{$originalseqnames_ref};
+my %GenesToSpecies = %{$genestospecies_ref};
 
 # I'm going to print off all the original sequence names to a file so
 # if things go wrong during a run we can actually figure out who's who
@@ -177,17 +175,16 @@ for (my $i=0; $i<scalar(@OriginalSeqNames); $i++) {
 }
 close($seqnamef);
 
-my $MinorSpeciesDBName;
-my @SpeciesDBNames;
 
-# Run Quilter
-my %MapsToMSAsDir;
-my %GroupsBySpecies;
-for ($i=0; $i<$numSpecies; $i++) {
+# Do our intra-species magic!
+for (my $i=0; $i<$num_species; $i++) {
 
-    # DEBUGGING
-    next if ($Species[$i] ne 'human');
-    # DEBUGGING
+    my $species_dirname = $SpeciesDir{$Species[$i]};
+    my $species_seqdir  = $SpeciesSeqDir{$Species[$i]};
+
+    #
+    #  Q U I L T E R
+    #
 
     # Start a timer for Quilter
     $IntervalStart = [Time::HiRes::gettimeofday()];
@@ -196,7 +193,7 @@ for ($i=0; $i<$numSpecies; $i++) {
     my $QuilterCmd = 'perl '.$location.'Quilter2.pl';
 
     # KEY 1: Protein database (implicit in species directory, under 'seqs/')
-    $QuilterCmd = $QuilterCmd.' '.$SpeciesDir{$Species[$i]};
+    $QuilterCmd = $QuilterCmd.' '.$species_dirname;
 
     # KEY 2: Genome
     $QuilterCmd = $QuilterCmd.' '.$Genomes[$i];
@@ -204,244 +201,33 @@ for ($i=0; $i<$numSpecies; $i++) {
     # KEY 3: GTF index (special case: - for "Just use BLAT")
     $QuilterCmd = $QuilterCmd.' '.$GTFs[$i];
 	
-    # Do we want a whole bunch of stuff spat at us?
-    $QuilterCmd = $QuilterCmd.' --v' if ($verbose);
-
     # Are we timing?
     $QuilterCmd = $QuilterCmd.' --time' if ($timed);
     
-    # Display the call if we're being loud
-    if ($verbose) {
-	print "\n  Aligning to the $Species[$i] genome using Quilter.pl\n";
-	print "  $QuilterCmd\n";
-    }
-
     # Make that daaaaaang call.
     RunSystemCommand($QuilterCmd);
-
-    # DEBUGGING
-    die;
-    # DEBUGGING
 
     # Figure out how much time that took and record it
     $QuilterTimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
 
-        
+    #
+    #  M A P s   T O   M S A s
+    #
+
     # Now we want to check how long it takes to run MapsToMSAs
     $IntervalStart = [Time::HiRes::gettimeofday()];
 
-    # Grab a hold of your toys (confirming that they're where they should be)
-    my $HitFileName  = $SpeciesDir{$Species[$i]}.'/Hits.Quilter.out';
-    my $MissFileName = $SpeciesDir{$Species[$i]}.'/Misses.Quilter.out';
-    my $NearFileName = $SpeciesDir{$Species[$i]}.'/NearHits.Quilter.out';
-    #if (!(-e $HitFile)) { die "\n  Failed to locate Quilter output '$HitFile'\n\n"; }
-
-    # Name the directory where we'll be putting the output from MapsToMSAs.pl
-    $MapsToMSAsDir{$Species[$i]} = $SpeciesDir{$Species[$i]}.'/alignments';
-
-    # Prepare to generate a file containing tallies for each gene with
-    # disagreeing positions.
-    my $DisFilename = $SpeciesDir{$Species[$i]}.'/CandidateARFs.txt';
-    
-    # Assembling the MapsToMSAs command.
-    my $MapsToMSAsCmd;
-    $MapsToMSAsCmd = 'perl '.$location.'MapsToMSAs.pl '; # base call
-    $MapsToMSAsCmd = $MapsToMSAsCmd.$HitFileName.' ';    # Quilter output
-    $MapsToMSAsCmd = $MapsToMSAsCmd.$SpeciesDBNames[$i]; # isoform file
-    
-    # Guiding output towards our desired directory
-    $MapsToMSAsCmd = $MapsToMSAsCmd.' -folder '.$MapsToMSAsDir{$Species[$i]};
-
-    # Tell MapsToMSAs how many CPUs we want it to work with
-    $MapsToMSAsCmd = $MapsToMSAsCmd.' -n '.$num_cpus;
-
-    # Give it reference to the quilter output folder, so we can scoop
-    # up any of those tasty multi-chromosomal gene families.
-    $MapsToMSAsCmd = $MapsToMSAsCmd.' -misses '.$MissFileName;
-
-    # If we want to stack ARFs in the output alignment files, now is
-    # the time to communicate our desires
-    $MapsToMSAsCmd = $MapsToMSAsCmd.' -stack-arfs' if ($stack_arfs);
-    
-    # Display the call and/or make it
-    if ($verbose) {
-	print "  Generating MSAs for all identified $Species[$i] genes\n";
-	print "  $MapsToMSAsCmd\n";
-    }
-
+    # As easy as it gets!
+    my $MapsToMSAsCmd = 'perl '.$location.'MapsToMSAs.pl '.$species_seqdir;
     if (system($MapsToMSAsCmd)) {
 	# HAMSTERS!
 	die "\n  *  ERROR:  MapsToMSAs.pl failed during execution  *\n\n";
     }
 
-
-    # Grab all group filenames.  Note that these should be identical across
-    # species.  We also count how many isoforms each group had within the species.
-    # Because we might be editing the contents of the directory, we begin by
-    # storing the filenames in an array, rather than doing it on-the-fly.
-    opendir(my $dir,$MapsToMSAsDir{$Species[$i]}) || die "\n  Failed to open directory '$MapsToMSAsDir{$Species[$i]}'\n\n";
-    open(my $DisFile,'>',$DisFilename);
-    my @DirContents;
-    while (my $filename = readdir($dir)) {
-
-	# Don't need to mess around with non-MSA files
-	if ($filename =~ /\.afa$/) {
-
-	    # Add to our list of directory contents
-	    push(@DirContents,$filename);
-	    
-	    # Check if there's a disagreement file
-	    $filename =~ s/\.afa$/\_ARFs/;
-	    $filename =  $MapsToMSAsDir{$Species[$i]}.'/'.$filename;
-
-	    # Open it up and record the first line to our big disagreement file
-	    if (-e $filename) {
-		open(my $geneDis,'<',$filename);
-		my $discountline = <$geneDis>;
-		close($geneDis);
-		$filename =~ /([^\/]+)\_ARFs$/;
-		print $DisFile "$1: $discountline";
-	    }
-
-	}
-    }
-    closedir($dir);
-    close($DisFile);
-
+    # Align any sequences that didn't fully map by getting all Needleman-Wunsch-y
+    my $missesbygene_ref = AggregateMappingMisses($species_dirname);
+    AlignUnmappedSeqs($missesbygene_ref,$species_seqdir);
     
-    # If we didn't have any disagreements, kill the disagreement file
-    system("rm $DisFilename") if (-e $DisFilename && !(-s $DisFilename));
-
-    # We're also now splitting all of the 'Hit' data off into gene-family-
-    # specific files, so presumably we should also be free to kill this file
-    system("rm \"$HitFileName\"");
-
-
-    # Make a hash of all the names of sequences that we missed.
-    # This will include any sequences that hit to a different 
-    # chromosome from the group's "leader" (arbitrary -- first seen)
-    my %QuilterMisses;
-    if (-e $MissFileName) {
-	open(my $MissFile,'<',$MissFileName);
-	while (my $line = <$MissFile>) {
-	    $line =~ s/\n|\r//g;
-	    next if (!$line);
-	    $line =~ /\|([^\|\s]+)\s*$/;
-	    my $fam_name = lc($1);
-	    if ($QuilterMisses{$fam_name}) {
-		# Some sequences have commas in the name,
-		# so we use ampersands (sp?) to break things up, instead
-		$QuilterMisses{$fam_name} = $QuilterMisses{$fam_name}.'&'.$line;
-	    } else { 
-		$QuilterMisses{$fam_name} = $line;
-	    }
-	}
-	close($MissFile);
-    }
-    
-    # We'll collect per-family miss information after attempting to identify partial
-    # mappings, so we can get rid of this file.
-    system("rm \"$MissFileName\"");
-    
-    
-    # You'll also need to know who had decent (but presumably not good enough)
-    # Spaln mapping.  These will be recorded as both Misses and as their own thing
-    #
-    # NOTE: The chromosomes labeled in this file will have '[revcomp]' if revcomp
-    #
-    my %QuilterNearHits;
-    if (-e $NearFileName) {
-
-	open(my $NearFile,'<',$NearFileName);
-	while (my $line = <$NearFile>) {
-
-	    $line =~ s/\n|\r//g;
-	    next if (!$line);
-
-	    $line =~ /^(\S+) (\S+) (\S+)$/;
-	    my $seqname = $1;
-	    my $chromosome = $2;
-	    my $maprange = $3;
-
-	    $seqname =~ /\|([^\|]+)$/;
-	    my $fam_name = lc($1);
-
-	    # First off, this is technically a miss
-	    if ($QuilterMisses{$fam_name}) { 
-		$QuilterMisses{$fam_name} = $QuilterMisses{$fam_name}.'&'.$seqname;
-	    } else {
-		$QuilterMisses{$fam_name} = $seqname;
-	    }
-
-	    # Second off, this was a close hit -- keep the three fields single-space separated
-	    # NOTE: Since these may end up being provided as commandline arguments,
-	    #       we'll need them to be all quoted-up
-	    $seqname    = '"'.$seqname.'"';
-	    $chromosome = '"'.$chromosome.'"';
-	    $maprange   = '"'.$maprange.'"';
-	    my $triple  = $seqname.' '.$chromosome.' '.$maprange;
-	    if ($QuilterNearHits{$fam_name}) {
-		$QuilterNearHits{$fam_name} = $QuilterNearHits{$fam_name}.'&'.$triple;
-	    } else {
-		$QuilterNearHits{$fam_name} = $triple;
-	    }
-
-	}
-
-	close($NearFile);
-
-    }
-
-
-    # Figure out which groups have MSAs in this species
-    foreach my $filename (@DirContents) {
-
-	if (-s $MapsToMSAsDir{$Species[$i]}.'/'.$filename) {
-
-	    # Count '>'s (number of sequences)
-	    open(my $MapsToMSAsFile,'<',$MapsToMSAsDir{$Species[$i]}.'/'.$filename);
-	    my $countedIsos = 0;
-	    while (my $line = <$MapsToMSAsFile>) {
-		$countedIsos++ if ($line =~ /^\>/);
-	    }
-	    close($MapsToMSAsFile);
-
-	    # Do we know this sequence?
-	    if ($GroupsBySpecies{$filename}) {
-		push(@{$GroupsBySpecies{$filename}},$i+1);
-		push(@{$GroupsBySpecies{$filename}},$countedIsos);
-	    } else {
-		${$GroupsBySpecies{$filename}}[0] = $i+1;
-		${$GroupsBySpecies{$filename}}[1] = $countedIsos;
-	    }
-
-	} elsif (-e $MapsToMSAsDir{$Species[$i]}.'/'.$filename) {
-	    # Wipe out any files that are only nominally present
-	    my $clearMSACmd = 'rm '.$MapsToMSAsDir{$Species[$i]}.'/'.$filename;
-	    system($clearMSACmd);
-	}
-
-    }
-
-    # Now that we have MSAs for all the groups that we had hits for,
-    # align any that we missed using Needleman-Wunsch.
-    print "  Aligning missed isoforms to gene MSAs\n" if ($verbose && keys %QuilterMisses);
-    my $singleseqfilename = $SpeciesDir{$Species[$i]}.'Mirage.Single.Temp.fa';
-    my $singleseqresults  = $SpeciesDir{$Species[$i]}.'Mirage.Multi.Temp.afa';
-
-    foreach my $missedgroup (keys %QuilterMisses) {
-	my @MissedSeqs = split('&',$QuilterMisses{$missedgroup});
-	foreach my $seq (@MissedSeqs) {
-	    my $GBSref = AttachSeqToMSA($seq,$MapsToMSAsDir{$Species[$i]},$missedgroup,
-					$SpeciesDBNames[$i],\%GroupsBySpecies,$i+1,
-					$singleseqfilename,$singleseqresults);
-	    %GroupsBySpecies = %{$GBSref};
-	}
-    }
-
-    system("rm $singleseqfilename") if (-e $singleseqfilename);
-    system("rm $singleseqresults")  if (-e $singleseqresults);
-
     # Knock it off with that darn timing!
     $MapsToMSAsTimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
 
@@ -452,318 +238,14 @@ for ($i=0; $i<$numSpecies; $i++) {
 }
 
 
-# Cool beans, daddy-o!  Now we're going to make sure that all of
-# the species that didn't make it into our guide get a little bit
-# of attention (and gather in their names).
-my $GBSref;
-my $MMSAref;
-($speciesref,$numSpecies,$GBSref,$MMSAref)
-    = CoverMinorSpecies(\@Species,$ProteinDB,$numSpecies,
-			\%GroupsBySpecies,$AllSpeciesDir,\%MapsToMSAsDir);
-@Species         = @{$speciesref};
-%GroupsBySpecies = %{$GBSref};
-%MapsToMSAsDir     = %{$MMSAref};
+# HOLY COW! You just made a heckin' ton of MSAs!
+# But don't forget about the 'Misc' sequences...
+AlignMiscSeqs($SpeciesSeqDir{'Misc'});
 
-
-# Generate first progress message
-my $progmsg = '  Mirage.pl: Preparing to generate final MSAs';
-while (length($progmsg) < 63) { $progmsg = $progmsg.' '; }
-print "$progmsg\r" if (!$verbose);
 
 # We're now going to track how long the whole final-MSA-generating
 # part of the program takes
 $IntervalStart = [Time::HiRes::gettimeofday()];
-
-
-# Make a directory to place our final MSAs in
-my $FinalDir = $ResultsDir.'/FinalMSAs';
-if (system("mkdir $FinalDir")) { die "\n  Failed to create directory '$FinalDir'\n\n"; }
-
-
-# Convert the hash entries to an array, so we can divvy it up
-# among the threads.  Did I mention there were going to be threads?
-# Oh, yeah, you'd better believe there are going to be threads.
-my @GroupFileNames   = sort keys %GroupsBySpecies;
-my $TotNumGroupFiles = @GroupFileNames;
-if ($TotNumGroupFiles < $num_cpus) { $num_cpus = $TotNumGroupFiles; }
-
-
-# Carve out a portion of the files for each process to work on,
-# or else die.  This would be really strange to see happen, but
-# it's good to cover your bases.
-my $portion;
-if ($num_cpus) {
-    $portion = $TotNumGroupFiles/$num_cpus;
-} else {
-    print "\n";
-    print "  No genes were identified for alignment.\n";
-    print "  Program Terminating Peacefully\n";
-    print "\n\n";
-    exit(0);
-}
-
-
-# Let the user know that we're about to hit the (long) home stretch
-print "\n  Computing final cross-species MSAs (large genes can take up to 30 seconds)\n\n"
-    if ($verbose);
-
-
-# Split up the work across the desired number of processes
-my $tempdirname = $ResultsDir.'/temp/';
-if (system("mkdir \"$tempdirname\"")) { die "\n  ERROR:  Failed to create Mirage tempdir '$tempdirname'\n\n"; }
-my $progressbase = $tempdirname.'mirage.thread_progress.';
-my $processes = 1;
-my $ThreadID  = 0; # In case of only one process
-my $pid;
-while ($processes < $num_cpus) {
-
-    # Create a new thread
-    if ( $pid = fork ) {
-	# Not liking this pid? Fuhget about it!
-	if (not defined $pid) { die "\n\tFork failed\n\n"; }	
-	# Master thread maintains ThreadID of 0
-	$ThreadID = 0;
-    } else {
-        $ThreadID = $processes;
-	last;
-    }
-
-    $processes++;
-
-}
-
-
-# Each thread writes its progress (number of completed families)
-# to a file containing 
-my $progtime = time();
-my $progfilename = $progressbase.$ThreadID;
-my $num_complete = 0;
-
-
-# Figure out where you'll be starting and stopping
-my $startpoint = $ThreadID * $portion;
-my $endpoint   = ($ThreadID+1) * $portion;
-if ($ThreadID == $num_cpus-1) { $endpoint = $TotNumGroupFiles; }
-
-
-#
-# M2: At some point we're going to have to transfer back to the original names.
-#     Good thing we've moved DCE info to come after a '#' in the seqnames...
-#
-
-
-# Now we go through each sequence group and align it across species
-my $tempfileA = $tempdirname.'tempfileA.'.$ThreadID.'.MIRAGE.afa';
-my $tempfileB = $tempdirname.'tempfileB.'.$ThreadID.'.MIRAGE.afa';
-for (my $groupindex = $startpoint; $groupindex < $endpoint; $groupindex++) {
-
-    # First, at your leisure (once every couple seconds) write
-    # out how far you've gotten to a file, unless you're thread 0
-    # who gets a very special job
-    if (!$verbose) {
-	if (time()-$progtime > 2) {
-	    
-	    if ($ThreadID) {
-		open(my $progfile,'>',$progfilename);
-		print $progfile "$num_complete\n";
-		close($progfile);
-		
-	    } else {
-		
-		# Generate call to ProgressTimer
-		my $progressCmd = $location.'ProgressTimer.pl '.$progressbase.' '.$num_cpus;
-		$progressCmd    = $progressCmd.' '.$num_complete.' |';
-		if ($location !~ /^\//) { $progressCmd = './'.$progressCmd; }
-		
-		# Make the call and read the results
-		open(my $progfile,$progressCmd);
-		my $overall_progress = readline($progfile);
-		close($progfile);
-		$overall_progress =~ s/\n|\r//g;
-		
-		# Pull together the message
-		$progmsg = '  Mirage.pl:   '.$overall_progress.' groups aligned';
-		while (length($progmsg) < 63) { $progmsg = $progmsg.' '; }
-		$progmsg = $progmsg."\r";
-		
-		# Print it out!
-		print "$progmsg";
-		
-	    }
-	    
-	    # The time for progress is NOW! People, rise up!
-	    $progtime = time();
-	    
-	}
-    }
-
-    
-    #
-    # Now let's get to work! Time is money, people!
-    #
-    
-    my $groupfile = $GroupFileNames[$groupindex];
-    my $groupID = $groupfile;
-    $groupID =~ s/\.afa$//;
-
-    my @GroupSpecies;
-    my @GroupSeqs;
-    my $speciesPerGroup = 0;
-
-    $i = 0;
-    while ($i < @{$GroupsBySpecies{$groupfile}}) {
-	$GroupSpecies[$i/2] = $Species[${$GroupsBySpecies{$groupfile}}[$i]-1];
-	$GroupSeqs[$i/2]    = ${$GroupsBySpecies{$groupfile}}[$i+1];
-	$speciesPerGroup++;
-	$i += 2;
-    }
-
-    #print "  -- $gene: $speciesPerGene (@GeneSpecies)\n" if ($verbose);
-
-    my $ResultFile = $FinalDir.'/'.$groupfile;
-
-    if ($speciesPerGroup == 1) {
-
-	if ($cleanMSA) {
-
-	    # still want to remove any splice site characters
-	    my $FinalMSACmd = 'perl '.$location.'FinalMSA.pl "'.$MapsToMSAsDir{$GroupSpecies[0]}.'/'.$groupfile.'"';
-	    $FinalMSACmd    = $FinalMSACmd." '".$ResultFile."'";
-	    
-	    # Print the command and execute
-	    #print "  $FinalMSACmd\n" if ($verbose);
-	    if (system($FinalMSACmd)) { 
-		system("rm -rf $tempdirname");
-		die "\n  *  ERROR: FinalMSA failed during execution  *\n\n"; 
-	    }
-	    
-	} else {
-	
-	    # Just copy it over
-	    if (system("cp '$MapsToMSAsDir{$GroupSpecies[0]}/$groupfile' '$ResultFile'")) {		
-		die "\n  Failed to move '$MapsToMSAsDir{$GroupSpecies[0]}/$groupfile' to '$ResultFile'\n\n";
-	    }
-
-	}
-
-	# Don't be shy, now!
-	next;
-
-    }
-
-    my $fileA     = $MapsToMSAsDir{$GroupSpecies[0]}.'/'.$groupfile;
-    my $fileAsize = $GroupSeqs[0];
-    my $fileB     = $MapsToMSAsDir{$GroupSpecies[1]}.'/'.$groupfile;
-    my $fileBsize = $GroupSeqs[1];
-
-    my $MultiSeqNWCmd = $location."MultiSeqNW '$fileA' $fileAsize"; # First species
-    $MultiSeqNWCmd    = $MultiSeqNWCmd." '$fileB' $fileBsize";      # Second species
-    $MultiSeqNWCmd    = $MultiSeqNWCmd.' > '.$tempfileA;            # Send to temp file    
-    if ($location !~ /^\//) { $MultiSeqNWCmd = './'.$MultiSeqNWCmd; }
-
-    print "  $MultiSeqNWCmd\n" if ($verbose);
-    if (system($MultiSeqNWCmd)) { die "\n  *  ERROR: MultiSeqNW failed during execution of command '$MultiSeqNWCmd'  *\n\n"; }
-    
-    $i = 2;
-    while ($i < $speciesPerGroup) {
-
-	if ($i % 2) { $fileA = $tempfileB; }
-	else        { $fileA = $tempfileA; }
-
-	$fileAsize += $fileBsize;
-	$fileB      = $MapsToMSAsDir{$GroupSpecies[$i]}.'/'.$groupfile;
-	$fileBsize  = $GroupSeqs[$i];
-	$MultiSeqNWCmd = $location."MultiSeqNW '$fileA' $fileAsize"; # First species
-	$MultiSeqNWCmd = $MultiSeqNWCmd." '$fileB' $fileBsize";      # Second species
-	if ($location !~ /^\//) { $MultiSeqNWCmd = './'.$MultiSeqNWCmd; }
-
-	# The tempfile we're writing to depends on how many iterations 
-	# we've been through.
-	if ($i % 2) { $MultiSeqNWCmd = $MultiSeqNWCmd.' > '.$tempfileA; }
-	else        { $MultiSeqNWCmd = $MultiSeqNWCmd.' > '.$tempfileB; }
-
-	#print "  $MultiSeqNWCmd\n" if ($verbose);
-	if (system($MultiSeqNWCmd)) { die "\n  *  ERROR: MultiSeqNW failed during execution of command '$MultiSeqNWCmd'  *\n\n"; }
-
-	$i++;
-
-    }
-
-    # Perform the final cleanup! (unless we're CRAZY!)
-    if ($cleanMSA) {
-
-	my $FinalMSACmd = 'perl '.$location.'FinalMSA.pl ';
-	if ($i % 2) { $FinalMSACmd = $FinalMSACmd."'$tempfileB'"; }
-	else        { $FinalMSACmd = $FinalMSACmd."'$tempfileA'"; }
-	$FinalMSACmd = $FinalMSACmd." '$ResultFile'";
-	
-	# Print the FinalMSA command and execute
-	#print "  $FinalMSACmd\n" if ($verbose);
-	if (system($FinalMSACmd)) { die "\n  *  ERROR: FinalMSA failed during execution  *\n\n"; }    
-
-    } else { # Ew! That MSA is gonna be riddled with intron markers!
-
-	my $FinalMoveCmd = 'mv ';
-	if ($i % 2) { $FinalMoveCmd = $FinalMoveCmd."'$tempfileB'"; }
-	else        { $FinalMoveCmd = $FinalMoveCmd."'$tempfileA'"; }
-	$FinalMoveCmd = $FinalMoveCmd." '$ResultFile'";
-
-	# Print the move command and execute
-	#print "  $FinalMoveCmd\n" if ($verbose);
-	if (system($FinalMoveCmd)) { die "\n  *  ERROR: FinalMoveCmd failed during execution  *\n\n"; }
-
-    }
-
-    print "  - $groupID complete\n" if ($verbose);
-    $num_complete++;
-
-}
-
-
-# Get rid of the temporary files
-if (-e $tempfileA && system("rm $tempfileA")) { die "\n  Failed to remove file $tempfileA\n\n"; }
-if (-e $tempfileB && system("rm $tempfileB")) { die "\n  Failed to remove file $tempfileB\n\n"; }
-
-
-# De-fork
-if ($ThreadID) { exit(0); }
-while (wait() != -1) {}
-
-
-# Well, why NOT put this here?!
-for ($i=0; $i<$numSpecies; $i++) {
-    system("rm \"$SpeciesDBNames[$i]\"")      if (-e $SpeciesDBNames[$i]);
-    system("rm \"$SpeciesDBNames[$i]\.ssi\"") if (-e $SpeciesDBNames[$i].'.ssi');
-}
-system("rm \"$MinorSpeciesDBName\"")      if (-e $MinorSpeciesDBName);
-system("rm \"$MinorSpeciesDBName\.ssi\"") if (-e $MinorSpeciesDBName.'.ssi');
-
-
-# Get rid of progress files (won't apply to thread 0)
-for ($i = 1; $i < $num_cpus; $i++) {
-    $progfilename = $progressbase.$i;
-    if (-e $progfilename && system("rm $progfilename")) { die "\n  Failed to remove file $progfilename\n\n"; }
-}
-$progmsg = ' ';
-while (length($progmsg) < 63) { $progmsg = $progmsg.' '; }
-print "$progmsg\r" if (!$verbose);
-
-
-# When did we finish generating our final MSAs?
-$MultiSeqNWTime = Time::HiRes::tv_interval($IntervalStart);
-$AvgNWTime = $MultiSeqNWTime / $TotNumGroupFiles;
-
-
-# One final thing: Move any suspected transposable elements to
-# a special final folder
-if (grep -f, glob $tempdirname.'*.TEs.Quilter.out') {
-    system("mkdir $ResultsDir/SuspectedTEs");
-    system("mv ".$tempdirname."*.TEs.Quilter.out $ResultsDir/SuspectedTEs");
-}
-
-
-# Remove the temp directory
-if (system("rm -rf $tempdirname")) { die "\n  ERROR:  Failed to delete temp directory '$tempdirname'\n\n"; }
 
 
 # Slap that stop-watch!
@@ -776,7 +258,7 @@ if ($verbose || $timed) {
     print "  +---------------------------------------------------+\n";
     print "                   Runtime Statistics \n";
     print "  +---------------------------------------------------+\n";
-    foreach $i (0..$numSpecies-1) {
+    for (my $i=0; $i<$num_species; $i++) {
 	
 	print "\n";
 	print "    Species        : $Species[$i]\n";
@@ -808,9 +290,6 @@ if ($verbose || $timed) {
     print "\n\n\n";
 
 }
-
-# Let the user know where the final directory is
-print "\n\n  All tasks complete.\n  Results in $FinalDir\n\n\n";
 
 # No more progress to be made!
 system("rm -rf \"\$progress_dirname\"");
@@ -1425,10 +904,11 @@ sub GenerateSpeciesDBs
     my $ProteinDB = OpenInputFile($ProteinDB_name);
     my $seq_num = 0;
     my @OriginalSeqNames;
+    my %SpeciesGeneHash;
     my $spec_gene_filename;
     my $SpecGeneFile;
     my $species;
-    my $genefam;
+    my $gene;
     while (my $line = <$ProteinDB>) {
 	
 	$line =~ s/\n|\r//g;
@@ -1450,17 +930,17 @@ sub GenerateSpeciesDBs
 
 		$parsename =~ /^([^\|]+)\|([^\|]+)\|/;
 		$species = lc($1);
-		$genefam = lc($2);
+		$gene = lc($2);
 
 		# Any aliases? NOTE: We'll allow redundancy in this stage
-		if ($genefam =~ /\//) {
-		    my @Aliases = split(/\//,$genefam);
-		    $genefam = $Aliases[0];
+		if ($gene =~ /\//) {
+		    my @Aliases = split(/\//,$gene);
+		    $gene = $Aliases[0];
 		    for (my $i=0; $i<scalar(@Aliases); $i++) {
-			if ($GeneAliases{$genefam}) {
-			    $GeneAliases{$genefam} = $GeneAliases{$genefam}.'/'.$Aliases[$i];
+			if ($GeneAliases{$gene}) {
+			    $GeneAliases{$gene} = $GeneAliases{$gene}.'/'.$Aliases[$i];
 			} else {
-			    $GeneAliases{$genefam} = $Aliases[$i];
+			    $GeneAliases{$gene} = $Aliases[$i];
 			}
 		    }
 		}
@@ -1471,7 +951,7 @@ sub GenerateSpeciesDBs
 		$species = lc($1);
 
 		$parsename =~ /GN\=(\S+)/;
-		$genefam = lc($1);
+		$gene = lc($1);
 
 	    } else {
 		die "\n  SHIT!\n\n";
@@ -1487,11 +967,14 @@ sub GenerateSpeciesDBs
 
 	    # Determine the specific file we want to write to
 	    $species = 'Misc' if (!$SpeciesDir{$species});
-	    $spec_gene_filename = $SpeciesSeqDir{$species}.$genefam.'.fa';
+	    $spec_gene_filename = $SpeciesSeqDir{$species}.$gene.'.fa';
 
 	    # Print that beautiful nameline!
 	    open($SpecGeneFile,'>>',$spec_gene_filename) || die "\n  ERROR:  Failed to open output species-gene database '$spec_gene_filename' ($species)\n\n";
 	    print $SpecGeneFile ">$seq_num\n";
+
+	    # Record that this species has members of this family
+	    $SpeciesGeneHash{$species.'|'.$gene} = 1;
 
 	    $seq_num++;
 
@@ -1504,10 +987,10 @@ sub GenerateSpeciesDBs
 	    if ($CharCounts{$species}) { $CharCounts{$species} += $linelen; }
 	    else                       { $CharCounts{$species}  = $linelen; }
 
-	    if ($CharCounts{$species.'&'.$genefam}) {
-		$CharCounts{$species.'&'.$genefam} = $CharCounts{$species.'&'.$genefam} += $linelen;
+	    if ($CharCounts{$species.'&'.$gene}) {
+		$CharCounts{$species.'&'.$gene} = $CharCounts{$species.'&'.$gene} += $linelen;
 	    } else {
-		$CharCounts{$species.'&'.$genefam} = $CharCounts{$species.'&'.$genefam}  = $linelen;
+		$CharCounts{$species.'&'.$gene} = $CharCounts{$species.'&'.$gene}  = $linelen;
 	    }
 	    
 	}
@@ -1543,12 +1026,12 @@ sub GenerateSpeciesDBs
 
 	    next if ($species_gene !~ /\&/);
 	    $species_gene =~ /^(\S+)\&(\S+)$/;
-	    my $sp   = $1; # 'species' is already in use :(
-	    $genefam = $2;
+	    my $sp = $1; # 'species' is already in use :(
+	    $gene  = $2;
 
 	    next if ($sp ne $species);
 	    
-	    print $ThreadGuide "$threadnum $genefam\n";
+	    print $ThreadGuide "$threadnum $gene\n";
 
 	    # If we've hit our portion, jump ship!
 	    $threadchars += $CharCounts{$species_gene};
@@ -1568,7 +1051,7 @@ sub GenerateSpeciesDBs
 
 	# Invent a file to record alias information
 	my $aliasf = OpenOutputFile($ResultsDir.'gene-aliases');
-	foreach my $gene (@GenesWithAliases) {
+	foreach $gene (@GenesWithAliases) {
 
 	    # We'll hash all of the aliases so we can avoid redundancy
 	    my %UniqueAliases;
@@ -1587,178 +1070,24 @@ sub GenerateSpeciesDBs
 	close($aliasf);
 	
     }
+
+    # A final little piece of work we'll do is switch from our hash of gene/species
+    # pairs to '1' to a hash from genes to a list of species that include them.
+    my %GenesToSpecies;
+    foreach my $gene_species_pair (keys %SpeciesGeneHash) {
+	$SpeciesGeneHash{$gene_species_pair} =~ /^(\S+)\|(\S+)$/;
+	$species = $1;
+	$gene = $2;
+	if ($GenesToSpecies{$gene}) {
+	    $GenesToSpecies{$gene} = $GenesToSpecies{$gene}.','.$species;
+	} else {
+	    $GenesToSpecies{$gene} = $species;
+	}
+    }
     
     # This is it, baby!
-    return (\@OriginalSeqNames);
+    return (\@OriginalSeqNames,\%GenesToSpecies);
 
-}
-
-
-
-
-
-########################################################################
-#
-# Function Name: CoverMinorSpecies
-#
-# About: In order to handle the presence of species that aren't listed
-#        in the species guide file, we do a little bit of extra work
-#        making sure they get worked into the fold
-#
-sub CoverMinorSpecies
-{
-    # Grab the original (major) species
-    my $speciesRef   = shift;
-    my @Species      = @{$speciesRef};
-
-    # Convert to a hash, for fun and games (and work and seriousness)
-    my %MajorSpecies;
-    foreach my $i (0..@Species-1) {
-	$MajorSpecies{$Species[$i]} = 1;
-    }
-    
-    # Grab the name of the database we're interested in looking through
-    my $DBname = shift;
-
-    # How many species were there to start with?
-    my $num_species = shift;
-    my %SpeciesIDs;
-
-    # Grab a reference to the group hash.  Keep in mind that the
-    # values stored in this hash are (species_index,number_of_isoforms)
-    # pairs
-    my $grouphashRef    = shift;
-    my %GroupsBySpecies = %{$grouphashRef};
-
-    # The name of the results directory
-    my $speciesDir = shift;
-    $speciesDir    =~ s/\/$//;
-
-    # The hash of intra-species MSA file locations within species
-    my $MapsToMSAsref = shift;
-    my %MapsToMSAsDir = %{$MapsToMSAsref};
-
-    # A temporary "GroupsBySpecies"-like hash
-    my %MinorGroupsBySpecies;
-    
-    # Scan along the protein database and record any sequences that don't
-    # belong to one of the major species.  It would be nice if this could
-    # be parallelized, but we'd run the risk of processes trampling over
-    # directories and files, so for the time being we'll just do a one-thread
-    # scan.
-    my $species;
-    my %MinorSpecies;
-    my $tempresults  = 'CoverMinorSpecies.results.fa';
-    my $tempfilename = 'CoverMinorSpecies.temp.fa';
-    open(my $DB,'<',$ARGV[0]);
-    my $line = readline($DB); # Priming the regex
-    while (!eof($DB)) {
-	
-	# Go to the start of the next sequence
-	while (!eof($DB) && $line !~ /^\>/) { # "GN:" EXCISION
-	    $line = readline($DB);
-	    $line =~ s/\r|\n//g;
-	}
-	
-	# Are we done?
-	last if (eof($DB));
-	
-	# Not yet we ain't! Grab the species name
-	my $header = $line;
-	$line =~ /^\>([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|(\S*\|)?([^\|\s]+)\s*$/; # "GN:" EXCISION
-
-	if (!$6) { print ">>> $line\n"; }
-	
-	my $gene    = uc($1);
-	my $species = lc($3);
-	my $groupID = lc($6);
-
-	if (!$MajorSpecies{$species}) {
-	    
-	    # Hot diggity! We got ourselves a minor species!
-	    $MinorSpecies{$species} = 1;
-
-	    # Oo la la! A brand new one, at that!
-	    if (!$SpeciesIDs{$species}) {
-		$MapsToMSAsDir{$species} = $speciesDir.'/'.$species;
-		$SpeciesIDs{$species}  = $num_species;
-		$Species[$num_species] = $species;
-		$num_species++;
-		if (system("mkdir $speciesDir/$species")) {
-		    die "\n  ERROR: Failed to make directory '$speciesDir/$species'\n\n";
-		}
-	    }
-	    
-	    # Recording the sequence.
-	    open(my $tempfile,'>',$tempfilename);
-	    print $tempfile "$line\n";
-	    $line = readline($DB);
-	    while ($line !~ /\>/) {
-		print $tempfile "$line";
-		last if (eof($DB));
-		$line = readline($DB);
-	    }
-	    print $tempfile "\n";
-	    close($tempfile);
-	    
-	    # Have we hit on any other groups for this species?
-	    if ($MinorGroupsBySpecies{$groupID.'#'.$species}) { 
-
-		# Need to get all Needleman-Wunschy about it
-		my $NWcmd = $location.'MultiSeqNW '.$tempfilename.' 1 '."'$speciesDir/$species/$groupID.afa' ";
-		$NWcmd    = $NWcmd.$MinorGroupsBySpecies{$groupID.'#'.$species};
-		$NWcmd    = $NWcmd.' > '.$tempresults;
-		if ($location !~ /^\//) { $NWcmd = './'.$NWcmd; }
-		if (system($NWcmd)) { die "\n  Failed to align non-indexed sequence '$header'\n\n"; }
-
-		# Transfer the results
-		my $mvCmd = "mv $tempresults '$speciesDir/$species/$groupID.afa'";
-		if (system($mvCmd)) { die "\n  Failed to move '$tempfilename' to '$speciesDir/$species/$groupID.afa'\n\n"; }
-		$MinorGroupsBySpecies{$groupID.'#'.$species}++; 
-
-	    } else { 
-
-		# Free pass!
-		my $mvCmd = "mv $tempfilename '$speciesDir/$species/$groupID.afa'";
-		if (system($mvCmd)) { die "\n  Failed to move '$tempfilename' to '$speciesDir/$species/$groupID.afa'\n\n"; }
-		$MinorGroupsBySpecies{$groupID.'#'.$species} = 1;
-
-	    }
-
-	} else {
-	    
-	    # Prime the next search
-	    $line = readline($DB) if (!eof($DB));
-	    
-	}
-	
-    }
-    close($DB);
-    
-    
-    # If we ever got around to writing into that tempfile, destroy it
-    system("rm $tempfilename") if (-e $tempfilename);
-
-    
-    # NOW that we've logged all these fun new species, let's make sure they
-    # make it onto our big datastructures
-    foreach my $pair (keys %MinorGroupsBySpecies) {
-	my @asArray  = split('#',$pair);
-	my $filename = $asArray[0].'.afa';
-	if ($GroupsBySpecies{$filename}) {
-	    push(@{$GroupsBySpecies{$filename}},$SpeciesIDs{$asArray[1]}+1);
-	    push(@{$GroupsBySpecies{$filename}},$MinorGroupsBySpecies{$pair});
-	} else {
-	    ${$GroupsBySpecies{$filename}}[0] = $SpeciesIDs{$asArray[1]}+1;
-	    ${$GroupsBySpecies{$filename}}[1] = $MinorGroupsBySpecies{$pair};
-	}
-    }
-
-
-    # Return the minor species
-    return (\@Species,$numSpecies,\%GroupsBySpecies,\%MapsToMSAsDir);
-    
-    
 }
 
 
@@ -1777,6 +1106,8 @@ sub ParseSeqNameAsMirage
     return 1 if ($seqname =~ /^[^\|]+\|[^\|]+\|[^\|]+$/);
     return 0;
 }
+
+
 
 
 ########################################################################
@@ -1825,108 +1156,194 @@ sub ParseSeqNameAsUniProt
 
 
 
-
 ########################################################################
 #
-# Function Name: AttachSeqToMSA
+#  Function: AggregateMappingMisses
 #
-# About: This function attaches a single sequence to an MSA, and is
-#        used to handle cases where neither FastMap nor SPALN
-#        are able to identify a correct alignment of the sequence to
-#        the genome.
-#
-sub AttachSeqToMSA
+sub AggregateMappingMisses
 {
+    my $dirname = shift;
 
-    my ($i,$j,$k);
-
-    my $seqname   = shift;
-    my $MSADir    = shift;
-    my $groupname = shift;
-    my $ProteinDB = shift;
-
-    # As a reminder, GroupsBySpecies is a hash of arrays of
-    # pairs where the first item is a numeric value (indicating
-    # index into Species array) and the second item is the number
-    # of isoforms for the given group name (the hash key).
-    my $GBSref          = shift;
-    my %GroupsBySpecies = %{$GBSref};
-    my $species_index   = shift;
-
-    # First, let's grab a hold of the missed sequence
-    my $seqfilename  = shift;
-    my $resultsname  = shift;
-    my $origseq = $seqname;
-    $origseq =~ s/^\>|\s//g;
-    my $eslsfetchCmd = $eslsfetch." -o \"$seqfilename\" \"$ProteinDB\" \"$origseq\" > /dev/null 2>\&1";
-    
-    
-    # run it!
-    if (system($eslsfetchCmd)) { die "\n  ERROR: esl-sfetch command '$eslsfetchCmd' failed\n\n"; }
-
-
-    # Now we're ready to join this sequence to the MSA (if there is one!!!)
-    my $baseMSAfile = $MSADir.'/'.$groupname.'.afa';
-    if (-s $baseMSAfile) {
-
-	# How many seq.s are in the existing MSA?
-	$i = 0;
-	while (${$GroupsBySpecies{$groupname.'.afa'}}[$i] 
-	       && ${$GroupsBySpecies{$groupname.'.afa'}}[$i] != $species_index) {
-	    $i += 2;
+    # Make a hash of all the names of sequences that we missed.
+    # This will include any sequences that hit to a 'noncanonical'
+    # chromosome
+    my %MappingMissesByGene;
+    if (-e $dirname.'mapping-misses') {
+	open(my $MissFile,'<',$dirname.'mapping-misses');
+	while (my $line = <$MissFile>) {
+	    $line =~ s/\n|\r//g;
+	    next if (!$line);
+	    $line =~ /^(\S+) (\d+)\:/;
+	    my $gene = lc($1);
+	    my $seq_id = $2;
+	    if ($MappingMissesByGene{$gene}) {
+		$MappingMissesByGene{$gene} = $MappingMissesByGene{$gene}.','.$seq_id;
+	    } else { 
+		$MappingMissesByGene{$gene} = $seq_id;
+	    }
 	}
-
-	# If we haven't shot over the edge (i.e., exhausted known species with this group), 
-	# then we're appending
-	if (${$GroupsBySpecies{$groupname.'.afa'}}[$i]) {
-	    
-	    my $num_isos = ${$GroupsBySpecies{$groupname.'.afa'}}[$i+1];
-	    
-	    if ($num_isos == 0) { # Final special check, I promise
-
-		# We just call this our MSA, and make a note of it in our hash
-		system("mv '$seqfilename' '$baseMSAfile'");
-		${$GroupsBySpecies{$groupname.'.afa'}}[$i+1] = 1;
-
-	    } else {
-
-		# Compose and run that daaaaang command!
-		my $alignCmd = $location."MultiSeqNW '".$seqfilename."' 1 '".$baseMSAfile."' ".$num_isos;
-		$alignCmd    = $alignCmd.' -igBase 0';
-		$alignCmd    = $alignCmd." > '".$resultsname."'";
-		if ($location !~ /^\//) { $alignCmd = './'.$alignCmd; }
-		if (system($alignCmd)) { die "  *  ERROR: Alignment of missing sequence '$origseq' to MSA failed ($alignCmd)\n\n"; }
-		
-		# Move the results and count this sequence
-		system("mv $resultsname '$baseMSAfile'");
-		${$GroupsBySpecies{$groupname.'.afa'}}[$i+1] = $num_isos+1;
-
-	    }		
-
-	} else {
-
-	    # We just call this our MSA, and make a note of it in our hash
-	    system("mv '$seqfilename' '$baseMSAfile'");
-	    push(@{$GroupsBySpecies{$groupname.'.afa'}},$species_index);
-	    push(@{$GroupsBySpecies{$groupname.'.afa'}},1);
-
-	}
-
-    } else {
-	
-	# We just call this our MSA, and make a note of it in our hash
-	system("mv '$seqfilename' '$baseMSAfile'");
-	push(@{$GroupsBySpecies{$groupname.'.afa'}},$species_index);
-	push(@{$GroupsBySpecies{$groupname.'.afa'}},1);
-
+	close($MissFile);
     }
-    
-    # Consider your hash updated!
-    return \%GroupsBySpecies;
+
+    return \%MappingMissesByGene;
     
 }
 
 
+
+
+
+########################################################################
+#
+#  Function: AlignUnmappedSeqs
+#
+sub AlignUnmappedSeqs
+{
+
+    my $missesbygene_ref = shift;
+    my $dirname = shift;
+
+    my %MappingMissesByGene = %{$missesbygene_ref};
+
+    # We'll make a list and determine how many threads to spawn
+    my @GeneList = keys %MappingMissesByGene;
+    my $num_threads = Min($num_cpus,scalar(@GeneList));
+    return if ($num_threads == 0);
+
+    # Spawn them there threads!
+    my $threadID = SpawnProcesses($num_threads);
+    my $start =  $threadID    * int(scalar(@GeneList)/$num_threads);
+    my $end   = ($threadID+1) * int(scalar(@GeneList)/$num_threads);
+    $end = scalar(@GeneList) if ($threadID == $num_threads-1);
+
+    # Go off!
+    for (my $gene_id=$start; $gene_id<$end; $gene_id++) {
+
+	my $gene = $GeneList[$gene_id];
+
+	my %SeqsToAlign;
+	foreach my $seq_id (split(/\,/,$MappingMissesByGene{$gene})) {
+	    $SeqsToAlign{$seq_id} = 1;
+	}
+	
+	# We'll extract each of the unmapped sequences
+	my @UnalignedSeqFiles;
+	my $num_aligned = 0;
+	my $num_unaligned = 0;
+	my $unaligned = 0;
+	my $outf;
+	my $inf = OpenInputFile($dirname.$gene.'.fa');
+	while (my $line = <$inf>) {
+
+	    $line =~ s/\n|\r//g;
+	    
+	    if ($line =~ /\>(\d+)/) {
+
+		# New seq! Who dis?
+		my $seq_id = $1;
+
+		# If we were writing to an output file, close it up
+		close($outf) if ($unaligned);
+
+		# Are we writing out this sequence, or has it been mapped?
+		if ($SeqsToAlign{$seq_id}) {
+
+		    $unaligned = 1;
+		    $num_unaligned++;
+
+		    my $outfname = $dirname.$seq_id.'.tmp.fa';
+		    push(@UnalignedSeqFiles,$outfname);
+		    $outf = OpenOutputFile($outfname);
+		    print $outf ">$seq_id\n";
+		    
+		} else {
+		    
+		    $unaligned = 0;
+		    $num_aligned++;
+		    
+		}
+
+	    } elsif ($unaligned) {
+		print $outf "$line\n";
+	    }
+	    
+	}
+	close($outf) if ($unaligned);
+	close($inf);
+
+	# If we have zero mapped sequences, surprise -- the first sequence
+	# is our MSA! NOTE that we could more easily pick the last sequence,
+	# but just to preserve order we do this sorta silly thing...
+	my $msa_fname = $dirname.$gene.'.afa';
+	my $i=0;
+	if ($num_aligned == 0) {
+	    RunSystemCommand("mv \"$UnalignedSeqFiles[0]\" \"$msa_fname\"");
+	    $num_aligned++;
+	    $i++;
+	}
+
+	# Where will we store the results of each alignment iteration?
+	my $tmp_outfname = $dirname.$gene.'.tmp.afa';
+
+	# Now we can just chug right on through, aligning seqs the ol'-fashioned way!
+	while ($i<$num_unaligned) {
+	    RunSystemCommand($location."MultiSeqNW \"$UnalignedSeqFiles[$i]\" 1 \"$msa_fname\" $num_aligned -igBase 0 > \"$tmp_outfname\"");
+	    RunSystemCommand("mv \"$tmp_outfname\" \"$msa_fname\"");
+	    $num_aligned++;
+	    $i++;
+	}
+
+	# We don't want any fake '.afa' files clogging up the ol' pipey-pipes
+	RunSystemCommand("rm \"$tmp_outfname\"") if (-e $tmp_outfname);
+	
+    }
+
+    # Make sure everybody's done before we head back home
+    if ($threadID) { exit(0); }
+    while (wait() != -1) {}
+
+}
+
+
+
+
+########################################################################
+#
+#  Function:  AlignMiscSeqs
+#
+sub AlignMiscSeqs
+{
+    my $dirname = shift;
+
+    # We'll make a hash of all sequence names by gene, so we can take advantage
+    # of the infrastructure of 'AlignUnmappedSeqs'
+    my %SeqsByGene;
+    my $Dir = OpenDirectory($dirname);
+    while (my $fname = readdir($Dir)) {
+
+	$fname = $dirname.$fname;
+	if ($fname =~ /\/([^\/]+)\.fa/) {
+	    my $gene = $1;
+	    my $grep = OpenSystemCommand("grep '>' \"$fname\"");
+	    while (my $line = <$grep>) {
+		if ($line =~ /\>(\d+)/) {
+		    my $seq_id = $1;
+		    if ($SeqsByGene{$gene}) {
+			$SeqsByGene{$gene} = $SeqsByGene{$gene}.','.$seq_id;
+		    } else {
+			$SeqsByGene{$gene} = $seq_id;
+		    }
+		}
+	    }
+	    close($grep);
+	}
+	
+    }
+
+    # Takin' advantage!
+    AlignUnmappedSeqs(\%SeqsByGene,$dirname);
+    
+}
 
 
 
