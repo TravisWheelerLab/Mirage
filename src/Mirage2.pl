@@ -107,6 +107,9 @@ my $track_spaln  = $Options{trackspaln};   # Hidden
 # Verify that we have all the files we need on-hand
 #CheckSourceFiles($forcecompile);
 
+# Make a directory to store results
+$ResultsDir = CreateDirectory($ResultsDir);
+
 # Stick in a directory to record progress information as we're running the
 # various tools that we're so happy to have this opportunity to be running!
 my $progress_dirname = CreateDirectory($ResultsDir.'.progress');
@@ -122,9 +125,6 @@ my @GTFs        = @{$gtfsref};
 my @Genomes     = @{$genomesref};
 my @MergeOrder  = @{$mergeorderref};
 my $num_species = scalar(@Species);
-
-# Make a directory to store results
-$ResultsDir = CreateDirectory($ResultsDir);
 
 # Make species-specific results folders
 my %SpeciesDir;
