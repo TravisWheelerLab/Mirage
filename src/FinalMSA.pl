@@ -109,7 +109,7 @@ for (my $i=0; $i<$num_seqs; $i++) {
 # Print out our final MSA
 my $outf = OpenOutputFile($ARGV[1]);
 for (my $i=0; $i<$num_seqs; $i++) {
-    print $outf "$SeqNames[$i]\n";
+    print $outf ">$SeqNames[$i]\n";
     for (my $j=0; $j<$msa_len; $j++) {
 	print $outf "$MSA[$i][$j]";
 	print $outf "\n" if (($j+1) % 60 == 0);
