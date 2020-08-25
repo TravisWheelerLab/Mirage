@@ -61,7 +61,6 @@ my %Opts     = %{$opts_ref};
 # As you'd expect, we want to know what there is to know about our proteins
 my $species_dirname = ConfirmDirectory($ARGV[0]);
 my $seq_dirname = ConfirmDirectory($species_dirname.'seqs');
-my $ali_dirname = CreateDirectory($species_dirname.'alignments');
 
 # As you'd expect, next up is confirming the genome
 my $genome = ConfirmFile($ARGV[1]);
