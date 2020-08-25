@@ -141,7 +141,7 @@ foreach my $species (@Species) {
 
 # Divide the database according to species
 DispProgMirage('db-speciation');
-my ($origseqnames_ref,$allgenes_ref)
+my ($origseqnames_ref,$allgenes_ref,$misc_seqs)
     = GenerateSpeciesDBs($ProteinDB,$num_cpus,\%SpeciesDir);
 my @OrigSeqNames = @{$origseqnames_ref};
 my @AllGenes = @{$allgenes_ref};
@@ -225,7 +225,7 @@ for (my $i=0; $i<$num_species-1; $i++) {
 
 # HOLY COW! You just made a heckin' ton of MSAs!
 # But don't forget about the 'Misc' sequences...
-AlignMiscSeqs($SpeciesDir{'Misc'});
+AlignMiscSeqs($SpeciesDir{'Misc'}) if ($misc_seqs);
 
 
 # We're now going to track how long the whole final-MSA-generating
@@ -248,6 +248,12 @@ for (my $i=0; $i<$num_species; $i++) {
 RunSystemCommand("rm \"$seqnamefname\"");
 my $aliasfname = $ResultsDir.'gene-aliases';
 RunSystemCommand("rm \"$aliasfname\"") if (-e $aliasfname);
+
+# If there weren't any genomeless sequences, we can clear out the Misc dir
+if (!$misc_seqs) {
+    my $miscdir = $SpeciesDir{'Misc'};
+    RunSystemCommand("rm -rf \"$miscdir\"");
+}
 
 # Print out runtime statistitcs
 if ($verbose || $timed) {
@@ -1004,7 +1010,9 @@ sub GenerateSpeciesDBs
     # a /-separated list in the 'gene' field
     my %GeneAliases;
 
-    #ConfirmSSI($ProteinDB_name); # We do this in 'ParseArgs'
+    # We'll want to know whether we actually found any genomeless sequences
+    my $misc_seqs = 0;
+
     my $ProteinDB = OpenInputFile($ProteinDB_name);
     my $seq_num = 0;
     my @OriginalSeqNames;
@@ -1069,8 +1077,13 @@ sub GenerateSpeciesDBs
 	    # If we already have a file open, close it
 	    if ($spec_gene_filename) { close($SpecGeneFile); }
 
+	    # Genomeless sequence ahoy!
+	    if (!$SpeciesDir{$species}) {
+		$species = 'Misc';
+		$misc_seqs++;
+	    }
+	    
 	    # Determine the specific file we want to write to
-	    $species = 'Misc' if (!$SpeciesDir{$species});
 	    $spec_gene_filename = $SpeciesDir{$species}.'seqs/'.$gene.'.fa';
 	    
 	    # Print that beautiful nameline!
@@ -1179,7 +1192,7 @@ sub GenerateSpeciesDBs
     my @AllGenes = sort keys %GeneHash;
     
     # This is it, baby!
-    return (\@OriginalSeqNames,\@AllGenes);
+    return (\@OriginalSeqNames,\@AllGenes,$misc_seqs);
 
 }
 
