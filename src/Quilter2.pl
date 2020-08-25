@@ -4246,6 +4246,7 @@ sub FinalFileCheck
     my $end_file_index   = ($threadID+1) * (scalar(@OutFileList)/$num_cpus);
     $end_file_index = scalar(@OutFileList) if ($threadID == $num_cpus-1);
 
+    my $num_cleaned_files = 0;
     for (my $i=$start_file_index; $i<$end_file_index; $i++) {
 
 	my $fname = $OutFileList[$i];
@@ -4367,6 +4368,9 @@ sub FinalFileCheck
 	if (!(-s $missfname)) {
 	    RunSystemCommand("rm \"$missfname\"") if (-e $missfname);
 	}
+
+	$num_cleaned_files++;
+	DispProgMirage('cleanup|'.$threadID.'|'.$num_cleaned_files);
 	
     }
     

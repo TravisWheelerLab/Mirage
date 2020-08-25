@@ -30,6 +30,7 @@ my $DispProg_cpus;
 
 my @QuilterFM2Genes;
 my @QuilterB2SGenes;
+my @QuilterCleanedGenes;
 my @MapsToMSAsGenes;
 my @MultiSeqNWGenes;
 
@@ -99,6 +100,7 @@ sub InitQuilterProgressVars
     for (my $i=0; $i<$num_cpus; $i++) {
 	$QuilterFM2Genes[$i] = 0;
 	$QuilterB2SGenes[$i] = 0;
+	$QuilterCleanedGenes[$i] = 0;
     }
 
     # Let 'em know we're initialized!
@@ -312,6 +314,34 @@ sub DispProgQuilter
 	    }
 	    $status = $status."$genes_completed genes examined using BLAT coordinates";
 	    $status =~ s/ 1 genes / 1 gene /;
+	}
+
+    } elsif ($part eq 'cleanup') {
+
+	# Write out how many genes you've completed to a different secret file!
+	my $genes_completed = $Data[2];
+	my $outfbase = $DispProg_dirname.$DispProg_species.'.Quilter.cleanup.';
+	open(my $outf,'>',$outfbase.$threadID);
+	print $outf "$genes_completed\n";
+	close($outf);
+
+	# If you're the master, count the total number of completed genes and
+	# compose a status report
+	if (!$threadID) {
+	    for (my $i=1; $i<$DispProg_cpus; $i++) {
+		my $outfname = $outfbase.$i;
+		if (-e $outfname) {
+		    open(my $inf,'<',$outfname);
+		    my $thread_genes = <$inf>;
+		    close($inf);
+		    if ($thread_genes && $thread_genes =~ /(\d+)/) {
+			$QuilterCleanedGenes[$i] = $1;
+		    }
+		    $genes_completed += $QuilterCleanedGenes[$i];
+		}
+	    }
+	    $status = $status."file cleanup complete for $genes_completed genes";
+	    $status =~ s/ 1 genes/ 1 gene/;
 	}
 
     }
