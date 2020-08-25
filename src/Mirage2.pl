@@ -148,7 +148,8 @@ my @AllGenes = @{$allgenes_ref};
 
 # I'm going to print off all the original sequence names to a file so
 # if things go wrong during a run we can actually figure out who's who
-my $seqnamef = OpenOutputFile($ResultsDir.'seq-name-guide');
+my $seqnamefname = $ResultsDir.'seq-name-guide';
+my $seqnamef = OpenOutputFile($seqnamefname);
 for (my $i=0; $i<scalar(@OrigSeqNames); $i++) {
     print $seqnamef "$i: $OrigSeqNames[$i]\n";
 }
@@ -239,12 +240,12 @@ $TotalRuntime = Time::HiRes::tv_interval($StartTime);
 
 # For a touch of cleanup, get rid of our species-specific protein databases
 for (my $i=0; $i<$num_species; $i++) {
-    my $seqdir = $SpeciesDir{$Species[$i]}.'seqs/';
-    RunSystemCommand("rm -rf \"$seqdir\"");
+    my $seqdirname = $SpeciesDir{$Species[$i]}.'seqs/';
+    RunSystemCommand("rm -rf \"$seqdirname\"");
 }
 
 # We'll also clear out the alias and name guide files
-RunSystemCommand("rm \"$seqnamef\"");
+RunSystemCommand("rm \"$seqnamefname\"");
 my $aliasfname = $ResultsDir.'gene-aliases';
 RunSystemCommand("rm \"$aliasfname\"") if (-e $aliasfname);
 
