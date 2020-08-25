@@ -1625,8 +1625,9 @@ sub MergeAlignments
     # let's get that data on-hand
     foreach my $species (@Species) {
 	my $dirname = $SpeciesDir{$species};
-	if (-e $dirname.'arfs') {
-	    my $inf = OpenInputFile($dirname.'arfs');
+	my $arfname = $dirname.'arfs';
+	if (-e $arfname) {
+	    my $inf = OpenInputFile($arfname);
 	    while (my $line = <$inf>) {
 		if ($line =~ /^(\d+) (\S+)/) {
 		    my $seq_id = $1;
@@ -1639,6 +1640,7 @@ sub MergeAlignments
 		}
 	    }
 	    close($inf);
+	    RunSystemCommand("rm \"$arfname\"");
 	}
     }
 
