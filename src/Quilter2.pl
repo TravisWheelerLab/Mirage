@@ -108,7 +108,7 @@ my $blat_naming;
 my @BlatFileNames;
 if ($gtfname ne '-') {
 
-    UseGTF($seq_dirname,$ali_dirname,$genome,$gtfname,$num_cpus,\%Opts);
+    UseGTF($seq_dirname,$genome,$gtfname,$num_cpus,\%Opts);
 
     # Each process MIGHT have left us with a blat file if it had
     # any unfinishable business, so we'll want to aggregate those
@@ -252,7 +252,6 @@ sub ParseChromSizes
 sub UseGTF
 {
     my $seq_dirname = shift;
-    my $ali_dirname = shift;
     my $genome      = shift;
     my $gtfname     = shift;
     my $num_cpus    = shift;

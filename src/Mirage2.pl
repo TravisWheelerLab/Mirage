@@ -720,7 +720,7 @@ sub ParseSpeciesGuide
 	    
 	    $i++;
 
-	} elsif ($line =~ /^\s*(\(.*\))\s*^/) {
+	} elsif ($line =~ /^\s*(\(.*\))\s*$/) {
 
 	    # This looks like a species tree string to me!
 	    $species_tree = lc($1);
@@ -792,6 +792,9 @@ sub SetMergeOrder
 	    $tree_str = '('.$tree_str.','.$species.')';
 	}
     }
+
+    # Let's also make sure that this looks like a valid tree
+    $tree_str = ConfirmValidTree($tree_str);
     
     # Alrighty then, looks like it's time to build up a nice lil' merge order list!
     my @MergeOrder;
@@ -804,6 +807,9 @@ sub SetMergeOrder
 	$merge_pair =~ /\((\S+)\,(\S+)\)/;
 	my $species1 = $1;
 	my $species2 = $2;
+
+	$merge_pair =~ s/\(/\\\(/;
+	$merge_pair =~ s/\)/\\\)/;
 
 	# Are these species names, or merge order coordinates?
 	if ($species1 !~ /^M\d+/) {
@@ -839,6 +845,49 @@ sub SetMergeOrder
     
 }
 
+
+
+
+########################################################################
+#
+#  Function: ConfirmValidTree
+#
+sub ConfirmValidTree
+{
+    my $tree_str = shift;
+
+    # First off, we'll do a raw count of parentheses, to make sure we have
+    # equal numbers of open and close parentheses.  We'll also cover for
+    # the user in case they accidentally left out any commas
+    my $num_open = 0;
+    my $num_close = 0;
+    my $final_tree_str = '';
+    my @TreeChrs = split(//,$tree_str);
+    for (my $i=0; $i<scalar(@TreeChrs); $i++) {
+
+	my $char = $TreeChrs[$i];
+	$num_open++  if ($char eq '(');
+	$num_close++ if ($char eq ')');
+	
+	if ($char =~ /[A-Za-z]/ && $TreeChrs[$i-1] eq ')') {
+	    $final_tree_str = $final_tree_str.',';
+	}
+	
+	$final_tree_str = $final_tree_str.$char;
+	
+	if ($char =~ /[A-Za-z]/ && $TreeChrs[$i+1] eq '(') {
+	    $final_tree_str = $final_tree_str.',';
+	}
+	
+    }
+
+    if ($num_open != $num_close) {
+	die "\n  ERROR:  Species tree has unequal numbers of open and close parens\n\n";
+    }
+
+    return $final_tree_str;
+    
+}
 
 
 
