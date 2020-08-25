@@ -41,7 +41,7 @@ sub ParseSeqNameAsUniProt;
 sub AggregateMappingMisses;
 sub AlignUnmappedSeqs;
 sub AlignMiscSeqs;
-
+sub MergeAlignments;
 
 # VERSION INFO
 my $mirage_version = 'Version 2.0.0a';
@@ -114,30 +114,23 @@ DispProgMirage('init');
 # Convert species guide into three arrays.
 # We'll ignore any species that don't show up
 # in our protein database.
-my ($speciesref,$gtfsref,$genomesref) = ParseSpeciesGuide($SpeciesGuide,$ProteinDB);
-my @Species = @{$speciesref};
-my @GTFs    = @{$gtfsref};
-my @Genomes = @{$genomesref};
+my ($speciesref,$gtfsref,$genomesref,$mergeorderref)
+    = ParseSpeciesGuide($SpeciesGuide,$ProteinDB);
+my @Species     = @{$speciesref};
+my @GTFs        = @{$gtfsref};
+my @Genomes     = @{$genomesref};
+my @MergeOrder  = @{$mergeorderref};
 my $num_species = scalar(@Species);
 
 # Make a directory to store results
 $ResultsDir = CreateDirectory($ResultsDir);
-print "\n  Results Directory:  $ResultsDir\n\n" if ($verbose);
-
 
 # Stick in a directory to record progress information as we're running the
 # various tools that we're so happy to have this opportunity to be running!
 my $progress_dirname = CreateDirectory($ResultsDir.'.progress');
 
-# We'll also create a directory to house any sequences belonging to species that
-# we don't have genomes for.  'Misc' is safe to use because all actual species are
-# lower-cased in our list.
-push(@Species,'Misc');
-
 # Make species-specific results folders
 my %SpeciesDir;
-my %SpeciesSeqDir;
-my %SpeciesMapDir;
 my $AllSpeciesDir = CreateDirectory($ResultsDir.'SpeciesMSAs');
 foreach my $species (@Species) {
     $SpeciesDir{$species} = CreateDirectory($AllSpeciesDir.$species);
@@ -164,22 +157,22 @@ foreach my $species (@Species) {
 #              against (e.g., "nord_pseudo_fam1: obscn titin fgfr2") -- synonyms
 
 DispProgMirage('db-speciation');
-my ($originalseqnames_ref,$genestospecies_ref)
-    = GenerateSpeciesDBs($ProteinDB,$num_cpus,\%SpeciesSeqDir);
-my @OriginalSeqNames = @{$originalseqnames_ref};
+my ($origseqnames_ref,$genestospecies_ref)
+    = GenerateSpeciesDBs($ProteinDB,$num_cpus,\%SpeciesDir);
+my @OrigSeqNames = @{$origseqnames_ref};
 my %GenesToSpecies = %{$genestospecies_ref};
 
 # I'm going to print off all the original sequence names to a file so
 # if things go wrong during a run we can actually figure out who's who
 my $seqnamef = OpenOutputFile($ResultsDir.'seq-name-guide');
-for (my $i=0; $i<scalar(@OriginalSeqNames); $i++) {
-    print $seqnamef "$i: $OriginalSeqNames[$i]\n";
+for (my $i=0; $i<scalar(@OrigSeqNames); $i++) {
+    print $seqnamef "$i: $OrigSeqNames[$i]\n";
 }
 close($seqnamef);
 
 
 # Do our intra-species magic!
-for (my $i=0; $i<$num_species; $i++) {
+for (my $i=0; $i<$num_species-1; $i++) {
 
     my $species_dirname = $SpeciesDir{$Species[$i]};
     my $species_seqdir  = $species_dirname.'seqs/';
@@ -229,14 +222,14 @@ for (my $i=0; $i<$num_species; $i++) {
     $MapsToMSAsTimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
 
     
-    #  M u l t i S e q N W  (less exciting, so less fanfare)
+    #  M u l t i S e q N W
     
     # Align any sequences that didn't fully map by getting all Needleman-Wunsch-y
     my $missesbygene_ref = AggregateMappingMisses($species_dirname);
     AlignUnmappedSeqs($missesbygene_ref,$species_seqdir);
 
     # #SaveTheMappings #MappingsArePeopleToo!
-    SaveSpeciesMappings($species_dirname,\@OriginalSeqNames);
+    SaveSpeciesMappings($species_dirname,\@OrigSeqNames);
 
     # Species[i] over and out!
     ClearProgress();
@@ -254,9 +247,22 @@ AlignMiscSeqs($SpeciesDir{'Misc'});
 # part of the program takes
 $IntervalStart = [Time::HiRes::gettimeofday()];
 
+# Perform a most unnatural merging of alignments! (interspecies -- scandalous!)
+MergeAlignments(\@Species,\%SpeciesDir,\@MergeOrder,\%GenesToSpecies,\@OrigSeqNames);
 
 # Slap that stop-watch!
 $TotalRuntime = Time::HiRes::tv_interval($StartTime);
+
+# For a touch of cleanup, get rid of our species-specific protein databases
+for (my $i=0; $i<$num_species; $i++) {
+    my $seqdir = $SpeciesDir{$Species[$i]}.'seqs/';
+    RunSystemCommand("rm -rf \"$seqdir\"");
+}
+
+# We'll also clear out the alias and name guide files
+RunSystemCommand("rm \"$seqnamef\"");
+my $aliasfname = $ResultsDir.'gene-aliases';
+RunSystemCommand("rm \"$aliasfname\"") if (-e $aliasfname);
 
 # Print out runtime statistitcs
 if ($verbose || $timed) {
@@ -654,13 +660,14 @@ sub VerifiedClean
 #
 sub ParseSpeciesGuide
 {
+    
     my $guide_fname  = shift;
     my $protdb_fname = shift;
 
     my $GuideFile = OpenInputFile($guide_fname);
 
     # It's possible that we'll need to know what '~' means
-    open(my $homecheck,"echo ~ |");
+    my $homecheck = OpenSystemCommand("echo ~");
     my $home = <$homecheck>;
     close($homecheck);
     $home =~ s/\n|\r//g;
@@ -668,7 +675,7 @@ sub ParseSpeciesGuide
     
     my $i = 0;
     my (@Species,@GTFs,@Genomes);
-
+    my $species_tree = 0;
     while (my $line = <$GuideFile>) {
 
 	$line =~ s/\n|\r//g;
@@ -722,6 +729,12 @@ sub ParseSpeciesGuide
 	    
 	    $i++;
 
+	} elsif ($line =~ /^\s*(\(.*\))\s*^/) {
+
+	    # This looks like a species tree string to me!
+	    $species_tree = lc($1);
+	    $species_tree =~ s/\s//g;
+	    
 	} else {
 	    
 	    # Something isn't right
@@ -733,9 +746,107 @@ sub ParseSpeciesGuide
     
     close($GuideFile);
 
-    return (\@Species,\@GTFs,\@Genomes);
+    # If we didn't have any species, this is a prank species guide
+    die "\n  No species entries found in '$guide_fname'\n\n" if (scalar(@Species) == 0);
+
+    # We'll also create a directory to house any sequences belonging to species that
+    # we don't have genomes for.  'Misc' is safe to use because all actual species are
+    # lower-cased in our list.
+    push(@Species,'Misc');
+
+    # Now we'll generate a list of merges that will represent our species tree.
+    # The list contents will be indices into Species or the Merge list, indicated
+    # by 'S' or 'M'
+    my $mergeorder_ref = SetMergeOrder($species_tree,\@Species);
+
+    return (\@Species,\@GTFs,\@Genomes,$mergeorder_ref);
+
 }
 
+
+
+
+
+
+########################################################################
+#
+#  Function: SetMergeOrder
+#
+sub SetMergeOrder
+{
+    my $tree_str = shift;
+    my $species_ref = shift;
+
+    my @Species = @{$species_ref};
+    my $num_species = scalar(@Species);
+
+    # We'll benefit from being able to quickly check our species indices
+    my %SpeciesToIndex;
+    for (my $i=0; $i<$num_species; $i++) {
+	$SpeciesToIndex{$Species[$i]} = $i+1; # Can't have '0' errors!
+    }
+
+    # If we don't have a species tree, we'll fake one.
+    if (!$tree_str) {
+	$tree_str = '('.$Species[0].','.$Species[1].')';
+	for (my $i=2; $i<$num_species; $i++) {
+	    $tree_str = '('.$tree_str.','.$Species[$i].')';
+	}
+    }
+
+    # Before we dig in, let's confirm that all of our species are represented.
+    # If any are missing, just toss 'em on.
+    foreach my $species (@Species) {
+	if ($tree_str !~ /\($species\,|\,$species\)/) {
+	    $tree_str = '('.$tree_str.','.$species.')';
+	}
+    }
+    
+    # Alrighty then, looks like it's time to build up a nice lil' merge order list!
+    my @MergeOrder;
+    my $num_merges = 0;
+    while ($tree_str =~ /(\([^\(]+\,[^\(]+\))/) {
+	
+	my $merge_pair = $1;
+
+	# Who's involved in this merge?
+	$merge_pair =~ /\((\S+)\,(\S+)\)/;
+	my $species1 = $1;
+	my $species2 = $2;
+
+	# Are these species names, or merge order coordinates?
+	if ($species1 !~ /^M\d+/) {
+	    if ($SpeciesToIndex{$species1}) {
+		$species1 = $SpeciesToIndex{$species1}-1;
+		$species1 = 'S'.$species1; 
+	    } else {
+		# UNKNOWN SPECIES!
+		$species1 = 'S'.$num_species;
+	    }
+	}
+	if ($species2 !~ /^M\d+/) {
+	    if ($SpeciesToIndex{$species2}) {
+		$species2 = $SpeciesToIndex{$species2}-1;
+		$species2 = 'S'.$species2; 
+	    } else {
+		# UNKNOWN SPECIES!
+		$species2 = 'S'.$num_species;
+	    }
+	}
+
+	push(@MergeOrder,$species1.','.$species2);
+
+	my $merge_id = 'M'.$num_merges;
+	$num_merges++;
+	
+	# Clear that stinky ol' pair from the tree!
+	$tree_str =~ s/$merge_pair/$merge_id/;
+	
+    }
+
+    return(\@MergeOrder);
+    
+}
 
 
 
@@ -745,9 +856,9 @@ sub ParseSpeciesGuide
 
 ########################################################################
 #
-# Function Name: ConfirmSSI
+#  Function: ConfirmSSI
 #
-# About:  This function takes a fasta-formatted database and either
+#  About: This function takes a fasta-formatted database and either
 #         generates an SSI file (if one doesn't already exist) or 
 #         uses a bit of goofiness to test the accuracy of the existing
 #         one.  If the existing one is inaccurate, it's replaced.
@@ -890,11 +1001,12 @@ sub ConfirmSSI
 #
 sub GenerateSpeciesDBs
 {
+    
     my $ProteinDB_name = shift;
     my $num_cpus       = shift;
     my $specseqdir_ref = shift;
 
-    my %SpeciesSeqDir = %{$specseqdir_ref};
+    my %SpeciesDir = %{$specseqdir_ref};
 
     # The first thing we'll do is scan through our database
     # making a set of species-AND-gene-family mini-databases.
@@ -974,8 +1086,8 @@ sub GenerateSpeciesDBs
 
 	    # Determine the specific file we want to write to
 	    $species = 'Misc' if (!$SpeciesDir{$species});
-	    $spec_gene_filename = $SpeciesSeqDir{$species}.$gene.'.fa';
-
+	    $spec_gene_filename = $SpeciesDir{$species}.'seqs/'.$gene.'.fa';
+	    
 	    # Print that beautiful nameline!
 	    open($SpecGeneFile,'>>',$spec_gene_filename) || die "\n  ERROR:  Failed to open output species-gene database '$spec_gene_filename' ($species)\n\n";
 	    print $SpecGeneFile ">$seq_num\n";
@@ -1008,7 +1120,7 @@ sub GenerateSpeciesDBs
 
     # Next, we'll run through each of our species and determine which gene
     # families belong to which threads.
-    foreach $species (keys %SpeciesSeqDir) {
+    foreach $species (keys %SpeciesDir) {
 
 	# You gotta catch this ol' trickster before it fouls things up!
 	next if ($species eq 'Misc');
@@ -1019,7 +1131,7 @@ sub GenerateSpeciesDBs
 	my $thread_portion = int($tot_chars/$num_cpus);
 
 	# Great! Now we can run through and assign each thread its share of sequences
-	my $ThreadGuide = OpenOutputFile($SpeciesSeqDir{$species}.'Thread-Guide');
+	my $ThreadGuide = OpenOutputFile($SpeciesDir{$species}.'seqs/Thread-Guide');
 	my $threadnum   = 0;
 	my $threadchars = 0;
 
@@ -1170,9 +1282,9 @@ sub ParseSeqNameAsUniProt
 sub SaveSpeciesMappings
 {
     my $species_dirname = shift;
-    my $orig_seqnames_ref = shift;
+    my $origseqnames_ref = shift;
 
-    my @OrigSeqNames = @{$orig_seqnames_ref};
+    my @OrigSeqNames = @{$origseqnames_ref};
     
     my $seqdirname = $species_dirname.'seqs/';
     my $mapdirname = $species_dirname.'mappings/';
@@ -1447,6 +1559,225 @@ sub AlignMiscSeqs
     AlignUnmappedSeqs(\%SeqsByGene,$dirname);
     
 }
+
+
+
+
+
+########################################################################
+#
+#  Function: MergeAlignments
+#
+sub MergeAlignments
+{
+    my $species_ref = shift;
+    my $speciesdir_ref = shift;
+    my $mergeorder_ref = shift;
+    my $genestospecies_ref = shift;
+    my $origseqnames_ref = shift;
+
+    my @Species = @{$species_ref};
+    my %SpeciesDir = %{$speciesdir_ref};
+    my @MergeOrder = @{$mergeorder_ref};
+    my %GenesToSpecies = %{$genestospecies_ref};
+    my @OrigSeqNames = @{$origseqnames_ref};
+
+    my $num_species = scalar(@Species);
+    my $num_merges = scalar(@MergeOrder);
+
+    # We'll need to add ARF information to the sequence names, so
+    # let's get that data on-hand
+    foreach my $species (@Species) {
+	my $dirname = $SpeciesDir{$species};
+	if (-e $dirname.'arfs') {
+	    my $inf = OpenInputFile($dirname.'arfs');
+	    while (my $line = <$inf>) {
+		if ($line =~ /^(\d+) (\S+)/) {
+		    my $seq_id = $1;
+		    my $arf_data = $2;
+		    if ($OrigSeqNames[$seq_id] =~ /\#/) {
+			$OrigSeqNames[$seq_id] = $OrigSeqNames[$seq_id].' '.$arf_data;
+		    } else {
+			$OrigSeqNames[$seq_id] = $OrigSeqNames[$seq_id].' #'.$arf_data;
+		    }
+		}
+	    }
+	    close($inf);
+	}
+    }
+
+    # Where are we writing out our final MSAs?
+    my $FinalDir = CreateDirectory($ResultsDir.'FinalMSAs');
+
+    # Make a shared gene list so nobody's stepping on anyone's toes
+    my @Genes = keys %GenesToSpecies;
+
+    # Make a secret temporary directory to store intermediate results
+    my $tmpdir = CreateDirectory($ResultsDir.'.tmp-msas');
+
+    # Threadify and get 'em done!
+    $num_cpus = Min($num_cpus,scalar(@Genes));
+    my $threadID = SpawnProcesses($num_cpus);
+
+    my $start_gene_id =  $threadID    * int(scalar(@Genes)/$num_cpus);
+    my $end_gene_id   = ($threadID+1) * int(scalar(@Genes)/$num_cpus);
+    $end_gene_id = scalar(@Genes) if ($threadID == $num_cpus-1);
+
+    # Merge time!
+    for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
+
+	# For each species, see who has this gene in their repetoire
+	my $gene = $Genes[$gene_id];
+	my @SpeciesFiles;
+	for (my $i=0; $i<$num_species; $i++) {
+	    my $fname = $SpeciesDir{$Species[$i]}.'seqs/'.$gene.'.afa';
+	    if (-e $fname) { $SpeciesFiles[$i] = $fname; }
+	    else           { $SpeciesFiles[$i] = 0;      }
+	}
+	$SpeciesFiles[$num_species] = 0; # In case of unknown species
+
+	# Merge 'em if you got 'em
+	my @MergeFiles;
+	for (my $merge=0; $merge<$num_merges; $merge++) {
+
+	    $MergeOrder[$merge] =~ /^(\S+)\,(\S+)$/;
+	    my $species1 = $1;
+	    my $species2 = $2;
+
+	    # Are we working with individual species, or pre-merged files?
+	    if ($species1 =~ /S(\d+)/) {
+		$species1 = $SpeciesFiles[$1];
+		FinalizeIntraSpeciesMSA($species1,\@OrigSeqNames);
+	    } elsif ($species1 =~ /M(\d+)/) {
+		$species1 = $MergeFiles[$1];
+	    }
+
+	    if ($species2 =~ /S(\d+)/) {
+		$species2 = $SpeciesFiles[$1];
+		FinalizeIntraSpeciesMSA($species2,\@OrigSeqNames);
+	    } elsif ($species2 =~ /M(\d+)/) {
+		$species2 = $MergeFiles[$1];
+	    }
+
+	    # If these gene isn't attributable to either species, things are
+	    # really easy!
+	    if ($species1 == 0 && $species2 == 0) {
+		$MergeFiles[$merge] = 0;
+		next;
+	    }
+
+	    # Well, we at least know that there's a file we'll be creating
+	    $MergeFiles[$merge] = $tmpdir.$threadID.'-'.$merge.'.afa';
+	    
+	    # If this gene is only present in one species, then we just move
+	    # the file.
+	    if ($species1 == 0) {
+		RunSystemCommand("mv \"$species2\" \"$MergeFiles[$merge]\"");
+		next;
+	    }
+	    if ($species2 == 0) {
+		RunSystemCommand("mv \"$species1\" \"$MergeFiles[$merge]\"");
+		next;
+	    }
+
+	    # UGH, we have to do WORK?!  UGGGGGHHHHHH
+
+	    # How many sequences are in each file?
+	    my $grep = OpenSystemCommand("grep '>' \"$species1\" | wc -l |");
+	    my $numseqs1 = <$grep>;
+	    $numseqs1 = int($numseqs1);
+	    close($grep);
+
+	    $grep = OpenSystemCommand("grep '>' \"$species2\" | wc -l |");
+	    my $numseqs2 = <$grep>;
+	    $numseqs2 = int($numseqs2);
+	    close($grep);
+
+	    # Gotta git down with that Needleman-Wunsch
+	    my $nwcmd = $location."MultiSeqNW \"$species1\" $numseqs1 ";
+	    $nwcmd = $nwcmd."\"$species2\" $numseqs2 > \"$MergeFiles[$merge]\"";
+	    RunSystemCommand($nwcmd);
+
+	    # We'll remove the input files, just to avoid excessive storage use
+	    RunSystemCommand("rm \"$species1\"");
+	    RunSystemCommand("rm \"$species2\"");
+
+	}
+
+	# Files merged! Time to finalize the final sequence!
+	my $infname = $MergeFiles[$num_merges-1];
+	my $outfname = $FinalDir.$gene.'.afa';
+
+	# (Sometimes finalization begins with a touch of cleanup)
+	if ($cleanMSA) {
+	    my $tmpname = $infname;
+	    $tmpname =~ s/\.afa$/\.tmp/;
+	    RunSystemCommand($location."FinalMSA.pl \"$infname\" \"$tmpname\"");
+	    $infname = $tmpname;
+	}
+
+	# Big move's a-comin'!
+	my $inf = OpenInputFile($infname);
+	my $outf = OpenOutputFile($outfname);
+	while (my $line = <$inf>) {
+	    $line =~ s/\n|\r//g;
+	    if ($line =~ /\>(\d+)/) {
+		print $outf ">$OrigSeqNames[$1]\n";
+	    } else {
+		print $outf "$line\n";
+	    }
+	}
+	close($outf);
+	close($inf);
+	
+    }
+    
+    # Amazing work, team!  Now bring it in to the chillout tent
+    if ($threadID) { exit(0); }
+    while (wait() != -1) {}
+
+    # Clear out the secret temporary directory and bump on back to the top level!
+    RunSystemCommand("rm -rf \"$tmpdir\"");
+    
+}
+
+
+
+
+
+
+
+########################################################################
+#
+#  Function: FinalizeIntraSpeciesMSA
+#
+sub FinalizeIntraSpeciesMSA
+{
+    my $infname = shift;
+    my $origseqnames_ref = shift;
+
+    my @OrigSeqNames = @{$origseqnames_ref};
+
+    $infname =~ /^(.*\/)seqs(\/[^\/]+)$/;
+    my $outfname = $1.'alignments'.$2;
+
+    my $inf  = OpenInputFile($infname);
+    my $outf = OpenOutputFile($outfname);
+    while (my $line = <$inf>) {
+	$line =~ s/\n|\r//g;
+	if ($line =~ /\>(\d+)/) {
+	    my $seq_id = $1;
+	    print $outf ">$OrigSeqNames[$seq_id]\n";
+	} else {
+	    print $outf "$line\n";
+	}
+    }
+    close($outf);
+    close($inf);
+    
+}
+
+
 
 
 
