@@ -24,8 +24,6 @@ use DisplayProgress;
 
 
 sub WriteMSAToFile;
-
-
 sub GetNextExonRange;   # Identify the start and end points of the next exon (nucleotide values)
 sub UniteARFSegments;   # When we have adjacent ARF segments, group them by sequence
 sub MatrixRecurse;      # Used by UniteARFSegments during clustering
@@ -53,6 +51,9 @@ close($ThreadGuide);
 $num_cpus =~ /Num CPUs\: (\d+)/;
 $num_cpus = $1;
 
+# Let's get progressive
+InitMapsToMSAsProgressVars($dirname,$num_cpus);
+
 # Spawn your friends and get to work!
 my $threadID = SpawnProcesses($num_cpus);
 
@@ -62,6 +63,7 @@ my $ARFfile = OpenOutputFile($dirname.$threadID.'-ARFs');
 # Ugh, do we *really* have to reopen that stinky old Thread-Guide?
 $ThreadGuide = OpenInputFile($dirname.'Thread-Guide');
 my $tg_line = <$ThreadGuide>; # Num CPUs line
+my $genes_completed = 0;
 while ($tg_line = <$ThreadGuide>) {
 
     # We only want the finest sequences, hand-selected for this thread
@@ -245,6 +247,10 @@ while ($tg_line = <$ThreadGuide>) {
     #
     my $outfname = $dirname.$gene.'.afa';
     WriteMSAToFile(\@MSA,\@SeqNames,\@OrigSeqs,$num_seqs,$msa_len,$outfname);
+
+    # Gene completed!
+    $genes_completed++;
+    DispProgMapsToMSAs('aligning|'.$threadID.'|'.$genes_completed);
     
 }
 

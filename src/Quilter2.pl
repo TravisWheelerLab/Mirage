@@ -301,11 +301,9 @@ sub UseGTF
 	if ($gene =~ /^$threadID (\S+)$/) { $gene = $1; }
 	else                              { $gene = 0;  }
 
-	# Report your progress ~1/15 of the time (with a special primer check)
+	# Report your progress
 	$genes_completed++;
-	if (!int(rand(15)) || ($threadID == 0 && $genes_completed == 1)) {
-	    DispProgQuilter('fm2|'.$threadID.'|'.$genes_completed);
-	}
+	DispProgQuilter('fm2|'.$threadID.'|'.$genes_completed);
 
 	
     }
@@ -2827,9 +2825,7 @@ sub GenBlatMaps
 
 	# Regardless of whether or not we found anything, we're done with this gene!
 	$genes_completed++;
-	if (!int(rand(15)) || (!$threadID && $genes_completed == 1)) {
-	    DispProgQuilter('blat2spaln|'.$threadID.'|'.$genes_completed);
-	}
+	DispProgQuilter('blat2spaln|'.$threadID.'|'.$genes_completed);
 
 	# Well well welly well...
 	# Do we have any full maps to add to our '.quilter.out' file?

@@ -104,12 +104,13 @@ my $just_spaln   = $Options{justspaln};    # Hidden
 my $track_spaln  = $Options{trackspaln};   # Hidden
 
 
-# We've officially started Mirage-ery!
-DispProgMirage('init');
-
 # Verify that we have all the files we need on-hand
 #CheckSourceFiles($forcecompile);
 
+# Stick in a directory to record progress information as we're running the
+# various tools that we're so happy to have this opportunity to be running!
+my $progress_dirname = CreateDirectory($ResultsDir.'.progress');
+InitMirageProgressVars($progress_dirname,$num_cpus);
 
 # Convert species guide into three arrays.
 # We'll ignore any species that don't show up
@@ -124,10 +125,6 @@ my $num_species = scalar(@Species);
 
 # Make a directory to store results
 $ResultsDir = CreateDirectory($ResultsDir);
-
-# Stick in a directory to record progress information as we're running the
-# various tools that we're so happy to have this opportunity to be running!
-my $progress_dirname = CreateDirectory($ResultsDir.'.progress');
 
 # Make species-specific results folders
 my %SpeciesDir;
@@ -208,7 +205,7 @@ for (my $i=0; $i<$num_species-1; $i++) {
 
     
     #  M u l t i S e q N W
-    
+
     # Align any sequences that didn't fully map by getting all Needleman-Wunsch-y
     my $missesbygene_ref = AggregateMappingMisses($species_dirname);
     AlignUnmappedSeqs($missesbygene_ref,$species_seqdir);
@@ -298,6 +295,9 @@ if ($verbose || $timed) {
 # No more progress to be made!
 system("rm -rf \"\$progress_dirname\"");
 
+# WE DID IT!
+ClearProgress();
+print "\n  Mirage complete: Results in $ResultsDir\n\n";
 
 # What, that's all you got? Pssssh, shoulda known it was gonna be EZ PZ :p
 1;
@@ -1453,6 +1453,11 @@ sub AlignUnmappedSeqs
 
     my %MappingMissesByGene = %{$missesbygene_ref};
 
+    # We'll need to do a quick reverse-engineer of the species name...
+    $dirname =~ /\/([^\/]+)\/seqs\//;
+    my $species = $1;
+    DispProgMirage('msnw-init|0|'.$species);
+    
     # We'll make a list and determine how many threads to spawn
     my @GeneList = keys %MappingMissesByGene;
     my $num_threads = Min($num_cpus,scalar(@GeneList));
@@ -1465,6 +1470,7 @@ sub AlignUnmappedSeqs
     $end = scalar(@GeneList) if ($threadID == $num_threads-1);
 
     # Go off!
+    my $genes_completed = 0;
     for (my $gene_id=$start; $gene_id<$end; $gene_id++) {
 
 	my $gene = $GeneList[$gene_id];
@@ -1544,6 +1550,10 @@ sub AlignUnmappedSeqs
 
 	# We don't want any fake '.afa' files clogging up the ol' pipey-pipes
 	RunSystemCommand("rm \"$tmp_outfname\"") if (-e $tmp_outfname);
+
+	# Nice work!
+	$genes_completed++;
+	DispProgMirage('msnw-loop|'.$threadID.'|'.$genes_completed);
 	
     }
 
@@ -1621,6 +1631,9 @@ sub MergeAlignments
     my $num_species = scalar(@Species);
     my $num_merges = scalar(@MergeOrder);
 
+    # Announcement! We're the best!
+    DispProgMirage('msnw-init|0|FINAL');
+
     # We'll need to add ARF information to the sequence names, so
     # let's get that data on-hand
     foreach my $species (@Species) {
@@ -1659,6 +1672,7 @@ sub MergeAlignments
     $end_gene_id = scalar(@AllGenes) if ($threadID == $num_cpus-1);
 
     # Merge time!
+    my $genes_completed = 0;
     for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
 
 	# For each species, see who has this gene in their repetoire
@@ -1765,6 +1779,10 @@ sub MergeAlignments
 	}
 	close($outf);
 	close($inf);
+	
+	# Ummm, you okay, gorgeous? 'Cuz you're KILLING IT!
+	$genes_completed++;
+	DispProgMirage('msnw-loop|'.$threadID.'|'.$genes_completed);
 	
     }
     

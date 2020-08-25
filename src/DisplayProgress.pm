@@ -8,11 +8,14 @@ sub PrintProgress;
 sub ClearProgress;
 
 # Functions for setting global variables
+sub InitMirageProgressVars;
 sub InitQuilterProgressVars;
+sub InitMapsToMSAsProgressVars;
 
 # Many functions for specific outs-put
 sub DispProgMirage;
 sub DispProgQuilter;
+sub DispProgMapsToMSAs;
 
 # Before we get going, let's set a standardized character limit for status messages.
 # Note that we go with a fairly large number to try to get at least one line of
@@ -27,10 +30,51 @@ my $DispProg_cpus;
 
 my @QuilterFM2Genes;
 my @QuilterB2SGenes;
+my @MapsToMSAsGenes;
+my @MultiSeqNWGenes;
 
 
 
 ###############################################################
+#
+#  Functions: PrintProgress & ClearProgress
+#
+sub PrintProgress
+{
+    my $str = shift;
+    $str = $str.' ' while (length($str) < $DispProg_line_len);
+    print "$str\r";
+}
+sub ClearProgress { PrintProgress(' '); }
+
+
+
+
+###############################################################
+#
+#  Function: InitMirageProgressVars
+#
+sub InitMirageProgressVars
+{
+    my $progress_dirname = shift;
+    my $num_cpus = shift;
+
+    # Record the location of the progress alcove
+    $DispProg_dirname = $progress_dirname;
+
+    # Copy over the number of cpus (requested -- still want to be careful!)
+    $DispProg_cpus = $num_cpus;
+
+    # Let 'em know we're initialized!
+    DispProgMirage('init');    
+}
+
+
+
+
+###############################################################
+#
+#  Function: InitQuilterProgressVars
 #
 sub InitQuilterProgressVars
 {
@@ -66,17 +110,43 @@ sub InitQuilterProgressVars
 
 ###############################################################
 #
-sub PrintProgress
+#  Function: InitMapsToMSAsProgressVars
+#
+sub InitMapsToMSAsProgressVars
 {
-    my $str = shift;
-    $str = $str.' ' while (length($str) < $DispProg_line_len);
-    print "$str\r";
+    my $seqdirname = shift;
+    my $num_cpus = shift;
+
+    # Reverse engineer the location of the progress alcove and species name
+    # from the sequence directory name
+    $seqdirname =~ /\/([^\/]+)\/seqs\/$/;
+    $DispProg_species = $1;
+
+    $seqdirname =~ s/[^\/]+\/$//; # seqs -> species
+    $seqdirname =~ s/[^\/]+\/$//; # species -> SpeciesMSAs
+    $seqdirname =~ s/[^\/]+\/$//; # SpeciesMSAs -> MirageResults    
+    $seqdirname = $seqdirname.'.progress/';
+    $DispProg_dirname = $seqdirname;
+
+    # Copy over the number of cpus (requested -- still want to be careful!)
+    $DispProg_cpus = $num_cpus;
+
+    # Zero-out the gene completion counters
+    for (my $i=0; $i<$num_cpus; $i++) {
+	$MapsToMSAsGenes[$i] = 0;
+    }
+
+    # Let 'em know we're initialized!
+    DispProgMapsToMSAs('init');
+    
 }
-sub ClearProgress { PrintProgress(' '); }
+
 
 
 
 ###############################################################
+#
+#  Function: DispProgMirage
 #
 sub DispProgMirage
 {
@@ -85,15 +155,65 @@ sub DispProgMirage
 
     # Field 0 is always the part of the program we're working on
     my $part = $Data[0];
-	
+
+    # During the MultiSeqNW-y stages of the pipeline, we might be threaded
+    my $threadID = 0;
+    $threadID = $Data[1] if (scalar(@Data) > 1);
+    
     my $status = "  Mirage: ";
     if ($part eq 'init') {
+
 	$status = $status."Checking files and performing setup";
+	
     } elsif ($part eq 'db-speciation') {
+	
 	$status = $status."Dividing protein database according to species";
+	
+    } elsif ($part eq 'msnw-init') {
+
+	for (my $i=0; $i<$DispProg_cpus; $i++) {
+	    $MultiSeqNWGenes[$i] = 0;
+	}
+
+	$DispProg_species = $Data[2];
+	if ($DispProg_species eq 'FINAL') {
+	    $status = "Preparing to generate interspecies alignments";
+	} else {
+	    $status = "Preparing to join unmapped sequences to $DispProg_species MSAs";
+	}
+	
+    } elsif ($part eq 'msnw-loop') {
+
+	# Write out how many genes you've completed to a secret file!
+	my $genes_completed = $Data[2];
+	my $outfbase = $DispProg_dirname.$DispProg_species.'.MSNW.';
+	open(my $outf,'>',$outfbase.$threadID);
+	print $outf "$genes_completed\n";
+	close($outf);
+
+	# If you're the master, count the total number of completed genes and
+	# compose a status report
+	if (!$threadID) {
+	    for (my $i=1; $i<$DispProg_cpus; $i++) {
+		my $outfname = $outfbase.$i;
+		if (-e $outfname) {
+		    open(my $inf,'<',$outfname);
+		    my $thread_genes = <$inf>;
+		    close($inf);
+		    if ($thread_genes && $thread_genes =~ /(\d+)/) {
+			$MultiSeqNWGenes[$i] = $1;
+		    }
+		    $genes_completed += $MultiSeqNWGenes[$i];
+		}
+	    }
+	    $status = $status."$genes_completed MSAs constructed";
+	    $status =~ s/ 1 MSAs / 1 MSA /;
+	}
+
     }
     
-    PrintProgress($status);
+    PrintProgress($status) if (!$threadID);
+    
 }
 
 
@@ -102,6 +222,8 @@ sub DispProgMirage
 
 
 ###############################################################
+#
+#  Function: DispProgQuilter
 #
 sub DispProgQuilter
 {
@@ -198,6 +320,71 @@ sub DispProgQuilter
     PrintProgress($status) if (!$threadID);
     
 }
+
+
+
+
+
+
+###############################################################
+#
+#  Function: DispProgMapsToMSAs
+#
+sub DispProgMapsToMSAs
+{
+    my $data_str = shift;
+    my @Data = split(/\|/,$data_str);
+
+    my $part = $Data[0];
+
+    # Do we have a thread ID?
+    my $threadID = 0;
+    $threadID = $Data[1] if (scalar(@Data) > 1);
+
+    # Gotta love this one
+    my $status = "  MapsToMSAs ($DispProg_species): ";
+
+    # Do a lil' bit o' work
+    if ($part eq 'init') {
+
+	$status = $status."Preparing to generate alignments using genome mappings";
+	
+    } elsif ($part eq 'aligning') {
+
+	# Write out how many genes you've completed to a secret file!
+	my $genes_completed = $Data[2];
+	my $outfbase = $DispProg_dirname.$DispProg_species.'.MapsToMSAs.';
+	open(my $outf,'>',$outfbase.$threadID);
+	print $outf "$genes_completed\n";
+	close($outf);
+
+	# If you're the master, count the total number of completed genes and
+	# compose a status report
+	if (!$threadID) {
+	    for (my $i=1; $i<$DispProg_cpus; $i++) {
+		my $outfname = $outfbase.$i;
+		if (-e $outfname) {
+		    open(my $inf,'<',$outfname);
+		    my $thread_genes = <$inf>;
+		    close($inf);
+		    if ($thread_genes && $thread_genes =~ /(\d+)/) {
+			$MapsToMSAsGenes[$i] = $1;
+		    }
+		    $genes_completed += $MapsToMSAsGenes[$i];
+		}
+	    }
+	    $status = $status."$genes_completed genes aligned using genome mappings";
+	    $status =~ s/ 1 genes / 1 gene /;
+	}
+	
+    }
+
+    PrintProgress($status) if (!$threadID);
+    
+}
+
+
+
 
 
 
