@@ -252,46 +252,6 @@ if (!$misc_seqs) {
     RunSystemCommand("rm -rf \"$miscdir\"");
 }
 
-# Print out runtime statistitcs
-if ($verbose || $timed) {
-    my $formattedTime;
-    print "\n\n\n";
-    print "  +---------------------------------------------------+\n";
-    print "                   Runtime Statistics \n";
-    print "  +---------------------------------------------------+\n";
-    for (my $i=0; $i<$num_species; $i++) {
-	
-	print "\n";
-	print "    Species        : $Species[$i]\n";
-	
-	$formattedTime = sprintf("%.3f",$QuilterTimeStats[$i]);
-	print "    Hit Stitching  : $formattedTime seconds\n";
-	
-	$formattedTime = sprintf("%.3f",$MapsToMSAsTimeStats[$i]);
-	print "    MSA Generation : $formattedTime seconds\n";
-	print "\n";
-	
-    }
-    
-    print "\n";
-    $formattedTime = sprintf("%.3f",$MultiSeqNWTime);
-    print "    Final MSA Generation  : $formattedTime seconds\n";
-    
-    $formattedTime = sprintf("%.3f",$AvgNWTime);
-    print "    Avg MSA Time per Gene : $formattedTime seconds\n";
-    
-    print "\n\n";
-    my $TotalRunMins = int($TotalRuntime / 60);
-    my $TotalRunSecs = $TotalRuntime - (60 * $TotalRunMins);
-    $formattedTime = sprintf("%d minutes %.3f seconds",$TotalRunMins,$TotalRunSecs);
-    print "    TOTAL RUNTIME : $formattedTime \n";
-    print "\n\n";
-    
-    print "  +---------------------------------------------------+\n";
-    print "\n\n\n";
-
-}
-
 # No more progress to be made!
 system("rm -rf \"\$progress_dirname\"");
 
