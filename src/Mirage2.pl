@@ -799,7 +799,7 @@ sub SetMergeOrder
     # Alrighty then, looks like it's time to build up a nice lil' merge order list!
     my @MergeOrder;
     my $num_merges = 0;
-    while ($tree_str =~ /(\([^\(]+\,[^\(]+\))/) {
+    while ($tree_str =~ /(\([\w\-\:]+\,[\w\-\:]+\))/) {
 	
 	my $merge_pair = $1;
 
