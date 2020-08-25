@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-# FinalMSA.pl - Alex Nord - 2016
+# MSA.pl - Alex Nord - 2016
 #
 # ABOUT: This script takes an MSA with splice site markers and
 #        cleans it up to make mirage's finished product.
@@ -10,8 +10,6 @@ use strict;
 use POSIX;
 
 
-sub MAX;
-sub MIN;
 sub RemoveIntronGaps;
 sub PostHocCleanup;
 
@@ -19,77 +17,51 @@ sub PostHocCleanup;
 
 # Because this script only makes sense within the context of mirage,
 # we don't offer additional options.
-if (@ARGV != 2) { die "\n  USAGE:  perl FinalMSA.pl <in> <out>\n\n"; }
-
-
-my ($i,$j,$k);
+if (@ARGV != 2) { die "\n  USAGE:  perl MSA.pl <in> <out>\n\n"; }
 
 
 # Where we'll store the sequence names and the MSA
-my @Headers;
-my @BigMSA;
+my @SeqNames;
+my @MSA;
 
-# Length of the seq.s in the MSA
-my $MSALength;
-
-# Ripping the sequences from the input file, storing them in BigMSA
-open(my $inf,'<',$ARGV[0]) || die "  Failed to open file '$ARGV[0]'\n";
-my $numSeqs = 0;
-my $line = <$inf>;
-while (!eof($inf)) {
+# Ripping the sequences from the input file, storing them in the MSA
+my $inf = OpenInputFile($ARGV[0]);
+my $msa_len;
+my $num_seqs = -1;
+while (my $line = <$inf>) {
 
     $line =~ s/\n|\r//g;
-    while (!eof($inf) && $line !~ /^\>/) {
-	$line =  <$inf>;
-	$line =~ s/\n|\r//g;
-    }
+    next if (!$line);
 
-    last if (eof($inf));
-
-    # Make sure we like how the header looks
-    my $header = $line;
-    if ($header !~ /^>GN\:/) {
-	$header =~ s/\>//g;
-	$header = '>GN:'.$header;
-    }
-
-    $Headers[$numSeqs] = $header;
-
-    $i = 0;
-    $line = <$inf>;
-    while ($line !~ /^\>/) {
-	$line =~ s/\n|\r//g;
-	if ($line) {
-	    my @seqline = split('',$line);
-	    foreach $j (@seqline) {
-		$BigMSA[$numSeqs][$i] = $j;
-		$i++;
-	    }
+    if ($line =~ /\>(\S+)/) {
+	push(@SeqNames,$1);
+	$num_seqs++;
+	$msa_len=0;
+    } else {
+	foreach my $char (split(//,$line)) {
+	    $MSA[$num_seqs][$msa_len] = $char;
+	    $msa_len++;
 	}
-	last if (eof($inf));
-	$line  = <$inf>;
     }
-    $MSALength = $i;
-
-    $numSeqs++;
-
+    
 }
+$num_seqs++;
 close($inf);
 
 
 # Remove intron gaps from the MSA
-#
-my ($MSAref,$FinalLength) = RemoveIntronGaps(\@BigMSA,$MSALength,$numSeqs);
-my @FinalMSA = @{$MSAref};
+my $msa_ref;
+($msa_ref,$msa_len) = RemoveIntronGaps(\@MSA,$msa_len,$num_seqs);
+@MSA = @{$msa_ref};
 
 
 # Our post-hoc cleanup -- correcting 'jigsaw' ugliness and other
 # obvious imperfections.
 #
-if ($numSeqs > 1) {
-    my ($cleanedMSA,$cleanLength) = PostHocCleanup(\@FinalMSA,$FinalLength,$numSeqs);
-    @FinalMSA = @{$cleanedMSA};
-    $FinalLength = $cleanLength;
+if ($num_seqs > 1) {
+    my ($cleanmsa_ref,$clean_len) = PostHocCleanup(\@MSA,$msa_len,$num_seqs);
+    @MSA = @{$cleanmsa_ref};
+    $msa_len = $clean_len;
 }
 
 
@@ -103,27 +75,27 @@ if ($numSeqs > 1) {
 # otherwise <--- on the condition that there's already at least one 'M'
 #                at the new start position in the MSA
 #
-for (my $i=0; $i<$numSeqs; $i++) {
+for (my $i=0; $i<$num_seqs; $i++) {
 
-    if (uc($FinalMSA[$i][0]) eq 'M' && $FinalMSA[$i][1] eq '-') {
+    if (uc($MSA[$i][0]) eq 'M' && $MSA[$i][1] eq '-') {
 
 	my $j=2;
-	while ($FinalMSA[$i][$j] eq '-') {
+	while ($MSA[$i][$j] eq '-') {
 	    $j++;
 	}
 	$j--;
 
 	my $m_support = 0;
-	for (my $k=0; $k<$numSeqs; $k++) {
-	    if (uc($FinalMSA[$k][$j]) eq 'M') {
+	for (my $k=0; $k<$num_seqs; $k++) {
+	    if (uc($MSA[$k][$j]) eq 'M') {
 		$m_support = 1;
 		last;
 	    }
 	}
 
 	if ($m_support) {
-	    $FinalMSA[$i][$j] = $FinalMSA[$i][0];
-	    $FinalMSA[$i][0]  = '-';
+	    $MSA[$i][$j] = $MSA[$i][0];
+	    $MSA[$i][0]  = '-';
 	}
 
     }
@@ -131,16 +103,15 @@ for (my $i=0; $i<$numSeqs; $i++) {
 
 
 # Print out our final MSA
-open(my $outf,'>',$ARGV[1]);
-foreach $i (0..$numSeqs-1) {
-    $j = 0;
-    print $outf "$Headers[$i]\n";
-    while ($j < $FinalLength) {
-	print $outf "$FinalMSA[$i][$j]";
-	$j++;
-	print $outf "\n" if ($j % 50 == 0);
+my $outf = OpenOutputFile($ARGV[1]);
+for (my $i=0; $i<$num_seqs; $i++) {
+    print $outf "$SeqNames[$i]\n";
+    for (my $j=0; $j<$msa_len; $j++) {
+	print $outf "$MSA[$i][$j]";
+	print $outf "\n" if (($j+1) % 60 == 0);
     }
-    print $outf "\n" if ($j % 50);
+    print $outf "\n" if ($msa_len % 60);
+    print $outf "\n";
 }
 close($outf);
 
@@ -161,37 +132,6 @@ close($outf);
 
 
 
-
-#
-# MAX
-#
-sub MAX
-{
-    my $a = shift;
-    my $b = shift;
-    return $a if ($a > $b);
-    return $b;
-}
-
-
-
-
-
-
-#
-# MIN
-#
-sub MIN
-{
-    my $a = shift;
-    my $b = shift;
-    return $a if ($a < $b);
-    return $b;
-}
-
-
-
-
 ########################################################################
 #
 # Function: RemoveIntronGaps
@@ -200,35 +140,32 @@ sub MIN
 #
 sub RemoveIntronGaps
 {
-
-    my ($i, $j, $k);
-
     my $MSAref = shift;
-    my @BigMSA = @{$MSAref};
+    my @MSA = @{$MSAref};
 
-    my $MSALength = shift;
-    my $num_seqs  = shift;
+    my $msa_len = shift;
+    my $num_seqs = shift;
     
     my @CleanMSA;
     my $CleanLength = 0;
-    for ($j=0; $j<$MSALength; $j++) {
+    for (my $j=0; $j<$msa_len; $j++) {
 
 	my $splice_site = 0;
 	my $gap_count   = 0;
 
-	for ($i=0; $i<$num_seqs; $i++) {
+	for (my $i=0; $i<$num_seqs; $i++) {
 
 	    # It's a splice boundary marker
-	    if ($BigMSA[$i][$j] eq '*') {
+	    if ($MSA[$i][$j] eq '*') {
 		$splice_site = 1;
 		last;
 	    }
 
 	    # There's a gap
-	    if ($BigMSA[$i][$j] eq '-') { $gap_count++; }
+	    if ($MSA[$i][$j] eq '-') { $gap_count++; }
 
 	    # Record this character
-	    $CleanMSA[$i][$CleanLength] = $BigMSA[$i][$j];
+	    $CleanMSA[$i][$CleanLength] = $MSA[$i][$j];
 	    
 	}
 
@@ -251,7 +188,6 @@ sub RemoveIntronGaps
 #
 sub PostHocCleanup
 {
-
     my $msa_ref  = shift;
     my $msa_len  = shift;
     my $num_seqs = shift;
