@@ -9,6 +9,10 @@ use warnings;
 use strict;
 use POSIX;
 
+# YUCKITY YUCK YUCK
+sub GetThisDir { my $lib = $0; $lib =~ s/\/FinalMSA.pl$//; return $lib; }
+use lib GetThisDir();
+use BureaucracyMirage;
 
 sub RemoveIntronGaps;
 sub PostHocCleanup;
