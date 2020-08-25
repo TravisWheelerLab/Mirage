@@ -139,28 +139,12 @@ foreach my $species (@Species) {
     CreateDirectory($SpeciesDir{$species}.'mappings');
 }
 
-# Create a temp directory in the results directory where we'll hide all of our secrets.
-#my $tempdirname = $ResultsDir.'temp/';
-#if (-d($tempdirname)) { system("rm -rf $tempdirname"); }
-#if (system("mkdir $tempdirname")) { die "\n  ERROR:  Failed to generate temporary directory '$tempdirname'\n\n"; }
-#
-# EDIT: Each process is liable to have its own tempdir location, so we accomodate them
-
-# Make species-specific databases, organized by gene family
-#
-# M2: We're going to want to be able to parse straight-from-SwissProt/TrEMBL seqnames.
-#
-#     We're also switching all names to a simple numeric value.  Everything else is
-#     already implicit (i.e., species and gene names).
-#
-# TODO, MAYBE: Allow for users to provide a list of genes to try searching a family
-#              against (e.g., "nord_pseudo_fam1: obscn titin fgfr2") -- synonyms
-
+# Divide the database according to species
 DispProgMirage('db-speciation');
-my ($origseqnames_ref,$genestospecies_ref)
+my ($origseqnames_ref,$allgenes_ref)
     = GenerateSpeciesDBs($ProteinDB,$num_cpus,\%SpeciesDir);
 my @OrigSeqNames = @{$origseqnames_ref};
-my %GenesToSpecies = %{$genestospecies_ref};
+my @AllGenes = @{$allgenes_ref};
 
 # I'm going to print off all the original sequence names to a file so
 # if things go wrong during a run we can actually figure out who's who
@@ -233,7 +217,7 @@ for (my $i=0; $i<$num_species-1; $i++) {
 
     # Species[i] over and out!
     ClearProgress();
-    print "Intra-species alignment complete for $Species[$i]\n";
+    print "  Intra-species alignment complete for $Species[$i]\n";
 
 }
 
@@ -248,7 +232,7 @@ AlignMiscSeqs($SpeciesDir{'Misc'});
 $IntervalStart = [Time::HiRes::gettimeofday()];
 
 # Perform a most unnatural merging of alignments! (interspecies -- scandalous!)
-MergeAlignments(\@Species,\%SpeciesDir,\@MergeOrder,\%GenesToSpecies,\@OrigSeqNames);
+MergeAlignments(\@Species,\%SpeciesDir,\@MergeOrder,\@AllGenes,\@OrigSeqNames);
 
 # Slap that stop-watch!
 $TotalRuntime = Time::HiRes::tv_interval($StartTime);
@@ -1023,7 +1007,7 @@ sub GenerateSpeciesDBs
     my $ProteinDB = OpenInputFile($ProteinDB_name);
     my $seq_num = 0;
     my @OriginalSeqNames;
-    my %SpeciesGeneHash;
+    my %GeneHash;
     my $spec_gene_filename;
     my $SpecGeneFile;
     my $species;
@@ -1092,8 +1076,8 @@ sub GenerateSpeciesDBs
 	    open($SpecGeneFile,'>>',$spec_gene_filename) || die "\n  ERROR:  Failed to open output species-gene database '$spec_gene_filename' ($species)\n\n";
 	    print $SpecGeneFile ">$seq_num\n";
 
-	    # Record that this species has members of this family
-	    $SpeciesGeneHash{$species.'|'.$gene} = 1;
+	    # Record that we've seen a gene
+	    $GeneHash{$gene} = 1;
 
 	    $seq_num++;
 
@@ -1190,22 +1174,11 @@ sub GenerateSpeciesDBs
 	
     }
 
-    # A final little piece of work we'll do is switch from our hash of gene/species
-    # pairs to '1' to a hash from genes to a list of species that include them.
-    my %GenesToSpecies;
-    foreach my $gene_species_pair (keys %SpeciesGeneHash) {
-	$SpeciesGeneHash{$gene_species_pair} =~ /^(\S+)\|(\S+)$/;
-	$species = $1;
-	$gene = $2;
-	if ($GenesToSpecies{$gene}) {
-	    $GenesToSpecies{$gene} = $GenesToSpecies{$gene}.','.$species;
-	} else {
-	    $GenesToSpecies{$gene} = $species;
-	}
-    }
+    # Do a quick switcheroo from a hash of seen genes to a list of genes
+    my @AllGenes = sort keys %GeneHash;
     
     # This is it, baby!
-    return (\@OriginalSeqNames,\%GenesToSpecies);
+    return (\@OriginalSeqNames,\@AllGenes);
 
 }
 
@@ -1573,13 +1546,13 @@ sub MergeAlignments
     my $species_ref = shift;
     my $speciesdir_ref = shift;
     my $mergeorder_ref = shift;
-    my $genestospecies_ref = shift;
+    my $allgenes_ref = shift;
     my $origseqnames_ref = shift;
 
     my @Species = @{$species_ref};
     my %SpeciesDir = %{$speciesdir_ref};
     my @MergeOrder = @{$mergeorder_ref};
-    my %GenesToSpecies = %{$genestospecies_ref};
+    my @AllGenes = @{$allgenes_ref};
     my @OrigSeqNames = @{$origseqnames_ref};
 
     my $num_species = scalar(@Species);
@@ -1609,25 +1582,22 @@ sub MergeAlignments
     # Where are we writing out our final MSAs?
     my $FinalDir = CreateDirectory($ResultsDir.'FinalMSAs');
 
-    # Make a shared gene list so nobody's stepping on anyone's toes
-    my @Genes = keys %GenesToSpecies;
-
     # Make a secret temporary directory to store intermediate results
     my $tmpdir = CreateDirectory($ResultsDir.'.tmp-msas');
 
     # Threadify and get 'em done!
-    $num_cpus = Min($num_cpus,scalar(@Genes));
+    $num_cpus = Min($num_cpus,scalar(@AllGenes));
     my $threadID = SpawnProcesses($num_cpus);
 
-    my $start_gene_id =  $threadID    * int(scalar(@Genes)/$num_cpus);
-    my $end_gene_id   = ($threadID+1) * int(scalar(@Genes)/$num_cpus);
-    $end_gene_id = scalar(@Genes) if ($threadID == $num_cpus-1);
+    my $start_gene_id =  $threadID    * int(scalar(@AllGenes)/$num_cpus);
+    my $end_gene_id   = ($threadID+1) * int(scalar(@AllGenes)/$num_cpus);
+    $end_gene_id = scalar(@AllGenes) if ($threadID == $num_cpus-1);
 
     # Merge time!
     for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
 
 	# For each species, see who has this gene in their repetoire
-	my $gene = $Genes[$gene_id];
+	my $gene = $AllGenes[$gene_id];
 	my @SpeciesFiles;
 	for (my $i=0; $i<$num_species; $i++) {
 	    my $fname = $SpeciesDir{$Species[$i]}.'seqs/'.$gene.'.afa';
@@ -1647,21 +1617,21 @@ sub MergeAlignments
 	    # Are we working with individual species, or pre-merged files?
 	    if ($species1 =~ /S(\d+)/) {
 		$species1 = $SpeciesFiles[$1];
-		FinalizeIntraSpeciesMSA($species1,\@OrigSeqNames);
+		FinalizeIntraSpeciesMSA($species1,\@OrigSeqNames) if ($species1);
 	    } elsif ($species1 =~ /M(\d+)/) {
 		$species1 = $MergeFiles[$1];
 	    }
 
 	    if ($species2 =~ /S(\d+)/) {
 		$species2 = $SpeciesFiles[$1];
-		FinalizeIntraSpeciesMSA($species2,\@OrigSeqNames);
+		FinalizeIntraSpeciesMSA($species2,\@OrigSeqNames) if ($species2);
 	    } elsif ($species2 =~ /M(\d+)/) {
 		$species2 = $MergeFiles[$1];
 	    }
 
 	    # If these gene isn't attributable to either species, things are
 	    # really easy!
-	    if ($species1 == 0 && $species2 == 0) {
+	    if (!$species1 && !$species2) {
 		$MergeFiles[$merge] = 0;
 		next;
 	    }
@@ -1671,11 +1641,11 @@ sub MergeAlignments
 	    
 	    # If this gene is only present in one species, then we just move
 	    # the file.
-	    if ($species1 == 0) {
+	    if (!$species1) {
 		RunSystemCommand("mv \"$species2\" \"$MergeFiles[$merge]\"");
 		next;
 	    }
-	    if ($species2 == 0) {
+	    if (!$species2) {
 		RunSystemCommand("mv \"$species1\" \"$MergeFiles[$merge]\"");
 		next;
 	    }
@@ -1722,7 +1692,8 @@ sub MergeAlignments
 	while (my $line = <$inf>) {
 	    $line =~ s/\n|\r//g;
 	    if ($line =~ /\>(\d+)/) {
-		print $outf ">$OrigSeqNames[$1]\n";
+		my $seq_id = $1;
+		print $outf ">$OrigSeqNames[$seq_id]\n";
 	    } else {
 		print $outf "$line\n";
 	    }
