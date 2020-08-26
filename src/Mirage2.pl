@@ -1404,7 +1404,7 @@ sub AggregateMappingMisses
 
 	# Open up the list of mapping misses handed down by MapsToMSAs,
 	# as well as an output file (where we'll write the final miss list)
-	my $infname = $species_dirname.'mapping_misses';
+	my $infname = $species_dirname.'mapping-misses';
 	my $inf  = OpenInputFile($infname);
 	my $outf = OpenOutputFile($misses_dirname.$species.'.misses');
 
