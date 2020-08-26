@@ -840,6 +840,10 @@ sub ConfirmValidTree
 	my $char = $TreeChrs[$i];
 	$num_open++  if ($char eq '(');
 	$num_close++ if ($char eq ')');
+
+	if ($i && $char eq '(' && $TreeChrs[$i-1] eq ')') {
+	    $final_tree_str = $final_tree_str.',';
+	}
 	
 	if ($char =~ /[A-Za-z]/ && $TreeChrs[$i-1] eq ')') {
 	    $final_tree_str = $final_tree_str.',';
