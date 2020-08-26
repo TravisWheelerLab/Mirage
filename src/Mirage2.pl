@@ -34,14 +34,20 @@ sub CheckSourceFiles;
 sub ParseArgs;
 sub VerifiedClean;
 sub ParseSpeciesGuide;
+sub SetMergeOrder;
+sub ConfirmValidTree;
 sub ConfirmSSI;
 sub GenerateSpeciesDBs;
 sub ParseSeqNameAsMirage;
 sub ParseSeqNameAsUniProt;
+sub SaveSpeciesMappings;
 sub AggregateMappingMisses;
 sub AlignUnmappedSeqs;
 sub AlignMiscSeqs;
 sub MergeAlignments;
+sub FinalizeIntraSpeciesMSA;
+sub EvaluateMissDir;
+
 
 # VERSION INFO
 my $mirage_version = 'Version 2.0.0a';
@@ -115,6 +121,9 @@ $ResultsDir = CreateDirectory($ResultsDir);
 my $progress_dirname = CreateDirectory($ResultsDir.'.progress');
 InitMirageProgressVars($progress_dirname,$num_cpus);
 
+# We'll also need a folder to record any mapping errors
+my $misses_dirname = CreateDirectory($ResultsDir.'Mapping-Misses');
+
 # Convert species guide into three arrays.
 # We'll ignore any species that don't show up
 # in our protein database.
@@ -128,7 +137,7 @@ my $num_species = scalar(@Species);
 
 # Make species-specific results folders
 my %SpeciesDir;
-my $AllSpeciesDir = CreateDirectory($ResultsDir.'SpeciesMSAs');
+my $AllSpeciesDir = CreateDirectory($ResultsDir.'Species-MSAs');
 foreach my $species (@Species) {
     $SpeciesDir{$species} = CreateDirectory($AllSpeciesDir.$species);
     CreateDirectory($SpeciesDir{$species}.'seqs');
@@ -178,9 +187,6 @@ for (my $i=0; $i<$num_species-1; $i++) {
     # KEY 3: GTF index (special case: - for "Just use BLAT")
     $QuilterCmd = $QuilterCmd.' '.$GTFs[$i];
 	
-    # Are we timing?
-    $QuilterCmd = $QuilterCmd.' --time' if ($timed);
-    
     # Make that daaaaaang call.
     RunSystemCommand($QuilterCmd);
 
@@ -207,7 +213,8 @@ for (my $i=0; $i<$num_species-1; $i++) {
     #  M u l t i S e q N W
 
     # Align any sequences that didn't fully map by getting all Needleman-Wunsch-y
-    my $missesbygene_ref = AggregateMappingMisses($species_dirname);
+    my $missesbygene_ref
+	= AggregateMappingMisses($species_dirname,$misses_dirname,\@OrigSeqNames);
     AlignUnmappedSeqs($missesbygene_ref,$species_seqdir);
 
     # #SaveTheMappings #MappingsArePeopleToo!
@@ -235,6 +242,7 @@ MergeAlignments(\@Species,\%SpeciesDir,\@MergeOrder,\@AllGenes,\@OrigSeqNames);
 # Slap that stop-watch!
 $TotalRuntime = Time::HiRes::tv_interval($StartTime);
 
+
 # For a touch of cleanup, get rid of our species-specific protein databases
 for (my $i=0; $i<$num_species; $i++) {
     my $seqdirname = $SpeciesDir{$Species[$i]}.'seqs/';
@@ -251,6 +259,10 @@ if (!$misc_seqs) {
     my $miscdir = $SpeciesDir{'Misc'};
     RunSystemCommand("rm -rf \"$miscdir\"");
 }
+
+# Check whether we actually had any mapping misses to report -- if not,
+# celebrate by burning the miss directory to the ground
+EvaluateMissDir($misses_dirname);
 
 # No more progress to be made!
 system("rm -rf \"\$progress_dirname\"");
@@ -471,8 +483,8 @@ sub ParseArgs
 {
 
     my %Options = ( 
-	cpus => $defaultcpus, 
-	outdirname => 'MirageResults',
+	cpus => $defaultcpus,
+	outdirname => 'Mirage-Results',
 	cleanmsa => 1,
 	);
 
@@ -1370,27 +1382,56 @@ sub SaveSpeciesMappings
 #
 sub AggregateMappingMisses
 {
-    my $dirname = shift;
+    my $species_dirname  = shift;
+    my $misses_dirname   = shift;
+    my $origseqnames_ref = shift;
+
+    my @OrigSeqNames = @{$origseqnames_ref};
+
+    # What species is this?
+    $species_dirname =~ /\/([^\/]+)\/$/;
+    my $species = $1;
 
     # Make a hash of all the names of sequences that we missed.
     # This will include any sequences that hit to a 'noncanonical'
     # chromosome
     my %MappingMissesByGene;
-    if (-e $dirname.'mapping-misses') {
-	open(my $MissFile,'<',$dirname.'mapping-misses');
-	while (my $line = <$MissFile>) {
+    if (-e $species_dirname.'mapping-misses') {
+
+	# Open up the list of mapping misses handed down by MapsToMSAs,
+	# as well as an output file (where we'll write the final miss list)
+	my $infname = $species_dirname.'mapping_misses';
+	my $inf  = OpenInputFile($infname);
+	my $outf = OpenOutputFile($misses_dirname.$species.'.misses');
+
+	while (my $line = <$inf>) {
+	    
 	    $line =~ s/\n|\r//g;
 	    next if (!$line);
-	    $line =~ /^(\S+) (\d+)\:/;
+	    
+	    $line =~ /^(\S+) (\d+)\: (.*)$/;
 	    my $gene = lc($1);
 	    my $seq_id = $2;
+	    my $reason = $3;
+	    
 	    if ($MappingMissesByGene{$gene}) {
 		$MappingMissesByGene{$gene} = $MappingMissesByGene{$gene}.','.$seq_id;
 	    } else { 
 		$MappingMissesByGene{$gene} = $seq_id;
 	    }
+
+	    my $seqname = $OrigSeqNames[$seq_id];
+	    print $outf "$seqname -- $reason\n";
+	    
 	}
-	close($MissFile);
+
+	close($outf);
+	close($inf);
+
+	# Since we now have the final record of misses in the designated folder,
+	# let's clear out this file
+	RunSystemCommand("rm \"$infname\"");
+	
     }
 
     return \%MappingMissesByGene;
@@ -1416,13 +1457,15 @@ sub AlignUnmappedSeqs
     # We'll need to do a quick reverse-engineer of the species name...
     $dirname =~ /\/([^\/]+)\/seqs\//;
     my $species = $1;
-    DispProgMirage('msnw-init|0|'.$species);
-    
+
     # We'll make a list and determine how many threads to spawn
     my @GeneList = keys %MappingMissesByGene;
     my $num_threads = Min($num_cpus,scalar(@GeneList));
     return if ($num_threads == 0);
 
+    # Let 'em know the truth
+    DispProgMirage('msnw-init|0|'.$species);
+    
     # Spawn them there threads!
     my $threadID = SpawnProcesses($num_threads);
     my $start =  $threadID    * int(scalar(@GeneList)/$num_threads);
@@ -1618,7 +1661,7 @@ sub MergeAlignments
     }
 
     # Where are we writing out our final MSAs?
-    my $FinalDir = CreateDirectory($ResultsDir.'FinalMSAs');
+    my $FinalDir = CreateDirectory($ResultsDir.'Final-MSAs');
 
     # Make a secret temporary directory to store intermediate results
     my $tmpdir = CreateDirectory($ResultsDir.'.tmp-msas');
@@ -1759,8 +1802,6 @@ sub MergeAlignments
 
 
 
-
-
 ########################################################################
 #
 #  Function: FinalizeIntraSpeciesMSA
@@ -1790,6 +1831,35 @@ sub FinalizeIntraSpeciesMSA
     close($inf);
     
 }
+
+
+
+
+
+
+########################################################################
+#
+#  Function: EvaluateMissDir
+#
+sub EvaluateMissDir
+{
+    my $dirname = shift;
+
+    my $dir = OpenDirectory($dirname);
+    my $misses = 0;
+    while (my $fname = readdir($dir)) {
+	if ($fname =~ /\.misses/) {
+	    $misses = 1;
+	    last;
+	}
+    }
+    closedir($dir);
+
+    # Do we even need this directory?
+    RunSystemCommand("rmdir \"$dirname\"") if ($misses == 0);
+    
+}
+
 
 
 
