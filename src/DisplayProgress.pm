@@ -186,6 +186,11 @@ sub DispProgMirage
 	
     } elsif ($part eq 'msnw-loop') {
 
+	# Make a wisdom saving throw (to avoid excessive printing)
+	if (rand() < 0.3 && !($threadID==0 && $MultiSeqNWGenes[0]==0)) {
+	    return;
+	}
+
 	# Write out how many genes you've completed to a secret file!
 	my $genes_completed = $Data[2];
 	my $outfbase = $DispProg_dirname.$DispProg_species.'.MSNW.';
@@ -254,6 +259,11 @@ sub DispProgQuilter
 
     } elsif ($part eq 'fm2') {
 
+	# Make a dexterity saving throw (to avoid excessive printing)
+	if (rand() < 0.3 && !($threadID==0 && $QuilterFM2Genes[0]==0)) {
+	    return;
+	}
+
 	# Write out how many genes you've completed to a secret file!
 	my $genes_completed = $Data[2];
 	my $outfbase = $DispProg_dirname.$DispProg_species.'.Quilter.fm2.';
@@ -290,6 +300,11 @@ sub DispProgQuilter
 	
     } elsif ($part eq 'blat2spaln') {
 
+	# Make an insight check (to avoid excessive printing)
+	if (rand() < 0.3 && !($threadID==0 && $QuilterB2SGenes[0]==0)) {
+	    return;
+	}
+
 	# Write out how many genes you've completed to a different secret file!
 	my $genes_completed = $Data[2];
 	my $outfbase = $DispProg_dirname.$DispProg_species.'.Quilter.b2s.';
@@ -317,6 +332,11 @@ sub DispProgQuilter
 	}
 
     } elsif ($part eq 'cleanup') {
+
+	# Make a stealth check (to avoid excessive printing)
+	if (rand() < 0.3 && !($threadID==0 && $QuilterCleanedGenes[0]==0)) {
+	    return;
+	}
 
 	# Write out how many genes you've completed to a different secret file!
 	my $genes_completed = $Data[2];
@@ -380,6 +400,11 @@ sub DispProgMapsToMSAs
 	$status = $status."Preparing to generate alignments using genome mappings";
 	
     } elsif ($part eq 'aligning') {
+
+	# Make an athletics check (to avoid excessive printing)
+	if (rand() < 0.3 && !($threadID==0 && $MapsToMSAsGenes[0]==0)) {
+	    return;
+	}
 
 	# Write out how many genes you've completed to a secret file!
 	my $genes_completed = $Data[2];
