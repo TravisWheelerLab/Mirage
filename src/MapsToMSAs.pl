@@ -117,7 +117,7 @@ while ($tg_line = <$ThreadGuide>) {
     if (!(-s $mapfname)) {
 	my $missf = OpenOutputFile($dirname.$gene.'.misses');
 	foreach my $seqname (@SeqNames) {
-	    print $missf "$seqname: Unmapped\n";
+	    print $missf "$gene $seqname: Unmapped\n";
 	}
 	close($missf);
 	next;
@@ -175,7 +175,7 @@ while ($tg_line = <$ThreadGuide>) {
 	    $seq_id = $num_mapped;
 	    $num_mapped++;
 	} else {
-	    push(@Unmapped,$gene.' '.$seqname.': Noncanonical Chromosome');
+	    push(@Unmapped,"$gene $seqname: Noncanonical Chromosome");
 	}
 
 	$line = <$MapFile>;
