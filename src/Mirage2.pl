@@ -271,7 +271,7 @@ system("rm -rf \"\$progress_dirname\"");
 ClearProgress();
 print "\n  Mirage complete: Results in $ResultsDir\n\n";
 
-# What, that's all you got? Pssssh, shoulda known it was gonna be EZ PZ :p
+# NOICE!
 1;
 
 
@@ -1671,12 +1671,12 @@ sub MergeAlignments
     my $tmpdir = CreateDirectory($ResultsDir.'.tmp-msas');
 
     # Threadify and get 'em done!
-    $num_cpus = Min($num_cpus,scalar(@AllGenes));
-    my $threadID = SpawnProcesses($num_cpus);
+    my $num_threads = Min($num_cpus,scalar(@AllGenes));
+    my $threadID = SpawnProcesses($num_threads);
 
-    my $start_gene_id =  $threadID    * int(scalar(@AllGenes)/$num_cpus);
-    my $end_gene_id   = ($threadID+1) * int(scalar(@AllGenes)/$num_cpus);
-    $end_gene_id = scalar(@AllGenes) if ($threadID == $num_cpus-1);
+    my $start_gene_id =  $threadID    * int(scalar(@AllGenes)/$num_threads);
+    my $end_gene_id   = ($threadID+1) * int(scalar(@AllGenes)/$num_threads);
+    $end_gene_id = scalar(@AllGenes) if ($threadID == $num_threads-1);
 
     # Merge time!
     my $genes_completed = 0;
@@ -1766,7 +1766,7 @@ sub MergeAlignments
 
 	# (Sometimes finalization begins with a touch of cleanup)
 	if ($cleanMSA) {
-	    my $tmpname = $infname;
+	    my $tmpname = $outfname;
 	    $tmpname =~ s/\.afa$/\.tmp/;
 	    RunSystemCommand($location."FinalMSA.pl \"$infname\" \"$tmpname\"");
 	    $infname = $tmpname;
@@ -1786,6 +1786,9 @@ sub MergeAlignments
 	}
 	close($outf);
 	close($inf);
+
+	# Don't need that input file anymore
+	RunSystemCommand("rm \"$infname\"");
 	
 	# Ummm, you okay, gorgeous? 'Cuz you're KILLING IT!
 	$genes_completed++;
