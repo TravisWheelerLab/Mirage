@@ -15,7 +15,6 @@
 //  + ReadNodesFromFile
 //  + UpdateHitExtScore
 //  + AttemptConnection
-//  + SortFloats
 //  + OrganizeEdgeList
 //  + ConnectGraph
 //  + RecursivePathEval
@@ -56,6 +55,7 @@ const float MAX_SPLICE_SCORE =  5.0;
 typedef struct _HW_NODE_T_ {
 
   // The data that we pull directly from the file
+  int ID;
   int start_amino;
   int end_amino;
   int start_nucl;
@@ -258,18 +258,32 @@ float SpliceProbToScore (float prob) {
  */
 void ReadNodesFromFile (HW_NODE ** Graph, int num_exons, FILE * inf) {
 
+  // We'll be sorting according to start aminos, so let's put them in
+  // their own special array
+  int StartAminos[num_exons];
+
+  // We'll also be (initially) storing our nodes in a temporary graph,
+  // prior to sorting them.
+  HW_NODE ** TempGraph = (HW_NODE **)malloc(num_exons * sizeof(HW_NODE *));
+
   // We already know how much reading we have assigned!
   int i,j;
   for (i=0; i<num_exons; i++) {
     
     // Start off by allocating space for this node
-    Graph[i] = (HW_NODE *)malloc(sizeof(HW_NODE));
-    HW_NODE * Node = Graph[i];
+    TempGraph[i] = (HW_NODE *)malloc(sizeof(HW_NODE));
+    HW_NODE * Node = TempGraph[i];
+
+    // What's your identification?
+    Node->ID = i+1;
 
     fscanf(inf,"\n"); // There should be an empty line...
     fscanf(inf,"Hit Score   : %f\n",&(Node->score));
     fscanf(inf,"Amino Range : %d..%d\n",&(Node->start_amino),&(Node->end_amino));
     fscanf(inf,"Nucl Range  : %d..%d\n",&(Node->start_nucl) ,&(Node->end_nucl));
+
+    // Record the start amino to our (to be sorted) array
+    StartAminos[i] = Node->start_amino;
 
     // We need to do a bit of computation to make sure we've nailed down the
     // actual length of our nucleotide string: (diff + 1) + 17 left + 17 right
@@ -315,7 +329,16 @@ void ReadNodesFromFile (HW_NODE ** Graph, int num_exons, FILE * inf) {
     Node->CumScoreMemo   = malloc(init_max_out * sizeof(float));
 
   }
-  
+
+  // Now that we've loaded in all of our exons, we'll sort them
+  // according to their starting amino indices.
+  int StartAminoSortIndex[num_exons];
+  MBB_SortInts(StartAminos,StartAminoSortIndex,num_exons);
+
+  // Finally, copy over from our TempGraph into our perma-Graph!
+  for (i=0; i<num_exons; i++)
+    Graph[i] = TempGraph[StartAminoSortIndex[i]];
+  free(TempGraph);
 
 }
 
@@ -670,82 +693,6 @@ void AttemptConnection
 
 
 
-
-/*
- *  Function: SortFloats
- *
- */
-void SortFloats (float * Vals, int * Index, int num_vals) {
-
-  int i,j,k,j_lim,k_lim;
-
-  int * Read  = malloc(num_vals*sizeof(int));
-  int * Write = malloc(num_vals*sizeof(int));
-  int * Swap;
-  
-  // Initialize the index
-  for (i=0; i<num_vals; i++)
-    Read[i] = i;
-
-  // Merge sort
-  int blocksize  = 1;
-  int num_blocks = num_vals / blocksize;
-  int pos        = 0;
-  while (num_blocks > 1) {
-
-    for (i=0; i+blocksize<num_vals; i+=2*blocksize) {
-
-      j     = i;
-      j_lim = j+blocksize;
-      k     = j_lim;
-      k_lim = k+blocksize;
-      if (k_lim>num_vals)
-	k_lim = num_vals;
-      
-      while (j<j_lim && k<k_lim) {
-	if (Vals[Read[j]]>Vals[Read[k]])
-	  Write[pos++] = Read[j++];
-	else
-	  Write[pos++] = Read[k++];
-      }
-
-      while (j<j_lim)
-	Write[pos++] = Read[j++];
-
-      while (k<k_lim)
-	Write[pos++] = Read[k++];
-      
-    }
-
-    // If we didn't have enough to fill up a full block, we'll still need to
-    // copy over the final values into 'Write'
-    while (i<num_vals)
-      Write[pos++] = Read[i++];
-
-    // Read becomes write, write becomes read, the first shall be last, etc!
-    Swap  = Read;
-    Read  = Write;
-    Write = Swap;
-
-    // Brace yourselves for another iteration!
-    num_blocks /= 2;
-    blocksize  *= 2;
-    pos         = 0;
-    
-  }
-
-  // Our final sorted index is stored in 'Read'
-  for (i=0; i<num_vals; i++)
-    Index[i] = Read[i];
-
-  free(Read);
-  free(Write);
-
-}
-
-
-
-
 /*
  *  Function: OrganizeEdgeList
  *
@@ -766,7 +713,7 @@ void OrganizeEdgeList (HW_NODE * N) {
   float    * TempFloats = malloc(index_size*sizeof(float *));
 
   // 1. INCOMING EDGES
-  SortFloats(N->InEdgeScore,Index,N->num_incoming);
+  MBB_SortFloats(N->InEdgeScore,Index,N->num_incoming);
 
   for (i=0; i<N->num_incoming; i++) TempNodes[i] = N->Incoming[i];
   for (i=0; i<N->num_incoming; i++) N->Incoming[i] = TempNodes[Index[i]];
@@ -781,7 +728,7 @@ void OrganizeEdgeList (HW_NODE * N) {
   for (i=0; i<N->num_incoming; i++) N->InEdgeScore[i] = TempFloats[Index[i]];
 
   // 2. OUTGOING EDGES  
-  SortFloats(N->OutEdgeScore,Index,N->num_outgoing);
+  MBB_SortFloats(N->OutEdgeScore,Index,N->num_outgoing);
 
   for (i=0; i<N->num_outgoing; i++) TempNodes[i] = N->Outgoing[i];
   for (i=0; i<N->num_outgoing; i++) N->Outgoing[i] = TempNodes[Index[i]];
@@ -1119,9 +1066,9 @@ void PrintHitMeta
   printf("\n  ----- Exons Spliced -----\n\n");
 
   // We'll ID the hit by the set of exons it used, using biologist-friendly indexing
-  printf("  Spliced Exon IDs : %d",ExonIDs[0]+1);
+  printf("  Spliced Exon IDs : %d",ExonIDs[0]);
   for (i=1; i<num_exons; i++)
-    printf(",%d",ExonIDs[i]+1);
+    printf(",%d",ExonIDs[i]);
   printf("\n");
 
   // Give the score of the hit
@@ -1158,7 +1105,7 @@ void PrintExonMeta
  int end_nucl
  ){
   printf("  Exon %d: Aminos %d..%d, Nucls %d..%d\n",
-	 exon_id+1,start_amino,end_amino,start_nucl,end_nucl);
+	 exon_id,start_amino,end_amino,start_nucl,end_nucl);
 }
 
 
@@ -1270,7 +1217,7 @@ void ReportSplicing
 (
  HW_NODE ** Graph,
  char * Seq,
- int  * ExonIDs,
+ int  * ExonIndices,
  int num_exons,
  int num_aminos,
  float score,
@@ -1281,6 +1228,9 @@ void ReportSplicing
 
   // We'll load up a bunch of arrays with the data we want to put out,
   // and then we'll do the actual outputery at the end.
+
+  // The original exon order from the input file
+  int ExonIDs[num_exons];
   
   // We'll start off by nabbing the chromosome start/end positions, and
   // building up a list of internal Outgoing indices.
@@ -1291,13 +1241,13 @@ void ReportSplicing
 
   // We'll treat the first and last a little bit specially, since they don't
   // get spliced.
-  HW_NODE * N = Graph[ExonIDs[0]];
+  HW_NODE * N = Graph[ExonIndices[0]];
   StartNuclOut[0] = N->start_nucl;
   InEdgeIndex[0]  = -1;
   for (i=0; i<num_exons-1; i++) {
-    GetHitExonChrEnd(N,ExonIDs[i+1],&EndNuclOut[i],&OutEdgeIndex[i]);
-    N = Graph[ExonIDs[i+1]];
-    GetHitExonChrStart(N,ExonIDs[i],&StartNuclOut[i+1],&InEdgeIndex[i+1]);
+    GetHitExonChrEnd(N,ExonIndices[i+1],&EndNuclOut[i],&OutEdgeIndex[i]);
+    N = Graph[ExonIndices[i+1]];
+    GetHitExonChrStart(N,ExonIndices[i],&StartNuclOut[i+1],&InEdgeIndex[i+1]);
   }
   EndNuclOut[i]   = N->end_nucl;
   OutEdgeIndex[i] = -1;
@@ -1314,11 +1264,12 @@ void ReportSplicing
   char Codon[3];
   int codon_pos = 0;
   int write_pos = 0;
-  int amino_index = Graph[ExonIDs[0]]->start_amino;
+  int amino_index = Graph[ExonIndices[0]]->start_amino;
   int last_ref_write; // In case we split a codon and need to write to a distant pos.
   for (i=0; i<num_exons; i++) {
 
-    N = Graph[ExonIDs[i]];
+    N = Graph[ExonIndices[i]];
+    ExonIDs[i] = N->ID;
 
     // NOTE that we want to friendly to biologists, so we'll index starting at '1'
     // Moreover, we'll keep this as '+1' so we can do a straight amino_count as the

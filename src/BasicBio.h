@@ -14,6 +14,9 @@ int MBB_MaxInt(int a, int b);
 float MBB_MinFloat(float a, float b);
 float MBB_MaxFloat(float a, float b);
 
+void MBB_SortInts(int * Vals, int * Index, int num_vals);
+void MBB_SortFloats(float * Vals, int * Index, int num_vals);
+
 int MBB_DNAtoNum(char residue);
 char MBB_TranslateCodon(char * Codon);
 float MBB_AminoAliScore(char amino1, char amino2);
