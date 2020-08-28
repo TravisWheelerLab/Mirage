@@ -103,10 +103,10 @@ typedef struct _HW_OPTS_T_ {
  *  DEBUGGING: BarfNodeInfo
  *
  */
-void BarfNodeInfo (HW_NODE * N, int node_id) {
+void BarfNodeInfo (HW_NODE * N) {
   int i;
   printf("\n");
-  printf("NODE %d\n",node_id);
+  printf("NODE %d\n",N->ID);
   printf("  Node Score : %f\n",N->score);
   printf("  Amino Range: %d..%d\n",N->start_amino,N->end_amino);
   printf("  Nucl. Range: %d..%d\n",N->start_nucl,N->end_nucl);
@@ -1696,7 +1696,6 @@ int main (int argc, char ** argv) {
   fclose(inf);
 
   // Draw up connections between nodes wherever possible.
-  // These edges end up being sorted by score (highest first)
   ConnectGraph(Graph,num_exons,Seq,Opts);
 
   // Identify the connected components of the graph, and reduce

@@ -110,7 +110,7 @@ void MBB_SortInts (int * Vals, int * Index, int num_vals) {
   int blocksize  = 1;
   int num_blocks = num_vals / blocksize;
   int pos        = 0;
-  while (num_blocks > 1) {
+  while (num_blocks) {
 
     for (i=0; i+blocksize<num_vals; i+=2*blocksize) {
 
@@ -184,7 +184,7 @@ void MBB_SortFloats (float * Vals, int * Index, int num_vals) {
   int blocksize  = 1;
   int num_blocks = num_vals / blocksize;
   int pos        = 0;
-  while (num_blocks > 1) {
+  while (num_blocks) {
 
     for (i=0; i+blocksize<num_vals; i+=2*blocksize) {
 
