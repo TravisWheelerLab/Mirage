@@ -122,7 +122,7 @@ void MBB_SortInts (int * Vals, int * Index, int num_vals) {
 	k_lim = num_vals;
       
       while (j<j_lim && k<k_lim) {
-	if (Vals[Read[j]]>Vals[Read[k]])
+	if (Vals[Read[j]]<Vals[Read[k]])
 	  Write[pos++] = Read[j++];
 	else
 	  Write[pos++] = Read[k++];
@@ -196,7 +196,7 @@ void MBB_SortFloats (float * Vals, int * Index, int num_vals) {
 	k_lim = num_vals;
       
       while (j<j_lim && k<k_lim) {
-	if (Vals[Read[j]]>Vals[Read[k]])
+	if (Vals[Read[j]]<Vals[Read[k]])
 	  Write[pos++] = Read[j++];
 	else
 	  Write[pos++] = Read[k++];

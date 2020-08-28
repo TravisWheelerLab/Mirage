@@ -706,14 +706,16 @@ void OrganizeEdgeList (HW_NODE * N) {
   int index_size = MBB_MaxInt(N->num_incoming,N->num_outgoing);
   if (!index_size)
     return;
-  
+
+  int      * RevIndex   = malloc(index_size*sizeof(int));
   int      * Index      = malloc(index_size*sizeof(int));
   HW_NODE ** TempNodes  = malloc(index_size*sizeof(HW_NODE *));
   int      * TempInts   = malloc(index_size*sizeof(int));
   float    * TempFloats = malloc(index_size*sizeof(float *));
 
   // 1. INCOMING EDGES
-  MBB_SortFloats(N->InEdgeScore,Index,N->num_incoming);
+  MBB_SortFloats(N->InEdgeScore,RevIndex,N->num_incoming);
+  for (i=0; i<N->num_incoming; i++) Index[i] = RevIndex[(N->num_incoming-1)-i];
 
   for (i=0; i<N->num_incoming; i++) TempNodes[i] = N->Incoming[i];
   for (i=0; i<N->num_incoming; i++) N->Incoming[i] = TempNodes[Index[i]];
@@ -728,7 +730,8 @@ void OrganizeEdgeList (HW_NODE * N) {
   for (i=0; i<N->num_incoming; i++) N->InEdgeScore[i] = TempFloats[Index[i]];
 
   // 2. OUTGOING EDGES  
-  MBB_SortFloats(N->OutEdgeScore,Index,N->num_outgoing);
+  MBB_SortFloats(N->OutEdgeScore,RevIndex,N->num_outgoing);
+  for (i=0; i<N->num_outgoing; i++) Index[i] = RevIndex[(N->num_outgoing-1)-i];
 
   for (i=0; i<N->num_outgoing; i++) TempNodes[i] = N->Outgoing[i];
   for (i=0; i<N->num_outgoing; i++) N->Outgoing[i] = TempNodes[Index[i]];
@@ -743,6 +746,7 @@ void OrganizeEdgeList (HW_NODE * N) {
   for (i=0; i<N->num_outgoing; i++) N->OutEdgeScore[i] = TempFloats[Index[i]];
 
   // SWEET RELEASE
+  free(RevIndex);
   free(Index);
   free(TempNodes);
   free(TempInts);
@@ -809,9 +813,12 @@ void ConnectGraph (HW_NODE ** Graph, int num_exons, char * Seq, HW_OPTS * Opts) 
     
   }
 
+  // UPDATE: Because we end up fully traversing the graph, we don't benefit
+  //         from this sorting.
+  //
   // Now that we've got all our connections drawn in, let's
-  // sort each node's edge list by score (descending, obv.s)
-  for (i=0; i<num_exons; i++) OrganizeEdgeList(Graph[i]);
+  // sort each node's edge list by score
+  //for (i=0; i<num_exons; i++) OrganizeEdgeList(Graph[i]);
 
 }
 
