@@ -179,9 +179,9 @@ sub DispProgMirage
 
 	$DispProg_species = $Data[2];
 	if ($DispProg_species eq 'FINAL') {
-	    $status = "Preparing to generate interspecies alignments";
+	    $status = $status."Preparing to generate interspecies alignments";
 	} else {
-	    $status = "Preparing to join unmapped sequences to $DispProg_species MSAs";
+	    $status = $status."Preparing to join unmapped sequences to $DispProg_species MSAs";
 	}
 	
     } elsif ($part eq 'msnw-loop') {

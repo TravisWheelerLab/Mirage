@@ -980,7 +980,7 @@ sub UseFastMap
 	# Do that nasty Spaln searchin'!
 	my ($spaln_hits_ref,$spaln_pcts_id_ref)
 	    = SpalnSearch(\@UnmappedSeqNames,\@UnmappedSeqs,\@ProtFnames,
-			  \@SpalnStarts,\@SpalnEnds,\@SpalnChrs);
+			  \@SpalnStarts,\@SpalnEnds,\@SpalnChrs,90.0);
 	my @SpalnHitStrs = @{$spaln_hits_ref};
 	my @SpalnPctsID  = @{$spaln_pcts_id_ref};
 	    
@@ -3358,7 +3358,7 @@ sub BlatToSpalnSearch
 
 	# Let's see what we see!
 	my ($hit_strs_ref,$hit_pcts_id_ref)
-	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs);
+	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs,90.0);
 	my $hit_str = @{$hit_strs_ref}[0];
 	my $hit_pct_id = @{$hit_pcts_id_ref}[0];
 
@@ -3427,7 +3427,7 @@ sub BlatToSpalnSearch
 
 	# Let's try this again!
 	my ($hit_strs_ref,$hit_pcts_id_ref)
-	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs);
+	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs,90.0);
 	my $hit_str = @{$hit_strs_ref}[0];
 	my $hit_pct_id = @{$hit_pcts_id_ref}[0];
 
@@ -3499,7 +3499,7 @@ sub BlatToSpalnSearch
 
     # Last call for Spaln-ohol!
     my ($hit_strs_ref,$hit_pcts_id_ref)
-	= SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@RangeStarts,\@RangeEnds,\@RangeChrs);
+	= SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@RangeStarts,\@RangeEnds,\@RangeChrs,75.0);
     my $hit_str = @{$hit_strs_ref}[0];
     my $hit_pct_id = @{$hit_pcts_id_ref}[0];
 
@@ -3659,6 +3659,7 @@ sub SpalnSearch
     my $range_starts_ref = shift;
     my $range_ends_ref = shift;
     my $range_chrs_ref = shift;
+    my $min_pct_id = shift;
 
     my @SeqNames = @{$seqnames_ref};
     my @SeqStrings = @{$seq_strs_ref};
@@ -3755,7 +3756,7 @@ sub SpalnSearch
 	RunSystemCommand("rm \"$spaln_fname\"") if (-e $spaln_fname);
 	
 	# If we didn't have a good return on investment, we're done-zo!
-	if ($spaln_pct_id < 90.0) {
+	if ($spaln_pct_id < $min_pct_id) {
 	    push(@SpalnHitStrs,0);
 	    push(@SpalnPctIDs,0);
 	    next;
@@ -3764,9 +3765,10 @@ sub SpalnSearch
 	# All of our nucleotide coordinates need to be adjusted...
 	my @UnadjNuclRanges = @{$nucl_ranges_ref};
 	my @UnadjCenters = @{$centers_ref};
-	
+
 	my @HitChrs;
-	my %ChrsUsed;
+	my @ChrsUsed;
+	my $num_chrs_used = 0;
 	my @NuclRanges;
 	my @AminoRanges = @{$amino_ranges_ref};
 	my @CodonCenters;
@@ -3778,6 +3780,7 @@ sub SpalnSearch
 	    my $range_end   = $2;
 	    my $start_chr;
 	    my $end_chr;
+	    my $hit_chr;
 	    
 	    ($range_start,$start_chr) = AdjustNuclCoord($range_start,\@JumpList);
 	    ($range_end,$end_chr) = AdjustNuclCoord($range_end,\@JumpList);
@@ -3790,18 +3793,23 @@ sub SpalnSearch
 		else                   { $end_chr =~ s/\+$//;            }
 		if ($start_chr =~ /\-$/) { $start_chr =~ s/\-$/\[revcomp\]/; }
 		else                     { $start_chr =~ s/\+$//;            }
-		$HitChrs[$num_exons] = 'Chimeric('.$start_chr.'/'.$end_chr.')';
-		$ChrsUsed{'Chimeric'} = 1;
+		$hit_chr = $start_chr.'/'.$end_chr;
 		
 	    } else {
 		
 		if ($end_chr =~ /\-$/) { $end_chr =~ s/\-$/\[revcomp\]/; }
 		else                   { $end_chr =~ s/\+$//;            }
-		$HitChrs[$num_exons] = $end_chr;
-		$ChrsUsed{$end_chr} = 1;
+		$hit_chr = $end_chr;
 		
 	    }
-	    
+	    push(@HitChrs,$hit_chr);
+
+	    # Check if the series of chromosomes used in this hit needs updating
+	    if (!$num_chrs_used || $ChrsUsed[$num_chrs_used-1] != $hit_chr) {
+		push(@ChrsUsed,$hit_chr);
+		$num_chrs_used++;
+	    }
+
 	    # Acquire the actual codon centers
 	    my $codon_center_str = '';
 	    foreach my $coord (split(/\,/,$UnadjCenters[$num_exons])) {
@@ -3816,13 +3824,21 @@ sub SpalnSearch
 	}
 	
 	my $chr;
-	if (scalar(keys %ChrsUsed) > 1) {
-	    $chr = 'Chimeric';
-	} else {
-	    # There's just one, but how else are we going to access it?
-	    foreach my $used_chr (keys %ChrsUsed) {
-		$chr = $used_chr;
+	if ($num_chrs_used > 1) {
+	    
+	    $chr = 'Chimeric:';
+	    foreach my $used_chr (@ChrsUsed) {
+		$chr = $chr.$used_chr.'/';
 	    }
+	    $chr =~ s/\/$//;
+
+	    # If we've set a threshold lower than 90%, we'll attach a note that this
+	    # is a low quality mapping (if it's less than 90%).	    
+	    $chr = $chr.' # low quality mapping: '.$spaln_pct_id.'% identity'
+		if ($spaln_pct_id < 90.0);
+
+	} else {
+	    $chr = $ChrsUsed[0];
 	}
 	
 	# Build up the hit string for this chromosome
@@ -4300,8 +4316,7 @@ sub FinalFileCheck
 	my $top_chr = 'Undetermined';
 	my $top_chr_count = 0;
 	foreach my $chr (keys %Chrs) {
-	    if ($chr ne 'Incomplete' && $chr ne 'Chimeric'
-		&& $Chrs{$chr} > $top_chr_count) {
+	    if ($chr !~ /Incomplete|Chimeric/ && $Chrs{$chr} > $top_chr_count) {
 		$top_chr = $chr;
 		$top_chr_count = $Chrs{$chr};
 	    }
@@ -4350,10 +4365,7 @@ sub FinalFileCheck
 	    } else {
 		$HitsBySeq{$seqname} =~ /Chromosome \: (\S+)/;
 		my $chr = $1;
-		if ($chr eq 'Incomplete' || $chr eq 'Chimeric') {
-		    while (length($chr) < 11) {
-			$chr = $chr.' ';
-		    }
+		if ($chr =~ /Incomplete|Chimeric/) {
 		    print $missf "$chr: $seqname\n";
 		}
 	    }

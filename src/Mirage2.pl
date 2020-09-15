@@ -222,7 +222,7 @@ for (my $i=0; $i<$num_species-1; $i++) {
 
     # Species[i] over and out!
     ClearProgress();
-    print "  Intra-species alignment complete for $Species[$i]\n";
+    print "  + Intra-species alignment complete for $Species[$i]\n";
 
 }
 
@@ -1417,12 +1417,14 @@ sub AggregateMappingMisses
 	    my $gene = lc($1);
 	    my $seq_id = $2;
 	    my $reason = $3;
-	    
+
+	    $seq_id++; # Need to handle possibility of sequence '0' :p
 	    if ($MappingMissesByGene{$gene}) {
 		$MappingMissesByGene{$gene} = $MappingMissesByGene{$gene}.','.$seq_id;
 	    } else { 
 		$MappingMissesByGene{$gene} = $seq_id;
 	    }
+	    $seq_id--;
 
 	    my $seqname = $OrigSeqNames[$seq_id];
 	    print $outf "$seqname -- $reason\n";
@@ -1484,7 +1486,9 @@ sub AlignUnmappedSeqs
 
 	my %SeqsToAlign;
 	foreach my $seq_id (split(/\,/,$MappingMissesByGene{$gene})) {
-	    $SeqsToAlign{$seq_id} = 1;
+	    # Recall that we incremented seq_id by 1 to be able to handle
+	    # sequence '0' in a hash in 'AggregateMappingMisses'
+	    $SeqsToAlign{$seq_id-1} = 1;
 	}
 	
 	# We'll extract each of the unmapped sequences
