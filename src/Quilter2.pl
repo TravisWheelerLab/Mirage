@@ -3805,7 +3805,7 @@ sub SpalnSearch
 	    push(@HitChrs,$hit_chr);
 
 	    # Check if the series of chromosomes used in this hit needs updating
-	    if (!$num_chrs_used || $ChrsUsed[$num_chrs_used-1] != $hit_chr) {
+	    if (!$num_chrs_used || $ChrsUsed[$num_chrs_used-1] ne $hit_chr) {
 		push(@ChrsUsed,$hit_chr);
 		$num_chrs_used++;
 	    }
