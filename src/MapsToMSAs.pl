@@ -175,7 +175,11 @@ while ($tg_line = <$ThreadGuide>) {
 	    $seq_id = $num_mapped;
 	    $num_mapped++;
 	} else {
-	    push(@Unmapped,"$gene $seqname: Noncanonical Chromosome");
+	    if ($chr =~ /Chimeric/) {
+		push(@Unmapped,"$gene $seqname: Chimeric Mapping");
+	    } else {
+		push(@Unmapped,"$gene $seqname: Noncanonical Chromosome");
+	    }
 	}
 
 	$line = <$MapFile>;
