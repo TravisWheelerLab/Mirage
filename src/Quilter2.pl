@@ -47,6 +47,9 @@ sub ParseBlatLine;
 sub ParseSpalnOutput;
 sub FinalFileCheck;
 
+# Original Spaln parsing code
+sub OPSO_ParseSpalnOutput;
+sub OPSO_SelenocysteineCheck;
 
 
 # Help?
@@ -3749,7 +3752,8 @@ sub SpalnSearch
 	# if we run into parsing errors.
 	my $SpalnFile = OpenInputFile($spaln_fname);
 	my ($nucl_ranges_ref,$amino_ranges_ref,$centers_ref,$spaln_pct_id)
-	    = ParseSpalnOutput($SpalnFile,\@Seq);
+	    #= ParseSpalnOutput($SpalnFile,\@Seq);
+	    = OPSO_ParseSpalnOutput($SpalnFile,\@Seq);
 	close($SpalnFile);
 	
 	# Get that spaln output file THE HECK OUTTA HERE!
@@ -4391,6 +4395,741 @@ sub FinalFileCheck
     while (wait() != -1) {}
     
 }
+
+
+
+
+
+#
+#  NOTE: The following functions are taken from the original Quilter,
+#        which underwent a long period of incremental fixes to account
+#        for errors in Spaln output.
+#
+#        The 'ParseSpalnOutput' function above is more along the lines of
+#        what I'd like (and will probably be transitioned into a parsing
+#        function for an eventual Spaln replacement), but for the sake of
+#        not having to translate all of the error catching stuff (at least
+#        not simultaneously) I'm going to stick with this uglier code.
+#
+#        OPSO_ := 'Original Parse Spaln Output'
+#
+
+
+
+
+#########################################################################
+#
+#  Function Name: ParseSPALNOutput
+#
+#  About: The name says it all.  Run a SPALN command and make sense of
+#         its wisdom.
+#
+#    1.  Don't trust percent identities.
+#    2.  J = S.
+#
+#  >> FOR ALEX:
+#
+#     New expected input is:
+#
+#          1. A file with the Spaln output
+#          2. The original sequence, as an array
+#
+#     New expected output is:
+#
+#          1. A list of nucleotide coordinate ranges formatted as <start>..<end>
+#          2. A list of amino acid coordinate ranges formatted as <start>..<end>
+#          3. A list of strings with comma-seperated amino acid center coordinates
+#          4. The percent identity of the mapping
+#
+sub OPSO_ParseSpalnOutput
+{
+    my ($i,$j,$k);
+
+    my $SpalnFile = shift;
+    my $seq_ref   = shift;
+
+    my @Seq = @{$seq_ref};
+    my $prot_len = scalar(@Seq);
+
+    # Are we timing?
+    my $timing     = shift;
+    my $timingdata = shift;
+    my $timeA;
+
+    my ($line,$hitstring);
+
+    # Look for where SPALN has called the start and end of the region.
+    my ($range_low,$range_high);
+    $line = readline($SpalnFile);
+    while (!eof($SpalnFile) && $line !~ /\S+\/(\d+)\-(\d+)/) {
+	$line = readline($SpalnFile);
+    }
+
+    # If we've hit the end of the file, no point continuing
+    return(0,0,0,0) if (eof($SpalnFile));
+
+
+    # Grab the range of positions on the chromosome that we hit in.
+    # Note that we want these to be formatted low=start, high=end
+    $line =~ /\S+\/(\d+)\-(\d+)/;
+    my $start_pos = $1;
+    my $end_pos   = $2;
+
+
+    # Go to the section that lays out the score
+    my $hitscore;
+    while ($line = <$SpalnFile>) {
+
+	if ($line =~ /Score \= (\d+)/) {
+	    
+	    # SPALN's score
+	    $hitscore = $1;
+
+	    # It seems that in cases where SPALN gives BAD hits
+	    # it breaks away from the expected format
+	    if ($line !~ /Score \= \S+ \S+\, (\d+)\.\d+ \S+\, (\d+)\.\d+ \S+\, (\d+)\.\d+ \S+\, (\d+)\.\d+/) {
+		return(0,0,0,0);
+	    }
+
+	    last;
+	    
+	}
+    }
+
+
+    # If we've hit the end of the file we're DONE with this NONSENSE
+    return(0,0,0,0) if (eof($SpalnFile));
+    
+    
+    # NOW we can go to the real business (the alignment lines)
+    $line = readline($SpalnFile); # 'ALIGNMENT'
+    while (!eof($SpalnFile) && $line !~ /ALIGNMENT/) {
+	$line = readline($SpalnFile);
+    }
+
+
+    # Still not totally stoked on seeing an eof
+    return(0,0,0,0) if (eof($SpalnFile));
+
+    
+    #
+    # ALRIGHT, GENTS AND LADIES, it looks like we're actually
+    # doing this thing.
+    #
+
+
+    # Scan through the SPALN output constructing 4 arrays:
+    #
+    #     - An array with the DNA sequence characters
+    #     - An array with the protein sequence characters
+    #     - An array mapping protein sequence indices to
+    #       DNA sequence indices
+    #     - An array mapping DNA sequence characters to
+    #       positions in the genome
+    #
+    # The combination of these arrays will allow us to do
+    # all of the work we need in terms of generating our
+    # final mapping of the protein to the genome, correcting
+    # for micro-exons.
+    #
+    # UPDATE (Nov. 2019): It looks like Spaln will, somewhat
+    # regularly, start/end exons with extraneous gaps, so I'm
+    # going to try to pay attention to the starts and ends of
+    # exons to make sure these don't drag good hits into the
+    # mud.
+    #
+    my $gap_run_len = 0;
+    my $starting_exon = 1;
+    my @FullNuclSeq;
+    my @FullProtSeq;
+    my @AAPositions;
+    my @NuclPositions;
+    my $trans_line;
+    my $full_length = 0;
+    my $num_aas     = 0; 
+    my $current_pos = 0;
+    my $last_end_pos; # To catch a possible SPALN error (false 'skip's)
+    my $first_jump  = 0;
+    while (!eof($SpalnFile)) {
+
+	# Grab the next line, clean it up, make sure it's
+	# meaningful.
+	#
+	$line = readline($SpalnFile);
+	$line =~ s/\n|\r//g;
+	next if (!$line);
+
+
+	# If we're skipping around in the genome, adjust
+	# the position variable accordingly.
+	#
+	if ($line =~ /skip\s+(\d+)\s+nt/) {
+	    $current_pos += int($1);
+	    $starting_exon = 1; # Whatever we see next will start an exon
+	    next;
+	}
+
+
+	# If we've made it this far but don't match this
+	# terminal format then we're looking at SPALN's
+	# translation of the nucleotide sequence
+	#
+	if ($line !~ /\| \S+\/\d+\-\d+/) {
+	    $trans_line = $line;
+	    next;
+	}
+
+	my $nn_line = $line;
+
+	# EXCELLENT!  This is the next line of DNA characters
+	#
+	my @NextNucls = split(//,$line);
+
+	# We also split up what would be the translation, so that
+	# we can evaluate percent ID for ourselves.
+	#
+	my @TransLine = split(//,$trans_line);
+
+	# The final check we need to do is to add/subtract
+	# the initial 'jump' into the hit (but only if this
+	# is the very beginning)
+	#
+	if ($first_jump == 0) {
+	    if ($line =~ /^\s*(\d+)/) {
+		$current_pos += $1;
+		$first_jump   = 1;
+	    } else {
+		return(0,0,0,0);
+	    }
+	}
+
+
+	# Does it look like SPALN lied to us about skipping?
+	$nn_line =~ /^\s*(\d+)\s/;
+	my $reported_pos = $1;
+	if ($last_end_pos && $last_end_pos == $reported_pos) {
+	    $current_pos = $last_end_pos;
+	}
+
+	
+	# ... which means that the following line is the next
+	# line of protein characters.
+	#
+	$line = readline($SpalnFile);
+	$line =~ s/\n|\r//g;
+	my @NextAAs = split('',$line);
+
+
+	# Advance to the actual DNA sequence.
+	# NOTE:  it's possible for SPALN to have a line of
+	#        '-' characters, which we'd want to throw
+	#        away.  BUT we still need to count up the
+	#        position indices when we encounter these. << Do we?
+	#
+	$i = 0;
+	#while ($i < @NextNucls && $NextNucls[$i] !~ /[a-zA-Z]|\|/) { $i++; }
+	while ($i < @NextNucls && $NextNucls[$i] =~ /\s/) { $i++; }
+	while ($i < @NextNucls && $NextNucls[$i] !~ /\s/) { $i++; }
+	while ($i < @NextNucls && $NextNucls[$i] =~ /\s/) { $i++; }
+	
+
+
+	# Some sort of SPALN weirdness...
+	#
+	next if ($i == @NextNucls || $NextNucls[$i] eq '|');
+
+
+	# Run along the two lines storing all of the relevant
+	# information that we can get out of them.
+	#
+	while ($NextNucls[$i] !~ /\|/) {
+	    
+	    push(@FullNuclSeq,$NextNucls[$i]);
+	    push(@NuclPositions,$current_pos);
+
+	    # If we're centered on a codon, take note.
+	    #
+	    if ($NextAAs[$i] =~ /\w/) {		
+		push(@FullProtSeq,$NextAAs[$i]);
+		push(@AAPositions,$full_length);
+		$num_aas++;
+	    }
+	    
+	    # Also, note a *SUBSTITUTION* mismatch (sorry for yelling)
+	    if ($NextAAs[$i] =~ /\S/
+		&& $NextAAs[$i] ne $TransLine[$i] 
+		&& !(uc($TransLine[$i]) eq 'J' && uc($NextAAs[$i]) eq 'S')) { # Sometimes SPALN calls an 'S' a 'J'
+
+		if ($NextAAs[$i] eq '-' && !$starting_exon) {
+		    $gap_run_len++ if (!$starting_exon);
+		}
+		
+	    } else {
+		$gap_run_len=0;
+	    }
+	    # I'm using that format because we might see more delightful tricks
+
+
+	    # Increment the position in the genome
+	    if ($NextNucls[$i] =~ /\w/) {
+		$current_pos++;
+	    }
+
+	    $full_length++;
+	    $i++;
+	    
+	}
+
+	$last_end_pos = $current_pos;
+	
+    }
+    
+
+    # Selenocysteine does some crazy stuff, man.  I translated some once
+    # and I'm still coming down.
+    if ($num_aas != $prot_len) {
+	
+	my ($fps_ref,$aap_ref) =
+	    OPSO_SelenocysteineCheck(\@FullNuclSeq,\@FullProtSeq,\@AAPositions,\@Seq);
+	@FullProtSeq = @{$fps_ref};
+	@AAPositions = @{$aap_ref};
+	$num_aas = scalar(@FullProtSeq);
+
+	return (0,0,0,0) if ($num_aas != $prot_len);	
+
+    }
+
+    # Alrighty, now we oughta have the most complete story of the translated sequence
+    # to determine the percent identity.
+    my $num_matches = 0;
+    for (my $i=0; $i<$prot_len; $i++) {
+	if (uc($FullProtSeq[$i]) eq uc($Seq[$i])) {
+	    $num_matches++;
+	}
+    }
+    my $spaln_pct_id = int(1000.0 * $num_matches / $prot_len) / 10.0;
+    
+
+    # ********************************************************************
+    # *** 'IF ZERO' WILL TOGGLE MICRO EXON SEARCHING OFF *****************
+    # ********************************************************************
+    #
+    #
+    #if (0) {
+
+    # Run along SPALN's output looking for 'exons' with
+    # improbably low amino acid counts.  Currently, we
+    # say that an exon should have at least 4 amino acids.
+    #
+    my @MicroExonRuns;
+    my $micro_start = -1;
+    my $micro_end   = 0;
+    
+    $i = 0;
+    while ($i < $num_aas) {
+
+
+	# Figure out the genome position of the current amino
+	# acid, so that we can infer exon boundaries (large
+	# changes in nucleotide position).
+	#
+	my $aa_loc   = $NuclPositions[$AAPositions[$i]];
+	my $aa_start = $i;
+	my $exon_len = 1;
+
+	
+	# Run through this exon, counting how many amino acids
+	# it has.
+	#
+	$i++;
+	while ($i < $num_aas && abs($NuclPositions[$AAPositions[$i]] - $NuclPositions[$AAPositions[$i-1]]) < 5) {
+	    $exon_len++;
+	    $i++;
+	}
+
+
+	# If we have too few amino acids, then we're working
+	# with a micro exon, baby!  Observe that we chain together
+	# runs of contiguous micro-exons.
+	#
+	if ($exon_len < 4) {
+	    
+	    if ($micro_start == -1) { $micro_start = $aa_start; }
+	    $micro_end = $i;
+	    
+	} elsif ($micro_start != -1) {
+	    
+	    push(@MicroExonRuns,$micro_start.'-'.$micro_end);
+	    $micro_start = -1;
+	    
+	}
+	
+    }
+    
+    
+    # Next we'll run through each of the indicated micro-exon
+    # regions ('regions' because they can be chained together)
+    # and try to re-align the amino acids to the ends of the
+    # 'major' exons that flank them.
+    #
+    # NOTE: Be careful that we don't step over a breakpoint by
+    #       checking whether NuclPositions[i] and NP[i+1] are
+    #       1 off from one another.
+    #
+    foreach my $micro_run_str (@MicroExonRuns) {
+
+	
+	# Split the indices out of the string
+	#
+	my @MicroRun = split(/\-/,$micro_run_str);
+	$micro_start = $MicroRun[0];
+	$micro_end   = $MicroRun[1]; # One past actual end, so we can do strict '<'
+
+
+	# Identify the amino acid sequence that constitutes
+	# this micro exon (or chain of micro exons)
+	#
+	my @MicroAAs;
+	for ($j = $micro_start; $j < $micro_end; $j++) {
+	    push(@MicroAAs,$FullProtSeq[$j]);
+	}
+
+	# Figure out how long the micro exon is (keeping in mind that '_end' is
+	# one position past the actual end index)
+	#
+	my $micro_len = $micro_end-$micro_start;
+
+	
+	# Look at the preceding exon
+	#
+	my @RearExt;
+	my $rear_ext_len = 0;
+	if ($micro_start > 0) {
+
+	    
+	    # Get situated so that we can start trying to
+	    # transfer amino acids from our micro exons to
+	    # the back end of the preceding exon.
+	    #
+	    # NOTE (for making sense of this):
+	    # --------------------------------
+	    # NuclPositions are the chromosome indices, AAPositions are the
+	    # array indices that SPALN has identified as codon centers -- thus
+	    # looking up the NuclPosition of an AAPosition gets you the genome
+	    # index for the AAPosition's codon center.
+	    #
+	    my $rear_codon_center = $NuclPositions[$AAPositions[$micro_start-1]];
+	    my $nuclseq_pos = $AAPositions[$micro_start-1]+3; # Which array index are we centered around?
+	    while ($rear_ext_len < $micro_len) {
+		
+		# Make sure we don't overstep (by checking if we've passed over
+		# an stretch of genome indices indicating an intron)
+		my $step_check = $NuclPositions[$nuclseq_pos];
+		$step_check -= 3 * ($rear_ext_len+1);
+		
+		last if ($step_check != $rear_codon_center);
+
+
+		# Figure out what the next codon is
+		my @NextCodon = ();
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos-1]);
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos]);
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos+1]);
+
+		
+		# If we have a match we are very happy.  If
+		# we do not have a match we are very sad.
+		#
+		# Why would we do 'micro_start+(rear_ext_len+1)'?
+		#
+		if (uc($FullProtSeq[$micro_start+$rear_ext_len]) eq uc(TranslateCodon(\@NextCodon))) {
+		    push(@RearExt,$nuclseq_pos);
+		    $nuclseq_pos += 3;
+		    $rear_ext_len++;
+		} else {
+		    last;
+		}
+		
+	    }
+	    
+	}
+	
+	# If we found a complete run, we're sooooo stoked!
+	if ($rear_ext_len == $micro_len) {
+	    for ($i=0; $i<$micro_len; $i++) {
+		$AAPositions[$micro_start+$i] = $RearExt[$i];
+	    }
+	    next;
+	}
+
+	
+	# Look at the exon ahead
+	my @FwdExt;
+	my $fwd_ext_len = 0;
+	if ($micro_end < $num_aas) {
+	    
+	    # Try to find a good extension to the front of
+	    # the upcoming exon.
+	    my $fwd_codon_center = $NuclPositions[$AAPositions[$micro_end]];
+	    my $nuclseq_pos = $AAPositions[$micro_end]-3;
+	    while ($fwd_ext_len < $micro_len) {
+
+		
+		# Make sure we don't overstep
+		my $step_check = $NuclPositions[$nuclseq_pos];
+		$step_check += 3 * ($fwd_ext_len+1);
+		
+		last if ($step_check != $fwd_codon_center);
+
+
+		# What does the next codon encode?
+		my @NextCodon = ();
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos-1]);
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos]);
+		push(@NextCodon,$FullNuclSeq[$nuclseq_pos+1]);
+		
+
+		# If we have a match, in terms of what the codon
+		# encodes, then we can continue our considerations.
+		# Otherwise we cannot.
+		#
+		# Note that the first nucleotide position in the
+		# 'FwdExt' array corresponds to the last amino acid
+		# in the micro-exon region.
+		#
+		if (uc($FullProtSeq[$micro_end-($fwd_ext_len+1)]) eq uc(TranslateCodon(\@NextCodon))) {
+		    push(@FwdExt,$nuclseq_pos);
+		    $nuclseq_pos -= 3;
+		    $fwd_ext_len++;
+		} else {
+		    last;
+		}
+		
+	    }
+	    
+	}
+
+	
+	# Did we find a complete run?
+	if ($fwd_ext_len == $micro_len) {
+	    for ($i=0; $i<$micro_len; $i++) {
+		$AAPositions[$micro_end-($i+1)] = $FwdExt[$i];
+	    }
+	    next;
+	}
+	
+
+	# Append as much as you can to the preceding
+	# major exon first.  We don't put any work into
+	# evaluating whether amino acids that could go
+	# either way should be fitted to one or the other
+	# side.
+	#
+	$i = 0;
+	while ($i < $rear_ext_len) {
+	    $AAPositions[$micro_start+$i] = $RearExt[$i];
+	    $i++;
+	}
+
+	
+	# Skip ahead to the stuff we're appending to the
+	# upcoming major exon, if you need to.
+	if ($i < $micro_len - $fwd_ext_len) {
+	    $i = $micro_len - $fwd_ext_len;
+	}
+
+
+	# Append this stuff onto the forward friend.
+	#
+	$j = $fwd_ext_len - 1;
+	while ($i < $micro_len) {
+	    $AAPositions[$micro_end-($micro_len-$i)] = $FwdExt[$j];
+	    $i++;
+	    $j--;
+	}
+	
+    }
+    
+
+    #}
+    #
+    #
+    # ********************************************************************
+    # *** 'IF ZERO' TOGGLE END *******************************************
+    # ********************************************************************
+
+        
+    # Radical, dude!  Now all we need to do is just convert
+    # our list of amino acid positions into a list of
+    # their corresponding middle amino acids (with '*'s to
+    # denote splice site boundaries).
+    #
+    # We'll try to be careful about how we place codons that are
+    # called as insertions into the genome.
+    #
+    my $prev_codon_c = $NuclPositions[$AAPositions[0]];
+    my $codon_center_str = $prev_codon_c;
+    my $amino_range_str  = '1';
+    my @Centers;
+    my @AminoRanges;
+    my @NuclRanges;
+    for ($i=1; $i<$num_aas; $i++) {
+
+	# A gap of more than 4 is taken to deserve a splice site marker
+	#
+	if ($NuclPositions[$AAPositions[$i]] - $NuclPositions[$AAPositions[$i-1]] > 4) {
+	    
+	    $codon_center_str =~ s/\,$//;
+	    push(@Centers,$codon_center_str);
+	    $codon_center_str = '';
+
+	    $amino_range_str = $amino_range_str.'..'.$i;
+	    push(@AminoRanges,$amino_range_str);
+
+	    # While we have the two amino end points, let's get some nucleotide ranges
+	    # like we're gall-darn maniacs.
+	    #
+	    # NOTE: I'm not sure how this works in cases of micro-exons, since there
+	    #       may not be perfect capitalization... At least it'll give a sense...
+	    #
+	    $amino_range_str =~ /(\d+)\.\.(\d+)/;
+	    my $range_start = $AAPositions[$1-1];
+	    my $range_end   = $AAPositions[$2-1];
+
+	    while ($FullNuclSeq[$range_start-1] = uc($FullNuclSeq[$range_start-1])) {
+		$range_start--;
+	    }
+	    $range_start = $NuclPositions[$range_start];
+
+	    while ($FullNuclSeq[$range_end+1] = uc($FullNuclSeq[$range_end+1])) {
+		$range_end++;
+	    }
+	    $range_end = $NuclPositions[$range_end];
+
+	    push(@NuclRanges,$range_start.'..'.$range_end);
+
+	    $amino_range_str = $i+1;
+	    
+	}
+
+	# Are we in an insertion (wrt genome)?
+	#
+	my $next_center;
+	if ($FullNuclSeq[$AAPositions[$i]] !~ /\w/) {
+	    $next_center = $prev_codon_c;
+	} else {
+	    $prev_codon_c = $NuclPositions[$AAPositions[$i]];
+	    $next_center  = $prev_codon_c;
+	}
+
+	# Are we starting a new run?
+	if ($codon_center_str) {
+	    $codon_center_str = $codon_center_str.','.$next_center;
+	} else {
+	    $codon_center_str = $next_center;
+	}
+	
+    }
+
+    push(@Centers,$codon_center_str);
+
+    $amino_range_str = $amino_range_str.'..'.$num_aas;
+    push(@AminoRanges,$amino_range_str);
+
+    # UGH, sorry about the copy-paste, but daddy lazy today :p
+    $amino_range_str =~ /(\d+)\.\.(\d+)/;
+    my $range_start = $AAPositions[$1-1];
+    my $range_end   = $AAPositions[$2-1];
+    
+    while ($FullNuclSeq[$range_start-1] = uc($FullNuclSeq[$range_start-1])) {
+	$range_start--;
+    }
+    $range_start = $NuclPositions[$range_start];
+    
+    while ($FullNuclSeq[$range_end+1] = uc($FullNuclSeq[$range_end+1])) {
+	$range_end++;
+    }
+    $range_end = $NuclPositions[$range_end];
+    
+    push(@NuclRanges,$range_start.'..'.$range_end);
+    
+    # OLD PARSE SPALN OUTPUT COMPLETE!
+    return(\@NuclRanges,\@AminoRanges,\@Centers,$spaln_pct_id);
+
+}
+
+
+
+
+
+#########################################################################
+#
+#  Function Name: SelenocysteineCheck
+#
+#  About: This function checks if a selonocyteine (U, encoded by TGA)
+#         explains an observed absence of aminos in SPALN output.
+#
+sub OPSO_SelenocysteineCheck
+{
+    my $nucl_seq_ref = shift;
+    my $prot_seq_ref = shift;
+    my $aa_pos_ref   = shift;
+    my $orig_seq_ref = shift;
+
+    my @NuclSeq = @{$nucl_seq_ref};
+    my @ProtSeq = @{$prot_seq_ref};
+    my @AAPos   = @{$aa_pos_ref};
+    my @OrigSeq = @{$orig_seq_ref};
+
+    my $aa_pos = 0;
+    while ($aa_pos < scalar(@OrigSeq)) {
+
+	# Looks like we've discovered a selenocysteine in our midst!
+	if ($OrigSeq[$aa_pos] eq 'U' && $aa_pos < scalar(@ProtSeq) && $ProtSeq[$aa_pos] ne 'U') {
+
+	    # Is this consistent with stepping forward 3 from the previous
+	    # amino's position?  3 back from forthcoming amino?
+	    my $nailed_it = 0;
+	    if ($aa_pos) {
+		
+		# Should be to the right of the last position...
+		my $nucl_pos = $AAPos[$aa_pos-1] + 2;
+		my $codon = uc($NuclSeq[$nucl_pos].$NuclSeq[$nucl_pos+1].$NuclSeq[$nucl_pos+2]);
+		if ($codon eq 'TGA') {
+
+		    # Note:  Splice moves everything at the indicated position to
+		    #        the right and sticks in what you want there.
+		    splice(@ProtSeq,$aa_pos,0,'U');
+		    splice(@AAPos,$aa_pos,0,$nucl_pos+1);
+		    $nailed_it = 1;
+		} 
+
+	    } 
+
+	    if (!$nailed_it && $aa_pos < scalar(@ProtSeq)-1) {
+		
+		# ... Or left of the next position
+		my $nucl_pos = $AAPos[$aa_pos] - 4;
+		my $codon = uc($NuclSeq[$nucl_pos].$NuclSeq[$nucl_pos+1].$NuclSeq[$nucl_pos+2]);
+		if ($codon eq 'TGA') {
+		    splice(@ProtSeq,$aa_pos-1,0,'U');
+		    splice(@AAPos,$aa_pos-1,0,$nucl_pos+1);
+		} 
+
+	    }
+
+	}
+
+	$aa_pos++;
+
+    }
+
+    return (\@ProtSeq,\@AAPos);
+
+}
+
+
+
 
 
 
