@@ -4458,65 +4458,19 @@ sub OPSO_ParseSpalnOutput
 
     my ($line,$hitstring);
 
-    # Look for where SPALN has called the start and end of the region.
-    my ($range_low,$range_high);
-    $line = readline($SpalnFile);
-    while (!eof($SpalnFile) && $line !~ /\S+\/(\d+)\-(\d+)/) {
-	$line = readline($SpalnFile);
-    }
-
-    # If we've hit the end of the file, no point continuing
-    return(0,0,0,0) if (eof($SpalnFile));
-
-
-    # Grab the range of positions on the chromosome that we hit in.
-    # Note that we want these to be formatted low=start, high=end
-    $line =~ /\S+\/(\d+)\-(\d+)/;
-    my $start_pos = $1;
-    my $end_pos   = $2;
-
-
-    # Go to the section that lays out the score
-    my $hitscore;
-    while ($line = <$SpalnFile>) {
-
-	if ($line =~ /Score \= (\d+)/) {
-	    
-	    # SPALN's score
-	    $hitscore = $1;
-
-	    # It seems that in cases where SPALN gives BAD hits
-	    # it breaks away from the expected format
-	    if ($line !~ /Score \= \S+ \S+\, (\d+)\.\d+ \S+\, (\d+)\.\d+ \S+\, (\d+)\.\d+ \S+\, (\d+)\.\d+/) {
-		return(0,0,0,0);
-	    }
-
-	    last;
-	    
-	}
-    }
-
-
-    # If we've hit the end of the file we're DONE with this NONSENSE
-    return(0,0,0,0) if (eof($SpalnFile));
-    
-    
     # NOW we can go to the real business (the alignment lines)
     $line = readline($SpalnFile); # 'ALIGNMENT'
     while (!eof($SpalnFile) && $line !~ /ALIGNMENT/) {
 	$line = readline($SpalnFile);
     }
 
-
     # Still not totally stoked on seeing an eof
     return(0,0,0,0) if (eof($SpalnFile));
-
     
     #
     # ALRIGHT, GENTS AND LADIES, it looks like we're actually
     # doing this thing.
     #
-
 
     # Scan through the SPALN output constructing 4 arrays:
     #
@@ -4574,7 +4528,7 @@ sub OPSO_ParseSpalnOutput
 	# terminal format then we're looking at SPALN's
 	# translation of the nucleotide sequence
 	#
-	if ($line !~ /\| \S+\/\d+\-\d+/) {
+	if ($line !~ /\| \S+$/) {
 	    $trans_line = $line;
 	    next;
 	}
@@ -4617,7 +4571,7 @@ sub OPSO_ParseSpalnOutput
 	#
 	$line = readline($SpalnFile);
 	$line =~ s/\n|\r//g;
-	my @NextAAs = split('',$line);
+	my @NextAAs = split(//,$line);
 
 
 	# Advance to the actual DNA sequence.
@@ -4708,7 +4662,7 @@ sub OPSO_ParseSpalnOutput
 	}
     }
     my $spaln_pct_id = int(1000.0 * $num_matches / $prot_len) / 10.0;
-    
+
 
     # ********************************************************************
     # *** 'IF ZERO' WILL TOGGLE MICRO EXON SEARCHING OFF *****************
@@ -4996,12 +4950,12 @@ sub OPSO_ParseSpalnOutput
 	    my $range_start = $AAPositions[$1-1];
 	    my $range_end   = $AAPositions[$2-1];
 
-	    while ($FullNuclSeq[$range_start-1] = uc($FullNuclSeq[$range_start-1])) {
+	    while ($range_start && $FullNuclSeq[$range_start-1] eq uc($FullNuclSeq[$range_start-1])) {
 		$range_start--;
 	    }
 	    $range_start = $NuclPositions[$range_start];
 
-	    while ($FullNuclSeq[$range_end+1] = uc($FullNuclSeq[$range_end+1])) {
+	    while ($range_end < scalar(@FullNuclSeq)-1 && $FullNuclSeq[$range_end+1] eq uc($FullNuclSeq[$range_end+1])) {
 		$range_end++;
 	    }
 	    $range_end = $NuclPositions[$range_end];
@@ -5041,12 +4995,12 @@ sub OPSO_ParseSpalnOutput
     my $range_start = $AAPositions[$1-1];
     my $range_end   = $AAPositions[$2-1];
     
-    while ($FullNuclSeq[$range_start-1] = uc($FullNuclSeq[$range_start-1])) {
+    while ($range_start && $FullNuclSeq[$range_start-1] eq uc($FullNuclSeq[$range_start-1])) {
 	$range_start--;
     }
     $range_start = $NuclPositions[$range_start];
     
-    while ($FullNuclSeq[$range_end+1] = uc($FullNuclSeq[$range_end+1])) {
+    while ($range_end < scalar(@FullNuclSeq)-1 && $FullNuclSeq[$range_end+1] eq uc($FullNuclSeq[$range_end+1])) {
 	$range_end++;
     }
     $range_end = $NuclPositions[$range_end];
