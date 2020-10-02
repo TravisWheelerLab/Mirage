@@ -29,20 +29,12 @@ if (-e 'mirage2') { system("rm \"mirage2\""); }
 
 
 # The name of the spaln folder (at the top for ease of adjustment)
+my $hsiDir   = 'inc/hsi';
 my $spalnDir = 'inc/spaln2.3.3';
-my $easelDir = 'inc/easel';
 my $blatDir  = 'inc/blat';
+my $hsiTar   = $hsiDir.'.tgz';
 my $spalnTar = $spalnDir.'.tgz';
-my $easelTar = $easelDir.'.tgz';
 my $blatTar  = $blatDir.'.tgz';
-
-
-# Before all else, make sure we have autoconf (most likely thing to
-# be missing)
-open(my $autoconfcheck,"which autoconf |");
-my $line = <$autoconfcheck>;
-if (!$line) { die "\n  ERROR: Program 'autoconf' is not installed (required for easel installation)\n         Try 'brew install autoconf'\n\n"; }
-close($autoconfcheck);
 
 
 # Where we are RIGHT NOW
@@ -80,39 +72,31 @@ if (system("make")) { die "\n  Failed to compile C source files\n\n"; }
 # already available before we go through the trouble of setting them up
 
 
-# We may need to unpack spaln
+# Now we need to get easel unpacked and setup, too
 chdir($startDir);
+if (-e $hsiTar) {
 
-# If forcing this might not be necessary
-#
+    if (system("tar -xzf $hsiTar -C inc/")) { die "\n  Failed to expand '$hsiTar'\n\n"; }
+
+    # Make and make install
+    chdir($hsiDir) || die "\n  Failed to enter directory '$hsiDir'\n\n";
+    print "\nCompiling hsi tools\n\n";
+    if (system("make")) { die "\n  Failed to compile hsi library\n\n"; }
+
+}    
+
+
+# Unpack Spaln, if necessary
+chdir($startDir);
 if (-e $spalnTar) {
 
     if (system("tar -xzf $spalnTar -C inc/")) { die "\n  Failed to expand file '$spalnTar'\n\n"; }
 
     # Configure and make SPALN
     chdir("$startDir/$spalnDir/src") || die "\n  Failed to enter directory '$spalnDir/src'\n\n";
-    print "\n  Configuring and compiling spaln\n\n";
+    print "\nConfiguring and compiling spaln\n\n";
     if (system("./configure")) { die "\n  Failed to configure 'spaln'\n\n"; }
     if (system("make")) { die "\n  Failed to make 'spaln'\n\n"; } 
-
-}    
-
-# Now we need to get easel unpacked and setup, too
-chdir($startDir);
-print "\n  Configuring and compiling easel\n\n";
-if (-e $easelTar) {
-
-    if (system("tar -xzf $easelTar -C inc/")) { die "\n  Failed to expand '$easelTar'\n\n"; }
-
-    # Configure
-    chdir($easelDir);
-    if (system "autoconf") { die "\n  Failed to configure easel library -- is autoconf installed?\n\n"; }
-    if (system "./configure") { die "\n  Failed to configure easel library\n\n"; }
-
-    # Make and make install
-    if (system("make")) { die "\n  Failed to compile easel library\n\n"; }
-    if (system("make check")) { die "\n  Failure during easel make check\n\n"; }
-    #if (system("make install")) { die "\n  Failed to install easel library\n\n"; }
 
 }    
 

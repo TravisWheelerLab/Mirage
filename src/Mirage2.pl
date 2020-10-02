@@ -36,7 +36,6 @@ sub VerifiedClean;
 sub ParseSpeciesGuide;
 sub SetMergeOrder;
 sub ConfirmValidTree;
-sub ConfirmSSI;
 sub GenerateSpeciesDBs;
 sub ParseSeqNameAsMirage;
 sub ParseSeqNameAsUniProt;
@@ -74,8 +73,9 @@ $location =~ s/Mirage2\.pl$//;
 
 
 # We're going to need these friends
-my $eslsfetch  = $location.'../inc/easel/miniapps/esl-sfetch';
-my $eslseqstat = $location.'../inc/easel/miniapps/esl-seqstat';
+my $sindex = $location.'../inc/hsi/sindex';
+my $sfetch = $location.'../inc/hsi/sfetch';
+my $sstat  = $location.'../inc/hsi/sstat';
 
 
 # Where we'll be storing timing information
@@ -422,8 +422,8 @@ sub CheckInstall
     push(@RequiredFiles,$location.'MultiSeqNW.h');
     push(@RequiredFiles,$location.'FinalMSA.pl');
     push(@RequiredFiles,$location.'makefile');
-    push(@RequiredFiles,$location.'../inc/easel/miniapps/esl-sfetch');
-    push(@RequiredFiles,$location.'../inc/easel/miniapps/esl-seqstat');
+    push(@RequiredFiles,$location.'../inc/hsi/sfetch');
+    push(@RequiredFiles,$location.'../inc/hsi/sstat');
     push(@RequiredFiles,$location.'../inc/spaln2.3.3/src/spaln');
     push(@RequiredFiles,$location.'../inc/blat/blat.linux.x86_64');
     push(@RequiredFiles,$location.'../inc/blat/blat.macOSX.x86_64');
@@ -532,7 +532,9 @@ sub ParseArgs
 
     # While we're here, we make sure there's a .ssi index for the
     # protein database
-    ConfirmSSI($proteindb);
+    # UPDATE: We've switched to .hsi, which will automatically check if this
+    #         is a good index, so just run that
+    RunSystemCommand($sindex." \"$proteindb\"");
 
     return \%Options;
 }
@@ -619,7 +621,7 @@ sub VerifiedClean
 # Function Name: ParseSpeciesGuide
 #
 # About: This function reads the necessary "Species Guide" file, making
-#        sure everything has the right (easel) indexing structures.
+#        sure everything has the right (.hsi) indexing structures.
 #
 sub ParseSpeciesGuide
 {
@@ -663,8 +665,8 @@ sub ParseSpeciesGuide
 		die   "  Recommendation: Verify path from directory containing MIRAGE.pl.\n\n";
 	    }
 	    
-	    # Make sure the genome has a .ssi index
-	    ConfirmSSI($Genomes[$i]);
+	    # Make sure the genome has an .hsi index
+	    RunSystemCommand($sindex." \"$Genomes[$i]\"");
 
 	    # If we don't have a '.chrom.sizes' file (std name for UCSC) then
 	    # generate one
@@ -672,11 +674,13 @@ sub ParseSpeciesGuide
 	    $chrsizes =~ s/\.fa$/\.chrom.sizes/;
 	    if (!(-e $chrsizes)) {
 		my $ChrSizes = OpenOutputFile($chrsizes);
-		my $SeqStats = OpenSystemCommand($eslseqstat." -a \"$Genomes[$i]\"");
+		my $SeqStats = OpenSystemCommand($sstat." \"$Genomes[$i]\"");
 		while (my $statline = <$SeqStats>) {
-		    if ($statline =~ /^\= (\S+)\s+(\d+)/) {
+		    if ($statline =~ /^\:/) {
+			$statline =~ /^\:\s+(\S+)/;
 			my $chr = $1;
-			my $len = $2;
+			$statline =~ /(\d+)$/;
+			my $len = $1;
 			print $ChrSizes "$chr\t$len\n";
 		    }
 		}
@@ -864,67 +868,6 @@ sub ConfirmValidTree
     return $final_tree_str;
     
 }
-
-
-
-
-
-
-########################################################################
-#
-#  Function: ConfirmSSI
-#
-#  About: This function takes a fasta-formatted database and either
-#         generates an SSI file (if one doesn't already exist) or 
-#         uses a bit of goofiness to test the accuracy of the existing
-#         one.  If the existing one is inaccurate, it's replaced.
-#
-sub ConfirmSSI
-{
-    my $dbname = shift;
-
-    # If there's no index, just make one already
-    if (!(-e "$dbname\.ssi")) {
-	if (system($eslsfetch." \-\-index $dbname 1>/dev/null")) {
-	    die "\n  ERROR:  Failed to create easel index for \"$dbname\"\n\n";
-	}
-	return;
-    }
-
-    # Aw jeez, looks like we're going to be double-checking the current
-    # index...
- 
-    # Slightly change the name of the database and make the link
-    my $symlinkdb = $dbname;
-    $symlinkdb =~ s/\.[^\.]+$/\.MirageSymlink\.fa/;
-    my $symlinkcmd = "ln -s \"$dbname\" \"$symlinkdb\"";
-    if (system($symlinkcmd)) {
-	RunSystemCommand("rm \"$symlinkdb\"") if (-e $symlinkdb);
-	die "\n  ERROR:  Symlink command '$symlinkcmd' failed\n\n";
-    }
-
-    # Build an ssi for the symlink
-    if (system($eslsfetch." \-\-index $symlinkdb 1>/dev/null")) {
-	RunSystemCommand("rm \"$symlinkdb\"");
-	RunSystemCommand("rm \"$symlinkdb\.ssi\"") if (-e $symlinkdb.'.ssi');
-	die"\n  ERROR:  Failed to create easel index for \"$symlinkdb\"\n\n";
-    }
-
-    # Check for differences between the two databases
-    my $diffcmd = "diff \"$dbname\.ssi\" \"$symlinkdb\.ssi\" \|";
-    open(my $diff,$diffcmd) || die "\n  ERROR:  Failed to diff the SSIs for '$dbname' and '$symlinkdb'\n\n";
-    my $diffline = <$diff>;
-    close($diff);
-
-    # If we have a substantive difference, the existing SSI needs replacement!
-    if ($diffline) { system("mv \"$symlinkdb\.ssi\" \"$dbname\.ssi\""); }
-    else           { system("rm \"$symlinkdb\.ssi\"");                  }
-    system("rm \"$symlinkdb\"");
-
-    return;
-
-}
-
 
 
 

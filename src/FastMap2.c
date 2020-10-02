@@ -54,7 +54,7 @@ int PrintUsage () {
  *
  *  About:  This function parses a FASTA-formatted sequence file
  *          containing a single DNA sequence extracted from a chromosome
- *          using esl-sfetch (or at least using the naming convention
+ *          using sfetch (or at least using the naming convention
  *          of '>[chr]/[start]-[end]')
  */
 char * ParseNucleotideFile

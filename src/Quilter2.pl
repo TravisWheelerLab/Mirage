@@ -74,7 +74,7 @@ my $gtfname = $ARGV[2];
 # As long as everything's going as expected, figure out where we are
 my $srcdir = $0;
 $srcdir =~ s/Quilter2.pl$//;
-my $sfetch = $srcdir.'../inc/easel/miniapps/esl-sfetch';
+my $sfetch = $srcdir.'../inc/hsi/sfetch';
 my $spaln  = $srcdir.'../inc/spaln2.3.3/src/spaln';
 
 # Spaln requires certain environment variables to be set, so why don'tcha set 'em?
@@ -630,7 +630,7 @@ sub UseFastMap
 	}
 
 	# Extract the appropriate genomic region for our search
-	RunSystemCommand($sfetch." -c $search_start\.\.$search_end \"$genome\" \"$chr\" > \"$nucl_fname\"");
+	RunSystemCommand($sfetch." -range $search_start\.\.$search_end \"$genome\" \"$chr\" > \"$nucl_fname\"");
 
 	# It's... FASTMAP2 TIME!
 	my $mapcmd = $srcdir."FastMap2 \"$gene_fname\" $num_seqs \"$nucl_fname\" $exon_list_str";
@@ -1659,7 +1659,7 @@ sub AttemptSpalnFill
 	close($tempf);
 	
 	my $nucl_range = $NuclSearchRanges[$i];
-	my $sfetch_cmd = $sfetch." -c $nucl_range \"$genome\" \"$chr\" > \"$nucl_fname\"";
+	my $sfetch_cmd = $sfetch." -range $nucl_range \"$genome\" \"$chr\" > \"$nucl_fname\"";
 	RunSystemCommand($sfetch_cmd);
 
 	my $spaln_cmd = $spaln."\"$nucl_fname\" \"$temp_fname\" 1>\"$spaln_fname\" 2>/dev/null";
@@ -2952,7 +2952,7 @@ sub AttemptBlatFill
 	    $sfetch_range = $sfetch_range_start.'..'.$sfetch_range_end;
 	}
 
-	my $sfetchcmd = $sfetch." -c $sfetch_range \"$genome\" \"$blat_chr\"";
+	my $sfetchcmd = $sfetch." -range $sfetch_range \"$genome\" \"$blat_chr\"";
 	my $inf = OpenSystemCommand($sfetchcmd);
 	my $line = <$inf>; # Eat the '>' line
 	my $blat_nucl_str = '';
@@ -3704,7 +3704,7 @@ sub SpalnSearch
 	my $range = $RangeStarts[$i].'..'.$RangeEnds[$i];
 	my $chr = $RangeChrs[$i];
 	$chr =~ s/\S$//;
-	my $sfetchcmd = $sfetch." -c $range \"$genome\" \"$chr\"";
+	my $sfetchcmd = $sfetch." -range $range \"$genome\" \"$chr\"";
 	my $inf = OpenSystemCommand($sfetchcmd);
 	my $line = <$inf>; # eat header
 	while ($line = <$inf>) {
