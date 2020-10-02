@@ -2,9 +2,7 @@
 #
 # ABOUT: This script is used to set up the directory for running 
 #        mirage.pl.  It verifies that all required programs are
-#        accessible and correctly compiled.  After running SETUP.pl,
-#        the user should only need to add the easel 'miniapps'
-#        directory and the spaln 'src' directory to her or his PATH.
+#        accessible and correctly compiled.
 #
 use warnings;
 use strict;
@@ -80,7 +78,7 @@ if (-e $hsiTar) {
 
     # Make and make install
     chdir($hsiDir) || die "\n  Failed to enter directory '$hsiDir'\n\n";
-    print "\nCompiling hsi tools\n\n";
+    print "\n  Compiling hsi tools\n\n";
     if (system("make")) { die "\n  Failed to compile hsi library\n\n"; }
 
 }    
@@ -94,7 +92,7 @@ if (-e $spalnTar) {
 
     # Configure and make SPALN
     chdir("$startDir/$spalnDir/src") || die "\n  Failed to enter directory '$spalnDir/src'\n\n";
-    print "\nConfiguring and compiling spaln\n\n";
+    print "\n  Configuring and compiling spaln\n\n";
     if (system("./configure")) { die "\n  Failed to configure 'spaln'\n\n"; }
     if (system("make")) { die "\n  Failed to make 'spaln'\n\n"; } 
 
@@ -109,8 +107,8 @@ if (-e $blatTar) {
     
 # If everything went well, we can go ahead an clear out the
 # spaln and easel tarballs
+system("rm $hsiTar")   if (-e $hsiTar);
 system("rm $spalnTar") if (-e $spalnTar);
-system("rm $easelTar") if (-e $easelTar);
 system("rm $blatTar")  if (-e $blatTar);
 
 # Create a symbolic link to the mirage-running shell script
