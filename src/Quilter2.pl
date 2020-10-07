@@ -3752,8 +3752,8 @@ sub SpalnSearch
 	# if we run into parsing errors.
 	my $SpalnFile = OpenInputFile($spaln_fname);
 	my ($nucl_ranges_ref,$amino_ranges_ref,$centers_ref,$spaln_pct_id)
-	    #= ParseSpalnOutput($SpalnFile,\@Seq);
-	    = OPSO_ParseSpalnOutput($SpalnFile,\@Seq);
+	    = ParseSpalnOutput($SpalnFile,\@Seq);
+	    # = OPSO_ParseSpalnOutput($SpalnFile,\@Seq);
 	close($SpalnFile);
 	
 	# Get that spaln output file THE HECK OUTTA HERE!
