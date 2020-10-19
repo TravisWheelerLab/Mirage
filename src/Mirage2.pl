@@ -147,10 +147,11 @@ foreach my $species (@Species) {
 
 # Divide the database according to species
 DispProgMirage('db-speciation');
-my ($origseqnames_ref,$allgenes_ref,$misc_seqs)
+my ($origseqnames_ref,$allgenes_ref,$misc_seqs,$speciesdir_ref)
     = GenerateSpeciesDBs($ProteinDB,$num_cpus,\%SpeciesDir);
 my @OrigSeqNames = @{$origseqnames_ref};
 my @AllGenes = @{$allgenes_ref};
+%SpeciesDir = %{$speciesdir_ref};
 
 # I'm going to print off all the original sequence names to a file so
 # if things go wrong during a run we can actually figure out who's who
@@ -164,6 +165,9 @@ close($seqnamef);
 
 # Do our intra-species magic!
 for (my $i=0; $i<$num_species-1; $i++) {
+
+    # Did we discover that this species wasn't actually present?
+    next if (!$SpeciesDir{$Species[$i]});
 
     my $species_dirname = $SpeciesDir{$Species[$i]};
     my $species_seqdir  = $species_dirname.'seqs/';
@@ -1088,6 +1092,17 @@ sub GenerateSpeciesDBs
     # families belong to which threads.
     foreach $species (keys %SpeciesDir) {
 
+	# If this species didn't actually appear in the database, then we'll want
+	# to remove it from circulation
+	if (!$CharCounts{$species}) {
+	    RunSystemCommand("rmdir \"$SpeciesDir{$species}\/alignments\"");
+	    RunSystemCommand("rmdir \"$SpeciesDir{$species}\/mappings\"");
+	    RunSystemCommand("rmdir \"$SpeciesDir{$species}\/seqs\"");
+	    RunSystemCommand("rmdir \"$SpeciesDir{$species}\"");
+	    $SpeciesDir{$species} = 0;
+	    next;
+	}
+
 	# You gotta catch this ol' trickster before it fouls things up!
 	next if ($species eq 'Misc');
 
@@ -1160,7 +1175,7 @@ sub GenerateSpeciesDBs
     my @AllGenes = sort keys %GeneHash;
     
     # This is it, baby!
-    return (\@OriginalSeqNames,\@AllGenes,$misc_seqs);
+    return (\@OriginalSeqNames,\@AllGenes,$misc_seqs,\%SpeciesDir);
 
 }
 
