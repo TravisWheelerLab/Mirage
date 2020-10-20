@@ -874,7 +874,6 @@ float RecursivePathEval
  float * TopScoreThroughNode,
  int * TopScoreSourceNode,
  int * TopScoreTargetNode,
- int target_amino,
  char * MapNucls,
  int start_map_nucl_len,
  int start_amino_depth,
@@ -905,7 +904,7 @@ float RecursivePathEval
   // Our second special catch is if this exon hits the target
   // amino we know ahead of time that this is as far as we can
   // go.
-  if (N->end_amino == target_amino) {
+  if (N->num_outgoing == 0) {
 
     // We'll still need to get the score of the mapping under the
     // given splice position
@@ -947,7 +946,7 @@ float RecursivePathEval
       // RECURSE!
       float recur_score =
 	RecursivePathEval(Graph,Seq,N->OutgoingID[i],node_id,TopScoreThroughNode,
-			  TopScoreSourceNode,TopScoreTargetNode,target_amino,MapNucls,
+			  TopScoreSourceNode,TopScoreTargetNode,MapNucls,
 			  map_nucl_len,amino_depth,map_score);
 
       // Phew, that was some hard work! Sure don't want to have to do it again!
@@ -1475,29 +1474,6 @@ void ReportMaximalPaths
 
   }
 
-  // Well, that was surprisingly easy -- we can now figure out the
-  // amino acid ranges covered by each connected component.
-  //
-  // NOTE: I'm fairly certain it's impossible for there to be a
-  //       pathological graph where the min_amino and max_amino for
-  //       a connected component can't be reached through forward
-  //       movement alone. FAIRLY certain.
-  //
-  // +1 because '0' is unassigned, and easy indexing is better than
-  // ultra-nitpicker-level memory efficiency.
-  //
-  int ComMinAmino[num_components+1];
-  int ComMaxAmino[num_components+1];
-  for (i=1; i<=num_components; i++) {
-    ComMinAmino[i] = 1000000;
-    ComMaxAmino[i] = -1;
-  }
-
-  for (i=0; i<num_exons; i++) {
-    j = ComMembership[i];
-    ComMinAmino[j] = MBB_MinInt(ComMinAmino[j],Graph[i]->start_amino);
-    ComMaxAmino[j] = MBB_MaxInt(ComMaxAmino[j],Graph[i]->end_amino);
-  }
 
   // So now we're going to do some nasty business.
   //
@@ -1538,16 +1514,15 @@ void ReportMaximalPaths
   // component
   for (i=0; i<num_exons; i++) {
 
-    // Figure out which component we're in, and see if we're a valid
-    // starting position.
+    // If this is a possible start node, we'll see what it's best path through
+    // this graph is.
     j = ComMembership[i];
-    if (Graph[i]->start_amino == ComMinAmino[j]) {
+    if (Graph[i]->num_incoming == 0) {
 
       // Are you my dad?
       float pathscore
 	= RecursivePathEval(Graph,Seq,i,-1,TopScoreThroughNode,TopScoreSourceNode,
-			    TopScoreTargetNode,ComMaxAmino[j],MapNucls,0,
-			    Graph[i]->start_amino,0.0);
+			    TopScoreTargetNode,MapNucls,0,Graph[i]->start_amino,0.0);
 
       if (pathscore > ToppestScores[j]) {
 	ToppestScores[j]  = pathscore;
@@ -1590,7 +1565,7 @@ void ReportMaximalPaths
       ComExons[j] = TopScoreTargetNode[ComExons[j-1]];
 
     // Also, how many aminos (not to pry)?
-    int num_com_aminos = ComMaxAmino[i] - ComMinAmino[i] + 1;
+    int num_com_aminos = Graph[ComExons[num_com_exons-1]]->end_amino - Graph[ComExons[0]]->start_amino + 1;
 
     // To keep things a little bit cleaner than they'd be otherwise, let's offload
     // the next bit of work to a dedicated output prep. function.
