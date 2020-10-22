@@ -2690,8 +2690,8 @@ sub GenBlatMaps
     my $threadID = SpawnProcesses($num_cpus);
 
     # Which range of gene name indices is this thread tasked with?
-    my $gene_index_start =  $threadID    * ($num_blat_genes / $num_cpus);
-    my $gene_index_end   = ($threadID+1) * ($num_blat_genes / $num_cpus);
+    my $gene_index_start =  $threadID    * int($num_blat_genes / $num_cpus);
+    my $gene_index_end   = ($threadID+1) * int($num_blat_genes / $num_cpus);
     if ($threadID == $num_cpus-1) { $gene_index_end = $num_blat_genes; }
 
     # Make a hash of genes that this thread is in charge of for quick reference
@@ -4262,8 +4262,8 @@ sub FinalFileCheck
     my $threadID = SpawnProcesses($num_cpus);
 
     # Off to the file mines with you!
-    my $start_file_index =  $threadID    * (scalar(@OutFileList)/$num_cpus);
-    my $end_file_index   = ($threadID+1) * (scalar(@OutFileList)/$num_cpus);
+    my $start_file_index =  $threadID    * int(scalar(@OutFileList)/$num_cpus);
+    my $end_file_index   = ($threadID+1) * int(scalar(@OutFileList)/$num_cpus);
     $end_file_index = scalar(@OutFileList) if ($threadID == $num_cpus-1);
 
     my $num_cleaned_files = 0;
