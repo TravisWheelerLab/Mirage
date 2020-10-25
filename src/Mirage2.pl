@@ -1038,7 +1038,7 @@ sub GenerateSpeciesDBs
 		$gene = lc($1);
 
 	    } else {
-		die "\n  SHIT!\n\n";
+		die "\n  ERROR:  Unable to parse sequence name '$parsename'\n\n";
 	    }
 
 	    # Record the original name of this sequence, and then switch over to our
