@@ -1557,7 +1557,7 @@ sub AlignMiscSeqs
 	    my $grep = OpenSystemCommand("grep '>' \"$fname\"");
 	    while (my $line = <$grep>) {
 		if ($line =~ /\>(\d+)/) {
-		    my $seq_id = $1;
+		    my $seq_id = $1+1; # Be careful with '0'!
 		    if ($SeqsByGene{$gene}) {
 			$SeqsByGene{$gene} = $SeqsByGene{$gene}.','.$seq_id;
 		    } else {
