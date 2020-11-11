@@ -246,6 +246,10 @@ MergeAlignments(\@Species,\%SpeciesDir,\@MergeOrder,\@AllGenes,\@OrigSeqNames);
 # Slap that stop-watch!
 $TotalRuntime = Time::HiRes::tv_interval($StartTime);
 
+# Even though there'll be a few moments for cleanup, who says we can't pop
+# some champagne bottles?
+print "  + Inter-species alignment complete\n";
+
 
 # For a touch of cleanup, get rid of our species-specific protein databases
 for (my $i=0; $i<$num_species; $i++) {
