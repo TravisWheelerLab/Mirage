@@ -587,8 +587,8 @@ sub UseFastMap
 	    }
 
 	    # Buff it up! Until you can feel it!
-	    $search_start += 1000;
-	    $search_end   -= 1000;
+	    $search_start = Min($search_start+1000,$ChrSizes{$chr});
+	    $search_end   = Max($search_end-1000,1);
 	    
 	} else {
 
@@ -610,8 +610,8 @@ sub UseFastMap
 	    }
 
 	    # Buff it up! And you don't even need it!
-	    $search_start -= 1000;
-	    $search_end   += 1000;
+	    $search_start = Max($search_start-1000,1);
+	    $search_end   = Min($search_end+1000,$ChrSizes{$chr});
 	    
 	}
 
@@ -628,12 +628,6 @@ sub UseFastMap
 	    if ($revcomp) { push(@SpalnChrs,$chr.'-'); }
 	    else          { push(@SpalnChrs,$chr.'+'); }
 	}
-
-	# Just in case we're pushing up against the edge of the
-	# genomic sequence (this is primarily a concern with 'alt'
-	# chromosomes), make sure we don't overstep.
-	$search_end   = Min($search_end,  $ChrSizes{$chr});
-	$search_start = Max($search_start,1);
 
 	# Extract the appropriate genomic region for our search
 	RunSystemCommand($sfetch." -range $search_start\.\.$search_end \"$genome\" \"$chr\" > \"$nucl_fname\"");
