@@ -156,7 +156,7 @@ if (scalar(@BlatFileNames)) {
     # telling us!
     GenBlatMaps($blat_outfname,\%BlatNameGuide,\%BlatGenes,$num_cpus);
 
-    # Cleanup on line 157! << CRITICAL: KEEP THIS LINE NUMBER CORRECT, FOR JOKE
+    # Cleanup on line 160! << CRITICAL: KEEP THIS LINE NUMBER CORRECT, FOR JOKE
     RunSystemCommand("rm \"$blat_outfname\"");
 
 }
@@ -628,6 +628,12 @@ sub UseFastMap
 	    if ($revcomp) { push(@SpalnChrs,$chr.'-'); }
 	    else          { push(@SpalnChrs,$chr.'+'); }
 	}
+
+	# Just in case we're pushing up against the edge of the
+	# genomic sequence (this is primarily a concern with 'alt'
+	# chromosomes), make sure we don't overstep.
+	$search_end   = MIN($search_end,  $ChrSizes{$chr});
+	$search_start = MAX($search_start,1);
 
 	# Extract the appropriate genomic region for our search
 	RunSystemCommand($sfetch." -range $search_start\.\.$search_end \"$genome\" \"$chr\" > \"$nucl_fname\"");
