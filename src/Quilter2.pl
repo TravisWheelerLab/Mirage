@@ -632,8 +632,8 @@ sub UseFastMap
 	# Just in case we're pushing up against the edge of the
 	# genomic sequence (this is primarily a concern with 'alt'
 	# chromosomes), make sure we don't overstep.
-	$search_end   = MIN($search_end,  $ChrSizes{$chr});
-	$search_start = MAX($search_start,1);
+	$search_end   = Min($search_end,  $ChrSizes{$chr});
+	$search_start = Max($search_start,1);
 
 	# Extract the appropriate genomic region for our search
 	RunSystemCommand($sfetch." -range $search_start\.\.$search_end \"$genome\" \"$chr\" > \"$nucl_fname\"");
