@@ -650,7 +650,7 @@ sub UseFastMap
 	#
 	################################################################
 
-	my $hitref = ParseFastMapOutput($mapcmd,$num_seqs);
+	my $hitref = ParseFastMapOutput($mapcmd,$num_seqs,$ChrSizes{$chr});
 
 	# We now have an array with the hits for each sequence stored in
 	# an &-separated list.  These hits are in |-separated format,
@@ -1060,6 +1060,7 @@ sub ParseFastMapOutput
 {
     my $cmd = shift;
     my $num_seqs = shift;
+    my $chr_len = shift;
 
     # We'll organize our hits by sequence
     my @HitsBySeq;
@@ -1106,6 +1107,12 @@ sub ParseFastMapOutput
 	    $line =~ /Mapped Nucl\.s\s+\: (\d+)\.\.(\d+)/;
 	    my $nucl_start = $1;
 	    my $nucl_end   = $2;
+
+	    # Check to make sure we have enough characters on the
+	    # edges that we can actually run ExonWeaver
+            next if (Min($nucl_start,$nucl_end) <= 17
+                     || Max($nucl_start,$nucl_end)+17 >= $chr_len);
+
 
 	    # 7. Protein characters (we already have access...)
 	    $line = <$fm2output>;
