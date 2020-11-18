@@ -269,6 +269,7 @@ void PrintMap
   int    map_start_index,
   int    map_len,
   char * NuclSeq,
+  int    nucl_seq_len,
   int    rel_start_nucl,
   int    chr_start_nucl,
   float  score,
@@ -276,12 +277,6 @@ void PrintMap
  ){
 
   int i;
-
-  // NOTE: I'm choosing for there to be 17 buffer nucleotides so
-  //       that, when stitching hits together, we can have
-  //       (up to) an extension of 5 full aminos from each hit,
-  //       and also observe whether we have AG/GT at full 5aa extension.
-  int num_buffer_nucls = 17; // *17*
 
   // ALL BOUNDS ARE INCLUSIVE!
   int prot_end_index = prot_start_index + (map_len-1);
@@ -299,6 +294,19 @@ void PrintMap
     chr_end_nucl    = chr_start_nucl + 3*map_len - 1;
   }
   
+  // NOTE: I'm choosing for there to be 17 buffer nucleotides so
+  //       that, when stitching hits together, we can have
+  //       (up to) an extension of 5 full aminos from each hit,
+  //       and also observe whether we have AG/GT at full 5aa extension.
+  int num_buffer_nucls = 17; // *17*
+
+  //       ... and, as you might expect, this puts a little restriction
+  //       on the hits we can report (mainly applies to nonstandard
+  //       chromosomal sequences)
+  if (rel_start_nucl - num_buffer_nucls < 0
+      || rel_end_nucl + num_buffer_nucls > nucl_seq_len)
+    return;
+
   // Metadata
   printf("\n");
   printf("Protein Num   : %d\n",prot_id);
@@ -367,6 +375,7 @@ void BlockScan
   int    orf_len,
   int    micro_exon,
   char * NuclSeq,
+  int    nucl_seq_len,
   int    rel_start_nucl,
   int    chr_start_nucl,
   int    revcomp
@@ -545,7 +554,7 @@ void BlockScan
     // Time to shout 'n' scream about that mapping!
     int map_len = prot_end_index - prot_start_index + 1;
     PrintMap(ProtSeq,prot_id,prot_start_index,exon_id,rf_index,ORF,orf_start_index,
-	     map_len,NuclSeq,rel_start_nucl,chr_start_nucl,score,revcomp);
+	     map_len,NuclSeq,nucl_seq_len,rel_start_nucl,chr_start_nucl,score,revcomp);
     
     
   }
@@ -575,6 +584,7 @@ void OriginalFastMap
   char * ORF,
   int    orf_len,
   char * NuclSeq,
+  int    nucl_seq_len,
   int    rel_start_nucl,
   int    chr_start_nucl,
   int    revcomp
@@ -633,7 +643,7 @@ void OriginalFastMap
 
 	// It's the end of the road!
 	PrintMap(ProtSeq,prot_id,ProtStartPos[i],exon_id,rf_index,ORF,0,map_len,
-		 NuclSeq,rel_start_nucl,chr_start_nucl,0.0,revcomp);
+		 NuclSeq,nucl_seq_len,rel_start_nucl,chr_start_nucl,0.0,revcomp);
 
 	// Front-fill, decrement num_live_diags
 	num_live_diags--;
@@ -652,7 +662,7 @@ void OriginalFastMap
 	  // If the diagonal was behaving well up until this point, cut it some slack!
 	  if (map_len >= output_threshold) {
 	    PrintMap(ProtSeq,prot_id,ProtStartPos[i],exon_id,rf_index,ORF,0,map_len,
-		     NuclSeq,rel_start_nucl,chr_start_nucl,0.0,revcomp);
+		     NuclSeq,nucl_seq_len,rel_start_nucl,chr_start_nucl,0.0,revcomp);
 	  }
 
 	  // Front-fill, decrement num_live_diags
@@ -684,7 +694,7 @@ void OriginalFastMap
   for (i=0; i<num_live_diags; i++) {
     int prot_index = ProtStartPos[i]+map_len;
     PrintMap(ProtSeq,prot_id,ProtStartPos[i],exon_id,rf_index,ORF,0,map_len,
-	     NuclSeq,rel_start_nucl,chr_start_nucl,0.0,revcomp);
+	     NuclSeq,nucl_seq_len,rel_start_nucl,chr_start_nucl,0.0,revcomp);
   }
   
 }
@@ -855,7 +865,7 @@ int main (int argc, char ** argv) {
 	  //
 	  for (j=0; j<num_seqs; j++)
 	    BlockScan(ProtSeqs[j],j,i,rf_index,&RF[orf_start_index],orf_len,micro_exon,
-		      NuclSeq,orf_rel_nucl,orf_chr_nucl,revcomp);
+		      NuclSeq,nucl_seq_len,orf_rel_nucl,orf_chr_nucl,revcomp);
 
 	  // [2]
 	  //
