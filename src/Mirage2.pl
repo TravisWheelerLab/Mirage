@@ -44,6 +44,7 @@ sub AggregateMappingMisses;
 sub AlignUnmappedSeqs;
 sub AlignMiscSeqs;
 sub MergeAlignments;
+sub CheckSpliceMarkers;
 sub FinalizeIntraSpeciesMSA;
 sub EvaluateMissDir;
 
@@ -1731,12 +1732,16 @@ sub MergeAlignments
 	my $outfname = $FinalDir.$gene.'.afa';
 
 	# (Sometimes finalization begins with a touch of cleanup)
+	# (Otherwise, we'll need to confirm that splice site markers
+	# extend through every row of the final MSA)
+	my $tmpname = $outfname;
+	$tmpname =~ s/\.afa$/\.tmp/;
 	if ($cleanMSA) {
-	    my $tmpname = $outfname;
-	    $tmpname =~ s/\.afa$/\.tmp/;
 	    RunSystemCommand($location."FinalMSA.pl \"$infname\" \"$tmpname\"");
-	    $infname = $tmpname;
+	} else {
+	    CheckSpliceMarkers($infname,$tmpname);
 	}
+	$infname = $tmpname;
 
 	# Big move's a-comin'!
 	my $inf = OpenInputFile($infname);
@@ -1768,6 +1773,82 @@ sub MergeAlignments
 
     # Clear out the secret temporary directory and bump on back to the top level!
     RunSystemCommand("rm -rf \"$tmpdir\"");
+    
+}
+
+
+
+
+
+########################################################################
+#
+#  Function: CheckSpliceMarkers
+#
+sub CheckSpliceMarkers
+{
+    my $infname  = shift;
+    my $outfname = shift;
+
+    # Read in the input file's MSA
+    my @MSA;
+    my @SeqNames;
+    my $num_seqs = -1;
+    my $msa_len;
+    my $line_len = 0;
+
+    my $inf = OpenInputFile($infname);
+    while (my $line = <$inf>) {
+
+	$line =~ s/\n|\r//g;
+	next if (!$line);
+
+	if ($line =~ /\>(\S+)/) {
+
+	    push(@SeqNames,$1);
+	    $num_seqs++;
+	    $msa_len = 0;
+	       
+	} else {
+
+	    $line_len = Max($line_len,length($line));
+	    foreach my $char (split(//,$line)) {
+		$MSA[$num_seqs][$msa_len++] = $char;
+	    }
+
+	}
+
+    }
+    $num_seqs++;
+    close($inf);
+
+    # Next we'll run through the MSA, and any column where we
+    # see a splice-site marker gets our stamp of quality assurance
+    # that every row has a splice-site marker there.
+    for (my $j=0; $j<$msa_len; $j++) {
+	for (my $i=0; $i<$num_seqs; $i++) {
+	    if ($MSA[$i][$j] eq '*') {
+		for (my $k=0; $k<$num_seqs; $k++) {
+		    $MSA[$k][$j] = '*';
+		}
+		last;
+	    }
+	}
+    }
+
+    # Great! Now we'll just write our happy final file out
+    open(my $outf,'>',$outfname) || die "\n  ERROR:  Failed to open output file '$outfname'\n\n";
+    for (my $i=0; $i<$num_seqs; $i++) {
+	print $outf ">$SeqNames[$i]\n";
+	for (my $j=0; $j<$msa_len; $j++) {
+	    print $outf "$MSA[$i][$j]";
+	    if (($j+1) % $line_len == 0) {
+		print $outf "\n";
+	    }
+	}
+	print "\n" if ($msa_len % $line_len);
+	print "\n";
+    }
+    close($outf);
     
 }
 
