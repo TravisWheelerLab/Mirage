@@ -1845,8 +1845,8 @@ sub CheckSpliceMarkers
 		print $outf "\n";
 	    }
 	}
-	print "\n" if ($msa_len % $line_len);
-	print "\n";
+	print $outf "\n" if ($msa_len % $line_len);
+	print $outf "\n";
     }
     close($outf);
     
