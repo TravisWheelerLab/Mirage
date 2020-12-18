@@ -67,19 +67,19 @@
   guide file directing the program to genomes and gtf indicies for each species
   being searched on.
 
-      $ perl mirage.pl  <Protein DB>  <Species Guide>
+      $ perl mirage2.pl  <Protein DB>  <Species Guide>
 
   It is expected that the names of the sequences in the protein database will
-  begin with 'GN:' and will be followed by the following fields, in order and
-  separated by bar (|) characters:
+  consist of three fields, in order and separated by bar (|) characters:
 
-       1. Gene family  
-       2. Isoform name 
-       3. Species
-       4. Isoform identifier / extra '|'-separated fields
-       5. Group name
+       1. Species
+       2. Gene family (or multiple families, separated by '/')
+       3. A unique identifier within the species/family pair
 
-       For example: '>GN:OBSCN|obscn_iso2|human|4L3XR0X|obscn'
+  This can be followed by a '#', after which any additional comments can be
+  written (and ignored by Mirage).
+
+       For example: '>human|znf143/zn143|2 # Accession:P52747, zinc finger protein'
 
   The guide file is a simple text file where each line corresponds to a species
   and has the following fields (separated by whitespace):
@@ -90,36 +90,12 @@
 
        For example: 'human  ../genomes/Human.DNA.fa  ../indices/human.gtf'
 
+  The guide file can also include a line with a Newick-formatted tree to set the
+  order in which inter-species alignment occurs.
+
+       For example: '(dolphin,((mouse,rat),human))'
+
   For more information, use 'mirage --help'.
-
-
-
-  MORE USAGE
-  ----------
-  To run mirage on a reduced dataset (such as one particular gene family), first
-  create a database containing only the sequences that you are interested in
-  searching for.  This can be done with the tools "grep" and "esl-sfetch."
-  grep will pull out all lines from a file matching some string pattern, and may
-  thus be used to identify all sequence names matching a given format.  For
-  example, the command
-
-       grep "GN:OBSCN" big_database.fa
-
-  will list all members of the OBSCN gene family in the file "big_database.fa."
-  Because these lines reveal the names of sequences, esl-sfetch can be used to
-  pull out the corresponding sequences one at a time.  For example, if the above
-  grep command matches '>GN:OBSCN|obscn_iso2|human|4L3XR0X,' then the command
-
-       esl-sfetch big_database.fa "GN:OBSCN|obscn_iso2|human|4L3XR0X|obscn" >> new_database.fa
-
-  will pull out the sequence named "GN:OBSCN|obscn_iso2|human|4L3XR0X|obscn" and
-  append it to a file named "new_database.fa" (if there isn't a file with this
-  name a new file will be created automatically).
-
-  Once the new database has been generated, re-running mirage is as easy as
-  substituting the name of the old database with the name of the new database.
-
-  NOTE: Automation of aligning a data subset is in imminent development plans
 
 
 
@@ -135,10 +111,8 @@
   section of the protein is identical to one of its purported exons).  The program
   analyzes each protein's hit set and identifies an optimal way of "stitching" the
   hits together to achieve full coverage of the protein.  This is the work done
-  by the 'Quilter.pl' script, which relies on 'FastDiagonals' and SPALN (if installed)
-  to determine the individual hits.  A side program ('TransSW') is used to measure
-  the repetitiveness of the proteins, and may be used to help identify sequencing
-  errors.
+  by the 'Quilter2.pl' script, which relies on 'FastMap2' and SPALN (if installed)
+  to determine the individual hits.
 
   The second phase consists of isolating each set of "stitched" hits for each 
   isoform within the same species and gene family and joining these hits together
@@ -146,7 +120,7 @@
   compared to one another by way of their positions in the genome, this alignment
   preserves the exon boundaries indicated by the hits identified in phase 1 and
   places special markers in the MSAs to mark where splice sites are observed.
-  This work is done with the 'MultiMSA.pl' script.
+  This work is done with the 'MapsToMSAs.pl' script.
 
   The third phase aligns the MSAs generated during the second phase across species
   (staying within gene families).  This is done with profile-to-profile alignment
@@ -163,40 +137,31 @@
     requirements expected by mirage.  If a database does not meet the requirements,
     mirage will direct the user towards this program.
 
-  + run_mirage.sh
+  + src/run_mirage2.sh
 
     A shell script used to run Mirage.
 
-  + mirage.pl
+  + src/Mirage2.pl
 
     The top-level script used to generate MSAs.  This and CleanMirageDB.pl are 
     the only programs that the user is expected to engage with.
   
-  + src/Quilter.pl
+  + src/Quilter2.pl
 
     A script used to align proteins within a particular species to their
     genome (stitching together small hits for many proteins, hence the name).
 
-  + src/DiagonalSets.pm
-
-    A perl module containing the objects and methods that Quilter.pl uses to
-    stitch together protein-to-genome alignments.
-
-  + src/FastMap.c
+  + src/FastMap2.c
    
     A program used to identify nearly-identical alignments of protein sequence
     to DNA (based on the Needleman-Wunsch dynamic programming algorithm, but only
     allowing match states).
 
-  + src/Diagonals.c
+  + src/BasicBio.c
 
-    A collection of helper functions used by FastDiagonals.c and TransSW.c.
+    A collection of helper functions used by FastMap2 and MultiSeqNW.
 
-  + src/TransSW.c
-
-    A program currently used only for debugging purposes.
-
-  + src/MultiMSA.pl
+  + src/MapsToMSAs.pl
 
     A script used to generate MSAs for all gene families within a species based
     on the results of Quilter.pl.
@@ -216,16 +181,15 @@
 
   INCLUDED DIRECTORIES
   --------------------
-  + inc/easel
+  + inc/hsi
     
-    A library of general-purpose bioinformatics programs.  Used within mirage 
-    to extract sequences or sequence metadata
+    A set of tools used mainly to extract sequences or sequence metadata from
+    fasta-formatted files.
 
   + inc/spaln2.2.2
 
     A program used to generate intron-aware alignments of proteins to genomes.
-    Slower than FastDiagonals but allows for search without guidance from a
-    GTF index.
+    Slower than FastMap2 but allows for search without guidance from a GTF index.
 
   + inc/blat
 
