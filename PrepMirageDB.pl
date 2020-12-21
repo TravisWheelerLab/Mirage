@@ -71,7 +71,7 @@ while (my $line = <$inf>) {
 	#   2. More English-y version of (1.)
 	#   3. UniProt
 	#
-	if ($orig_name =~ /\>([^\|]+)\|([^\|]+)\|([^\|]+)/) { ###################### 1
+	if ($orig_name =~ /([^\|]+)\|([^\|]+)\|([^\|]+)/) { ###################### 1
 
 	    # The recommended format is being followed, so let's see if they nailed it!
 	    my $species = $1;
