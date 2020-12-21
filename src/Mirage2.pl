@@ -1033,19 +1033,25 @@ sub GenerateSpeciesDBs
 		    }
 		}
 
-	    } elsif (ParseSeqNameAsUniProt($parsename) && 0) {
+	    } elsif (ParseSeqNameAsUniProt($parsename)) {
 
-		# NOTE: This makes the assumption that the gene and species are
-		#       non-whitespacey, which isn't a safe assumption!
-		#       This needs to be fixed before we can turn this back on!
-		#       Also, it's important to consider how 'fixing' this will
-		#       require adjusting how we parse the species guide file.
-
-		$parsename =~ /OS\=(\S+)/;
+		$parsename =~ /OS\=([^\=]+\=?)/;
 		$species = lc($1);
+		$species =~ s/\s+\S\S\=$//;
 
-		$parsename =~ /GN\=(\S+)/;
+		# Replace illegal characters
+		$species =~ s/\s|\||\&|\*|\$/\_/g;
+		$species =~ s/\[/\(/g;
+		$species =~ s/\]/\)/g;
+		
+		$parsename =~ /GN\=([^\=]+\=?)/;
 		$gene = lc($1);
+		$gene =~ s/\s+\S\S\=$//;
+		
+		# Replace illegal characters
+		$gene =~ s/\s|\||\&|\*|\$/\_/g;
+		$gene =~ s/\[/\(/g;
+		$gene =~ s/\]/\)/g;
 
 	    } else {
 		die "\n  ERROR:  Unable to parse sequence name '$parsename'\n\n";
@@ -1240,13 +1246,10 @@ sub ParseSeqNameAsMirage
 sub ParseSeqNameAsUniProt
 {
     my $seqname = shift;
-    if ($seqname =~ /^([^\|]+)\|[^\|]+\|[^\|]+ /) {
-	my $origin_db = lc($1);
-	if ($origin_db ne 'sp' && $origin_db ne 'tr') { return 0; }
-	# Make sure we can get everything we need to do our Mirage-y work with this
-	# sequence.
-	if ($seqname =~ /GN\=\S+/ && $seqname =~ /OS\=\S+/) { return 1; }
-	return 0;
+    # Make sure we can get everything we need to do our Mirage-y work with this
+    # sequence.
+    if ($seqname =~ /GN\=/ && $seqname =~ /OS\=/) {
+	return 1;
     }
     return 0;
 }

@@ -272,7 +272,9 @@ if ($num_diff_lines =~ /^\s*0\s*$/) {
 sub ReplaceIllegalChars
 {
     my $string = shift;
-    $string =~ s/\s|\[|\]|\||\&|\*|\$/\_/g;
+    $string =~ s/\s|\||\&|\*|\$/\_/g;
+    $string =~ s/\[/\(/g;
+    $string =~ s/\]/\)/g;
     return $string;
 }
 
