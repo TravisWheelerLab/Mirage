@@ -1672,10 +1672,8 @@ sub AttemptSpalnFill
 	my $spaln_cmd = $spaln."\"$nucl_fname\" \"$temp_fname\" 1>\"$spaln_fname\" 2>/dev/null";
 
 	# Don't bail if Spaln does -- just move on to the next case
-	if (system($spaln_cmd)) {
-	    print "\n  Note: Spaln failed during '$spaln_cmd'\n  (Error handled)\n\n";
-	    next;
-	}
+	next if (system($spaln_cmd));
+	
 	my $SpalnOut = OpenInputFile($spaln_fname);
 
 	# Note that while the intuition is that a gap is a single wily
@@ -3745,7 +3743,6 @@ sub SpalnSearch
 	# Sometimes Spaln doesn't like an input, so we don't bail if the
 	# system call goes badly
 	if (system($spaln_cmd)) {
-	    print "\n  Note: Spaln failed during '$spaln_cmd'\n  (Error handled)\n\n";
 	    push(@SpalnHitStrs,0);
 	    push(@SpalnPctIDs,0);
 	    next;
