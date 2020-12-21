@@ -124,6 +124,8 @@ while (my $line = <$inf>) {
 	    if ($lc_line =~ /genes?\:\s*(\S+)/) {
 		$input_genes = $1;
 	    } else {
+		close($outf); RunSystemCommand("rm \"$outfname\"");
+		close($namechangef); RunSystemCommand("rm \"$namechangefname\"");
 		die "\n  Failed to determine gene (gene:[name]) in '$line'\n\n";
 	    }
 
@@ -141,6 +143,8 @@ while (my $line = <$inf>) {
 	    if ($lc_line =~ /id\:\s*(\S+)/) {
 		$id = $1;
 	    } else {
+		close($outf); RunSystemCommand("rm \"$outfname\"");
+		close($namechangef); RunSystemCommand("rm \"$namechangefname\"");
 		die "\n  Failed to determine id (id:[name]) in '$line'\n\n";
 	    }
 
@@ -297,6 +301,8 @@ sub ParseUniProt
 	$species =~ s/\s+\S\S\=$//;
 	$species = ReplaceIllegalChars($species);
     } else {
+	close($outf); RunSystemCommand("rm \"$outfname\"");
+	close($namechangef); RunSystemCommand("rm \"$namechangefname\"");
 	die "\n  Failed to determine species (OS=[name]) in '$orig_name'\n\n";
     }
     
@@ -326,6 +332,8 @@ sub ParseUniProt
     } elsif ($long_gene) {
 	$gene = $long_gene;
     } else {
+	close($outf); RunSystemCommand("rm \"$outfname\"");
+	close($namechangef); RunSystemCommand("rm \"$namechangefname\"");
 	die "\n  Failed to determine gene (GN=[name]) in '$orig_name'\n\n";
     }
     
