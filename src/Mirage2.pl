@@ -587,7 +587,7 @@ sub VerifiedClean
 	# Check the header
 	$line =~ s/\n|\r//g;
 	my $header = $line;
-	if ($header =~ /\s|\#|\&|\//) {
+	if ($header =~ /\s|\#|\&|\/|\$/) {
 	    close($DB);
 	    print "\n  ERROR: Sequence name '$header' uses illegal characters\n";
 	    return 0;
@@ -1033,7 +1033,13 @@ sub GenerateSpeciesDBs
 		    }
 		}
 
-	    } elsif (ParseSeqNameAsUniProt($parsename)) {
+	    } elsif (ParseSeqNameAsUniProt($parsename) && 0) {
+
+		# NOTE: This makes the assumption that the gene and species are
+		#       non-whitespacey, which isn't a safe assumption!
+		#       This needs to be fixed before we can turn this back on!
+		#       Also, it's important to consider how 'fixing' this will
+		#       require adjusting how we parse the species guide file.
 
 		$parsename =~ /OS\=(\S+)/;
 		$species = lc($1);
