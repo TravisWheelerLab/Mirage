@@ -1208,7 +1208,7 @@ sub GenerateSpeciesDBs
 sub ParseSeqNameAsMirage
 {
     my $seqname = shift;
-    return 1 if ($seqname =~ /^[^\|]+\|[^\|]+\|[^\|]+$/);
+    return 1 if ($seqname =~ /^[^\|]+\|[^\|]+\|[^\|]+\s*$/);
     return 0;
 }
 
