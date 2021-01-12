@@ -24,13 +24,13 @@ use DisplayProgress;
 
 
 sub WriteMSAToFile;
-sub GetNextExonRange;   # Identify the start and end points of the next exon (nucleotide values)
-sub UniteARFSegments;   # When we have adjacent ARF segments, group them by sequence
-sub MatrixRecurse;      # Used by UniteARFSegments during clustering
-sub MinorClean;         # Clean up obvious minor errors in the alignment
-sub QuickAlign;         # Used to resolve indels
-sub ResolveExon;        # When an error has been detected in an exon, try to adjust using gap tricks
-sub CheckColumnProfile; # Build a profile of an MSA column
+sub GetNextExonRange;    # Identify the start and end points of the next exon (nucleotide values)
+sub UniteARFSegments;    # When we have adjacent ARF segments, group them by sequence
+sub GroupCoocurringSeqs; # Group sequences that use the same MSA positions (during ARF clustering)
+sub MinorClean;          # Clean up obvious minor errors in the alignment
+sub QuickAlign;          # Used to resolve indels
+sub ResolveExon;         # When an error has been detected in an exon, try to adjust using gap tricks
+sub CheckColumnProfile;  # Build a profile of an MSA column
 
 
 
@@ -150,6 +150,11 @@ while ($tg_line = <$ThreadGuide>) {
 	my $seqname = $1;
 	my $seq_id  = $SeqNameToIndex{$seqname}-1;
 
+	# DEBUGGING
+	if (!$SeqNameToIndex{$seqname}) {
+	    die "\n  No recognized sequence with the name '$seqname'...?\n\n";
+	}
+
 	$line = <$MapFile>;
 	$line =~ /Map Method \: (\S+)/;
 	my $map_method = $1;
@@ -232,7 +237,8 @@ while ($tg_line = <$ThreadGuide>) {
 
 
     my ($msa_ref,$msa_len,$arfs_ref)
-	= ComposeMSA(\%Mapping,$num_seqs,$revcomp,\@SeqLengths);
+	= ComposeMSA(\%Mapping,$num_seqs,$revcomp,\@SeqLengths
+		     ,$gene); # DEBUGGING
     my @MSA  = @{$msa_ref};
     my @ARFs = @{$arfs_ref};
 
@@ -338,6 +344,8 @@ sub ComposeMSA
     my $num_seqs = shift;
     my $revcomp = shift;
     my $seq_lens_ref = shift;
+
+    my $gene = shift; # DEBUGGING
 
     my %Mapping = %{$mapping_ref};
     my @SeqLens = @{$seq_lens_ref};
@@ -712,7 +720,8 @@ sub ComposeMSA
 	    }
 
 	    # Correct the MSA
-	    my $msa_ref = UniteARFSegments(\@MSA,$num_seqs,$MultiFrameStarts[$seg_run_start],$MultiFrameEnds[$seg_run_end],\@LineUpWithSeqs,$line_up);
+	    my $msa_ref = UniteARFSegments(\@MSA,$num_seqs,$MultiFrameStarts[$seg_run_start],$MultiFrameEnds[$seg_run_end],\@LineUpWithSeqs,$line_up
+					   ,$gene); # DEBUGGING
 	    @MSA = @{$msa_ref};
 	    
 	    # Correct our ARF annotation
@@ -1094,6 +1103,8 @@ sub UniteARFSegments
     my $line_up_seqs  = shift;
     my $line_up       = shift;
 
+    my $gene = shift; # DEBUGGING
+
     my @MSA = @{$msa_ref};
 
     # If we have information about the sequences that made up the content of
@@ -1110,18 +1121,25 @@ sub UniteARFSegments
     # any non-gap content.
 
     
-    # Initialization - note that we're only initializing one half,
-    # so that for [i][j] we only care about situations where j < i
+    # Initialization
     my @Cooccur;
     my @NotAllGaps;
     for (my $i=0; $i<$num_seqs; $i++) { # Need 0 for NotAllGaps
 	$NotAllGaps[$i] = 0;
-	for (my $j=0; $j<$i; $j++) {
+	for (my $j=0; $j<$num_seqs; $j++) {
 	    $Cooccur[$i][$j] = 0;
 	}
     }
 
-    # Party time (Scanning)!
+    # Party time!
+    #
+    # Here we're scanning along the length of the MSA that we've
+    # identified as an ARF-y segment and, by column, identifying the
+    # group of residue displaying (non-gapped) sequences
+    #
+    # 'Coocur' is then a (num_seqs x num_seqs) matrix where a '1'
+    # indicates that the sequences share at least one column
+    #
     for (my $j=$segment_start; $j<$segment_end; $j++) {
 
 	# Build up our column
@@ -1138,7 +1156,8 @@ sub UniteARFSegments
 	if (scalar(@Column) > 1) {
 	    for (my $j=0; $j<scalar(@Column)-1; $j++) {
 		for (my $i=$j+1; $i<scalar(@Column); $i++) {
-		    $Cooccur[$Column[$i]][$Column[$j]] = 1 
+		    $Cooccur[$Column[$i]][$Column[$j]] = 1;
+		    $Cooccur[$Column[$j]][$Column[$i]] = 1;
 		}
 	    }
 	}
@@ -1159,10 +1178,15 @@ sub UniteARFSegments
 
     # And, cluster!
     #
-    # We start with the highest number because this lets us scan a
-    # row from 0 to i-1 without having to keep track of i explicitly
+    # EXPLANATION:
+    # Here, what we're doing is iterating over the set of sequences
+    # that use this DCE region and trying to group them according to
+    # which sequences share positions in the MSA, using a matrix that
+    # just tracks whether there is cooccurrence between two sequences
+    # 
+    #      
     my $num_clusters = 0;
-    for (my $check=$num_to_check-1; $check>=0; $check--) {
+    for (my $check=0; $check<$num_to_check; $check++) {
 
 	# Skip anyone we've already clustered
 	next if ($Clustered[$CheckEm[$check]]);
@@ -1170,8 +1194,12 @@ sub UniteARFSegments
 	# We'll need to cluster at least this sequence
 	$num_clusters++;
 
+	my $cluster_list = GroupCoocurringSeqs(\@Cooccur,$CheckEm[$check],$num_seqs);
+
 	# Figure out the set of sequences that belong to this cluster
-	my ($cluster_list,) = MatrixRecurse(\@Cooccur,$CheckEm[$check],$num_seqs);
+	#my ($cluster_list,) = MatrixRecurse(\@Cooccur,$CheckEm[$check],$num_seqs
+	#,$gene,1);
+
 	foreach my $i (split(/\,/,$cluster_list)) {
 	    $Clustered[$i] = $num_clusters;
 	}
@@ -1278,43 +1306,46 @@ sub UniteARFSegments
 
 ################################################################
 #
-#  FUNCTION:  MatrixRecurse
+#  FUNCTION:  GroupCoocurringSeqs
 #
-sub MatrixRecurse
+#  NOTE: The matrix that we're evaluating is the 'Cooccur' matrix
+#        which records (booleanishly) whether two sequences share a
+#        column in the (current) ARF-y region of the MSA.
+#        This is a (num_seqs * num_seqs) matrix
+#
+sub GroupCoocurringSeqs
 {
     
-    my $matrix_ref = shift;
-    my $seq_id     = shift;
-    my $max_dim    = shift;
+    my $cooccur_ref = shift;
+    my $seq_id      = shift;
+    my $num_seqs    = shift;
 
-    return ('0',$matrix_ref) if ($seq_id == 0);
+    my @Cooccur = @{$cooccur_ref};
 
-    my @M = @{$matrix_ref};
+    my @CheckList;
+    my $num_to_check=1;
+    push(@CheckList,$seq_id);
 
-    my %RecurseOn;
-    
-    for (my $j=$seq_id-1; $j>=0; $j--) {
-	if ($M[$seq_id][$j]) {
-	    $M[$seq_id][$j] = 0;
-	    $RecurseOn{$j}  = 1;
+    my %AlreadyChecked;
+    $AlreadyChecked{$seq_id} = 1;
+
+    my $group_str = "";
+    while ($num_to_check) {
+    	
+	$seq_id = $CheckList[--$num_to_check];
+	$group_str = $group_str.",".$seq_id;
+
+	for (my $j=0; $j<$num_seqs; $j++) {
+	    if ($Cooccur[$seq_id][$j] && !$AlreadyChecked{$j}) {
+		$CheckList[$num_to_check++] = $j;
+		$AlreadyChecked{$j} = 1;
+	    }
 	}
+
     }
 
-    for (my $i=1; $i<$max_dim; $i++) {
-	if ($M[$i][$seq_id]) {
-	    $M[$i][$seq_id] = 0;
-	    $RecurseOn{$i}  = 1;
-	}
-    }
-    
-    my $return_string = "$seq_id";
-    foreach my $next_seq_id (sort {$b <=> $a} keys %RecurseOn) {
-	my ($next_string,$new_matrix_ref) = MatrixRecurse(\@M,$next_seq_id,$max_dim);
-	$return_string = $return_string.','.$next_string;
-	@M = @{$new_matrix_ref};
-    }
-    
-    return ($return_string,\@M);
+    $group_str =~ s/^\,//;
+    return $group_str;
 
 }
 
