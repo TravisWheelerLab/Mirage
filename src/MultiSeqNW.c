@@ -1741,10 +1741,10 @@ int main (int argc, char ** argv)
 
   
   // YOU RASCALLY TUPLE_SETS! GET OFF MY LAWN!
-  for (i=0; i<MSA1Size; i++)
+  for (i=0; i<MSA1Length; i++)
     DestroyTupleSet(TS1[i]);
   free(TS1);
-  for (i=0; i<MSA2Size; i++)
+  for (i=0; i<MSA2Length; i++)
     DestroyTupleSet(TS2[i]);
   free(TS2);
 
