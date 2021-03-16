@@ -115,10 +115,11 @@ system("rm $blatTar")  if (-e $blatTar);
 my $MirageLink = "ln -s src/run_mirage2.sh mirage2";
 if (system($MirageLink)) { die "\n  Failed to create symbolic link to src/run_mirage2.sh\n\n"; }
 
-# Now the only thing the user REALLY needs to do is make
-# sure that spaln is on their PATH.
-print "\n  Setup completed successfully!\n\n";
+# Create a symbolic link for running oasis
+my $OasisLink = "ln -s src/run_oasis.sh oasis";
+if (system($OasisLink)) { die "\n  Failed to create symbolic link to src/run_oasis.sh\n\n"; }
 
 # Happy mirage-ing!
+print "\n  Setup completed successfully!\n\n";
 1;
 

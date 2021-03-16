@@ -29,6 +29,7 @@ sub RecordSplicedMSA;
 
 if (@ARGV != 2) { die "\n  USAGE:  ./Oasis.pl [Mirage-Results] [Species-Guide]\n\n"; }
 
+
 # Figure out what the location of the Mirage src directory is
 my $location = $0;
 $location =~ s/Oasis\.pl$//;
@@ -45,7 +46,8 @@ my $final_results_dirname = ConfirmDirectory($input_dirname.'Final-MSAs');
 my $all_species_dirname = ConfirmDirectory($input_dirname.'Species-MSAs');
 
 
-# TODO: Parse other arguments
+# TODO: Parse arguments
+my $oasis_dirname = CreateDirectory('Oasis-Results');
 my $write_spliced_msas = 1; # Do we want to write our spliced MSAs to files?
 
 
@@ -147,6 +149,8 @@ while (my $fname = readdir($FinalMSAs)) {
 closedir($FinalMSAs);
 
 1;
+
+
 
 
 
