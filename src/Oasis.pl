@@ -13,9 +13,14 @@ use BureaucracyMirage;
 use DisplayProgress;
 
 # Subroutines
+sub ParseArgs;
 sub GetMappedSeqMSA;
 sub ParseAFA;
 sub RecordSplicedMSA;
+sub ReduceMSAToSpecies;
+sub FindGhostExons;
+
+
 
 
 
@@ -30,6 +35,7 @@ sub RecordSplicedMSA;
 if (@ARGV != 2) { die "\n  USAGE:  ./Oasis.pl [Mirage-Results] [Species-Guide]\n\n"; }
 
 
+
 # Figure out what the location of the Mirage src directory is
 my $location = $0;
 $location =~ s/Oasis\.pl$//;
@@ -39,6 +45,15 @@ my $sindex = $location.'../inc/hsi/sindex';
 my $sfetch = $location.'../inc/hsi/sfetch';
 my $sstat  = $location.'../inc/hsi/sstat';
 
+# Another friend we'll need is blat... but which one?!
+my $blat = $location.'../inc/blat/';
+my $UnameCmd = OpenSystemCommand('uname -a |');
+my $uname = <$UnameCmd>;
+close($UnameCmd);
+if    (uc($uname) =~ /^LINUX /)  { $blat = $blat.'blat.linux.x86_64';  }
+elsif (uc($uname) =~ /^DARWIN /) { $blat = $blat.'blat.macOSX.x86_64'; }
+else                             { $blat = $blat.'blat.macOSX.i386';   }
+
 
 # Confirm that the input directory looks like the real deal
 my $input_dirname = ConfirmDirectory($ARGV[0]);
@@ -46,12 +61,30 @@ my $final_results_dirname = ConfirmDirectory($input_dirname.'Final-MSAs');
 my $all_species_dirname = ConfirmDirectory($input_dirname.'Species-MSAs');
 
 
-# TODO: Parse arguments
-my $oasis_dirname = CreateDirectory('Oasis-Results');
-my $write_spliced_msas = 1; # Do we want to write our spliced MSAs to files?
+# TODO: Make these options available as commandline arguments
+my $options_ref = ParseArgs();
+my %Options = %{$options_ref};
+my $outdirname = CreateDirectory($Options{outdirname});
+my $save_msas = $Options{savemsas}; # Do we want to write our spliced MSAs to files?
+my $bad_ali_cutoff = $Options{alicutoff};
 
 
-# Start off by parsing the species guide, which will give
+# Now that we have our output directory, we can go ahead and generate
+# some temporary filenames that we'll want to use (and, while we're at it,
+# fill in all of the wild 'n' wacky blat arguments we'll be using).
+my $nucl_seq_fname = $outdirname.'nucl.tmp.fa';
+my $prot_seq_fname = $outdirname.'prot.tmp.fa';
+my $blat_out_fname = $outdirname.'blat.tmp.out';
+
+# An astute observer will notice that these aren't the same settings as Quilter
+# uses, which is because this isn't frickin' Quilter, geez.
+# It's rad that our standardized filenames let us play like this!
+$blat = $blat.' -tileSize=5 -minIdentity=90 -maxIntron=0';
+$blat = $blat.' -t=dnax -q=prot -out=blast8 1>/dev/null 2>&1';
+$blat = $blat.' '.$nucl_seq_fname.' '.$prot_seq_fname.' '.$blat_out_fname;
+
+
+# Start off the real work by parsing the species guide, which will give
 # us genome locations and chromosome lengths.
 my $SpeciesGuide = OpenInputFile($ARGV[1]);
 my %SpeciesToGenomes;
@@ -100,14 +133,15 @@ if (scalar(keys %SpeciesToGenomes) == 0) {
 # If such a directory already exists, warn about overwriting, but trust that
 # the most recent version of the software will give the best output.
 my $spliced_dirname = $input_dirname.'Marked-Splice-Sites-MSAs/';
-if ($write_spliced_msas) {
+if ($save_msas) {
     if (-d $spliced_dirname) {
 	print "\n";
-	print "  Warning:  Directory of MSAs with marked splice sites ($spliced_dirname) located.\n";
-	print "            MSAs may be over-written.\n\n";
+	print "  Warning:  Existing directory of MSAs with marked splice sites located ($spliced_dirname)\n";
+	print "            MSAs may be overwritten.\n\n";
     } else {
 	CreateDirectory($spliced_dirname);
     }
+    $spliced_dirname = ConfirmDirectory($spliced_dirname);
 }
 
 
@@ -141,9 +175,22 @@ while (my $fname = readdir($FinalMSAs)) {
     my %SpeciesToChrs = %{$speciestochrs_ref};
 
     # Do we want to write this out to a spliced msa file?
-    if ($write_spliced_msas) {
+    if ($save_msas) {
 	RecordSplicedMSA($spliced_dirname.$gene.'.afa',\@MSA,\@SeqNames,$num_seqs,$msa_len);
     }
+
+    # Now we'll reduce our MSA even further, down to just one sequence per
+    # species!
+    ($msa_ref,$mapmsa_ref,$seqnames_ref,$num_seqs)
+	= ReduceMSAToSpecies(\@MSA,\@MapMSA,\@SeqNames,$num_seqs,$msa_len);
+    @MSA = @{$msa_ref};
+    @MapMSA = @{$mapmsa_ref};
+    my @SpeciesNames = @{$seqnames_ref};
+    my $num_species = $num_seqs;
+    
+    # Now that we have our super-reduced splice-site-ified MSA, let's get real nasty
+    # with it (by way of locating exons suggestive of "ghosts")!
+    FindGhostExons($gene,\@MSA,\@MapMSA,\@SpeciesNames,$num_species,$msa_len,\%SpeciesToChrs);
     
 }
 closedir($FinalMSAs);
@@ -160,6 +207,41 @@ closedir($FinalMSAs);
 #   SUBROUTINES   #
 #                 #
 ###################
+
+
+
+
+
+
+###############################################################
+#
+#  Function: ParseArgs
+#
+sub ParseArgs
+{
+
+    my %Options = ( 
+        outdirname => 'Oasis-Results',
+        savemsas => 0,
+	alicutoff => 0.4,
+        );
+
+    &GetOptions( 
+        \%Options,
+        "help",
+        "outdirname=s",
+	"savemsas",
+	"alicutoff=s"
+        )
+        || die "\n  ERROR:  Failed to parse command line arguments\n\n";
+
+    if ($Options{help}) {
+	die "\n  Help is on the way!\n\n"; # TODO
+    }
+
+    return \%Options;
+    
+}
 
 
 
@@ -600,6 +682,601 @@ sub RecordSplicedMSA
     close($outf);
 
 }
+
+
+
+
+
+###############################################################
+#
+#  Function: ReduceMSAToSpecies
+#
+sub ReduceMSAToSpecies
+{
+    my $msa_ref = shift;
+    my $mapmsa_ref = shift;
+    my $seqnames_ref = shift;
+    my $num_seqs = shift;
+    my $msa_len = shift;
+
+    my @MSA = @{$msa_ref};
+    my @MapMSA = @{$mapmsa_ref};
+    my @SeqNames = @{$seqnames_ref};
+
+    # First off, who are our species?  Which sequences belong to which species?
+    my %SpeciesToSeqIDs;
+    for (my $i=0; $i<$num_seqs; $i++) {
+	$SeqNames[$i] =~ /^([^\|]+)\|/;
+	my $species = $1;
+	if ($SpeciesToSeqIDs{$species}) {
+	    $SpeciesToSeqIDs{$species} = $SpeciesToSeqIDs{$species}.','.($i+1);
+	} else {
+	    $SpeciesToSeqIDs{$species} = ($i+1);
+	}
+    }
+
+    # Alrighty! Let's get reducing!
+    my @SpeciesNames;
+    my @SpeciesMSA;
+    my @SpeciesMapMSA;
+    my $num_species = 0;
+    foreach my $species (keys %SpeciesToSeqIDs) {
+
+	push(@SpeciesNames,$species);
+
+	# Get the sequence IDs for every member of this species.
+	# Note that we'll need to decrement by one because we previously
+	# had to increment by one (to not throw out sequence '0')
+	my @SeqIDs = split(/\,/,$SpeciesToSeqIDs{$species});
+	for (my $i=0; $i<scalar(@SeqIDs); $i++) {
+	    $SeqIDs[$i] = $SeqIDs[$i]-1;
+	}
+
+	# Great!  Now it's time to get reducing!  To do this, we'll just
+	# walk along the MSA, and wherever there's a residue-containing
+	# column we'll take a poll of what the residue should be, and majority
+	# wins
+	for (my $j=0; $j<$msa_len; $j++) {
+
+	    # If this is a splice-site column, we can take it super easy
+	    if ($MSA[0][$j] eq '*') {
+		$SpeciesMSA[$num_species][$j] = '*';
+		$SpeciesMapMSA[$num_species][$j] = 0;
+		next;
+	    }
+	    
+	    my %Residues;
+	    foreach my $seq_id (@SeqIDs) {
+		if ($MSA[$seq_id][$j] =~ /[A-Z]/) {
+		    if ($Residues{$MSA[$seq_id][$j]}) {
+			$Residues{$MSA[$seq_id][$j]}++;
+		    } else {
+			$Residues{$MSA[$seq_id][$j]}=1;
+		    }
+		}
+	    }
+
+	    # If this is a gap column, we can take it sorta easy
+	    if (scalar(keys %Residues) == 0) {
+		$SpeciesMSA[$num_species][$j] = '-';
+		$SpeciesMapMSA[$num_species][$j] = 0;
+		next;
+	    }
+
+	    # Alrighty then, who's the lucky residue?
+	    my @ResidueList = keys %Residues;
+	    my $top_residue = $ResidueList[0];
+	    my $top_residue_count = $Residues{$top_residue};
+	    for (my $i=1; $i<scalar(@ResidueList); $i++) {
+		if ($Residues{$ResidueList[$i]} > $top_residue_count) {
+		    $top_residue = $ResidueList[$i];
+		    $top_residue_count = $Residues{$top_residue};
+		}
+	    }
+
+	    # Great stuff!  Now, we just need to get a mapping coordinate from
+	    # someone who used the top residue.
+	    my $map_coord;
+	    foreach my $seq_id (@SeqIDs) {
+		if ($MSA[$seq_id][$j] eq $top_residue) {
+		    $map_coord = $MapMSA[$seq_id][$j];
+		    last;
+		}
+	    }
+
+	    # Record that residue and mapping coordinate!
+	    $SpeciesMSA[$num_species][$j] = $top_residue;
+	    $SpeciesMapMSA[$num_species][$j] = $map_coord;
+	    
+	}
+
+	# Another species in the bag!
+	$num_species++;
+
+    }
+
+    # That was too easy!
+    return(\@SpeciesMSA,\@SpeciesMapMSA,\@SpeciesNames,$num_species);
+    
+}
+
+
+
+
+
+###############################################################
+#
+#  Function: FindGhostExons
+#
+sub FindGhostExons
+{
+    my $gene = shift;
+    my $msa_ref = shift;
+    my $mapmsa_ref = shift;
+    my $speciesnames_ref = shift;
+    my $num_species = shift;
+    my $msa_len = shift;
+    my $speciestochrs_ref = shift;
+
+    my @MSA = @{$msa_ref};
+    my @MapMSA = @{$mapmsa_ref};
+    my @SpeciesNames = @{$speciesnames_ref};
+    my %SpeciesToChrs = %{$speciestochrs_ref};
+
+    # First off, let's figure out where the starts (inclusive) and ends (exclusive)
+    # of our exons are, as well as how many exons we have
+    my @ExonStarts;
+    my @ExonEnds;
+    my $num_exons = 0;
+    for (my $j=0; $j<$msa_len; $j++) {
+	if ($MSA[0][$j] eq '*') {
+	    $num_exons++;
+	    push(@ExonEnds,$j) if ($j);
+	    push(@ExonStarts,$j+1) if ($j+1 < $msa_len);
+	}
+    }
+    $num_exons--; # We'll have overcounted by one, but that's okie-dokie
+
+    # Before we get into the nastiness, we'll set some variables to represent the
+    # minimum number of amino acids for 'using an exon' and the maximum number
+    # of amino acids for 'not using an exon' -- both Inclusive
+    #
+    # This is intended to pre-empt any occurrences of micro-exons or other
+    # weird nonstandard splicing events that might cause an exon to technically
+    # have amino acids in it, but clearly only as an artifact of computation.
+    #
+    # Similarly, we have a minimum number of aminos for a sequence to be worth
+    # Blat-ing.
+    my $min_use_aminos = 6;
+    my $max_nonuse_aminos = 3;
+    my $min_search_aminos = 10;
+
+    # Alright, now for the pain!  We'll do a pairwise comparison of species,
+    # seeing which species suggest ghost exons in which other ones.
+    # Wherever we find such pairs, we'll record (1) the sequence we're looking for,
+    # (2) the species we're looking for it in, (3) the range we're looking for it in,
+    # and (4) the species we found it in.
+    my @SearchSeqs;
+    my @TargetSpecies;
+    my @TargetSpeciesRange;
+    my @SourceSpecies;
+    my @MSAExonRanges;
+    my $num_ghost_exons = 0;
+    for (my $s1=0; $s1<$num_species-1; $s1++) {
+
+	my $species1 = $SpeciesNames[$s1];
+
+	for (my $s2=$s1+1; $s2<$num_species; $s2++) {
+
+	    my $species2 = $SpeciesNames[$s2];
+
+	    # We'll kick things off by computing the number of matches / mismatches
+	    # between the two sequences, as well as the total number of amino acids
+	    # each sequence has, for each exon.  We'll use these bits of information
+	    # to make a determination as to the nastiness of the pairing.
+	    my @ExonMatches;
+	    my @ExonMismatches;
+	    my @S1ExonAminos;
+	    my @S2ExonAminos;
+	    my @IsNastyExonPair;
+	    for (my $exon_id=0; $exon_id<$num_exons; $exon_id++) {
+
+		$ExonMatches[$exon_id] = 0;
+		$ExonMismatches[$exon_id] = 0;
+		$S1ExonAminos[$exon_id] = 0;
+		$S2ExonAminos[$exon_id] = 0;
+
+		# Let's start with the straight facts
+		for (my $j=$ExonStarts[$exon_id]; $j<$ExonEnds[$exon_id]; $j++) {
+
+		    if ($MSA[$s1][$j] =~ /[A-Z]/) {
+			$S1ExonAminos[$exon_id]++;
+			if ($MSA[$s2][$j] =~ /[A-Z]/) {
+			    $S2ExonAminos[$exon_id]++;
+			    if ($MSA[$s1][$j] eq $MSA[$s2][$j]) {
+				$ExonMatches[$exon_id]++;
+			    } else {
+				$ExonMismatches[$exon_id]++;
+			    }
+			}
+		    } elsif ($MSA[$s2][$j] =~ /[A-Z]/) {
+			$S2ExonAminos[$exon_id]++;
+		    }
+		    
+		}
+
+		# But now it's time for a hot take!
+		$IsNastyExonPair[$exon_id] = 0;
+
+		# Shortcut to non-nastiness: Neither sequence uses this exon
+		next if ($S1ExonAminos[$exon_id] <= $max_nonuse_aminos
+			 && $S2ExonAminos[$exon_id] <= $max_nonuse_aminos);
+
+		# Way to nastiness 1: One sequence doesn't use this exon, but
+		#   the other does.
+		#
+		if ($S1ExonAminos[$exon_id] >= $min_use_aminos
+		    && $S2ExonAminos[$exon_id] <= $max_nonuse_aminos) {
+		    $IsNastyExonPair[$exon_id] = 1;
+		    next;
+		}
+		if ($S2ExonAminos[$exon_id] >= $min_use_aminos
+		    && $S1ExonAminos[$exon_id] <= $max_nonuse_aminos) {
+		    $IsNastyExonPair[$exon_id] = 1;
+		    next;
+		}
+
+		# Way to nastiness 2: Both sequences use this exon, but the
+		#   total number of aligned columns (matches or mismatches)
+		#   is less than half of the length of the shorter of the two
+		if (2*($ExonMatches[$exon_id]+$ExonMismatches[$exon_id])
+		    < Min($S1ExonAminos[$exon_id],$S2ExonAminos[$exon_id])) {
+		    $IsNastyExonPair[$exon_id] = 2;
+		    next;
+		}
+
+		# Way to nastiness 3: The sequences have a reasonable alignment
+		#   region, but the alignment itself is low-quality.
+		my $pct_id = (0.0 + $ExonMatches[$exon_id]) / (0.0 + $ExonMatches[$exon_id] + $ExonMismatches[$exon_id]);
+		if ($pct_id <= $bad_ali_cutoff) {
+		    $IsNastyExonPair[$exon_id] = 3;
+		    next;
+		}
+		
+	    }
+
+	    # Radical!  Now we can condense each of our runs of contiguous
+	    # nasty exon pairs, extract the relevant sequence, and BOOM!
+	    #
+	    # NOTE: We don't really need the Matches/Mismatches/S_ExonAminos,
+	    #   but it might be good to have at some later point for either
+	    #   debugging or more sprawling output, so let's not worry about
+	    #   the (probably) unnecessary data hoarding.
+	    my @NastyRunStarts;
+	    my @NastyRunEnds;
+	    my $num_nasty_runs = 0;
+	    for (my $exon_id=0; $exon_id<$num_exons; $exon_id++) {
+		if ($IsNastyExonPair[$exon_id]) {
+		    if ($num_nasty_runs == 0 || $NastyRunEnds[$num_nasty_runs-1] != $exon_id-1) {
+			$NastyRunStarts[$num_nasty_runs] = $exon_id;
+			$num_nasty_runs++;
+		    }
+		    $NastyRunEnds[$num_nasty_runs-1] = $exon_id;
+		}
+	    }
+
+	    # Moment of truth -- are we... NASTY?!
+	    next if ($num_nasty_runs == 0);
+
+	    # NASTY! NASTY! NASTY!
+
+	    # Alrighty then, time to take each of our runs and pull out the data
+	    # that we'll need to perform our Blat searches.
+	    for (my $run_id=0; $run_id<$num_nasty_runs; $run_id++) {
+
+		my $start_exon = $NastyRunStarts[$run_id];
+		my $end_exon = $NastyRunEnds[$run_id];
+
+		my $search_seq_1 = '';
+		my $search_seq_2 = '';
+		for (my $j=$ExonStarts[$start_exon]; $j<$ExonEnds[$end_exon]; $j++) {
+		    if ($MSA[$s1][$j] =~ /[A-Z]/) {
+			$search_seq_2 = $search_seq_2.$MSA[$s1][$j];
+		    }
+		    if ($MSA[$s2][$j] =~ /[A-Z]/) {
+			$search_seq_1 = $search_seq_1.$MSA[$s2][$j];
+		    }
+		}
+
+		# We'll be searching for this sequence from species 1 against
+		# the genome of species 2.
+		if (length($search_seq_1) >= $min_search_aminos) {
+
+		    # [1] Find the nearest genomic coordinates outside of the nasty
+		    #     region for sequence 2, starting with the left
+
+		    my $left_bound;
+		    if ($start_exon) {
+			my $j=$ExonEnds[$start_exon-1]-1;
+			while ($j) {
+			    if ($MapMSA[$s2][$j]) {
+				$left_bound = $MapMSA[$s2][$j];
+				last;
+			    }
+			}
+		    }
+		    if (!$left_bound) {
+			my $j=0;
+			while (!$MapMSA[$s2][$j]) {
+			    $j++;
+			}
+			$left_bound = '[start-of-coding-region:'.$MapMSA[$s2][$j].']';
+		    }
+
+		    # [2] Find the coordinates to the right using a method that mirrors
+		    #     how we got coordinates to the left
+
+		    my $right_bound;
+		    if ($end_exon+1 < $num_exons) {
+			my $j=$ExonStarts[$end_exon+1];
+			while ($j<$msa_len) {
+			    if ($MapMSA[$s2][$j]) {
+				$right_bound = $MapMSA[$s2][$j];
+				last;
+			    }
+			}
+		    }
+		    if (!$right_bound) {
+			# Find the first coordinate for this species, noting it as such
+			my $j=$msa_len-1;
+			while (!$MapMSA[$s2][$j]) {
+			    $j--;
+			}
+			$right_bound = '[end-of-coding-region:'.$MapMSA[$s2][$j].']';
+		    }
+
+		    # Heck yeah! Let's scream (and shout)!
+		    push(@SearchSeqs,$search_seq_1);
+		    push(@TargetSpecies,$species2);
+		    push(@TargetSpeciesRange,$left_bound.'..'.$right_bound);
+		    push(@SourceSpecies,$species1);
+		    push(@MSAExonRanges,($start_exon+1).'..'.($end_exon+1));
+		    $num_ghost_exons++;
+		    
+		}
+
+
+		# We'll be searching for this sequence from species 2 against
+		# the genome of species 1.
+		if (length($search_seq_2) >= $min_search_aminos) {
+
+		    # [1] Find the nearest genomic coordinates outside of the nasty
+		    #     region for sequence 1, starting with the left
+
+		    my $left_bound;
+		    if ($start_exon) {
+			my $j=$ExonEnds[$start_exon-1]-1;
+			while ($j) {
+			    if ($MapMSA[$s1][$j]) {
+				$left_bound = $MapMSA[$s1][$j];
+				last;
+			    }
+			}
+		    }
+		    if (!$left_bound) {
+			my $j=0;
+			while (!$MapMSA[$s1][$j]) {
+			    $j++;
+			}
+			$left_bound = '[start-of-coding-region:'.$MapMSA[$s1][$j].']';
+		    }
+
+		    # [2] Find the coordinates to the right using a method that mirrors
+		    #     how we got coordinates to the left
+
+		    my $right_bound;
+		    if ($end_exon+1 < $num_exons) {
+			my $j=$ExonStarts[$end_exon+1];
+			while ($j<$msa_len) {
+			    if ($MapMSA[$s1][$j]) {
+				$right_bound = $MapMSA[$s1][$j];
+				last;
+			    }
+			}
+		    }
+		    if (!$right_bound) {
+			# Find the first coordinate for this species, noting it as such
+			my $j=$msa_len-1;
+			while (!$MapMSA[$s1][$j]) {
+			    $j--;
+			}
+			$right_bound = '[end-of-coding-region:'.$MapMSA[$s1][$j].']';
+		    }
+
+		    # Heck yeah! Let's shout (and scream)!
+		    push(@SearchSeqs,$search_seq_2);
+		    push(@TargetSpecies,$species1);
+		    push(@TargetSpeciesRange,$left_bound.'|'.$right_bound);
+		    push(@SourceSpecies,$species2);
+		    push(@MSAExonRanges,($start_exon+1).'..'.($end_exon+1));
+		    $num_ghost_exons++;
+		    
+		}
+
+		
+	    }
+
+	}
+	
+    }
+
+    # I tried so hard, and got so far, but in the end it still mattered just a lil' bit
+    return if ($num_ghost_exons == 0);
+
+    # NOICE!  Time to get ready for some good 'n' nasty blattery!
+    # (blattery will get you everywhere)
+
+    my $outf = OpenOutputFile($outdirname.$gene.'.out');
+
+    # We'll just go hit-by-hit, because that's what's sensible.  'q' for query
+    for (my $q=0; $q<$num_ghost_exons; $q++) {
+
+	# Write out the protein sequence to our protein sequence file.
+	# We don't use my fancy file functions here because we'll be overwriting.
+	open(my $protf,'>',$prot_seq_fname);
+	print $protf ">seq\n$SearchSeqs[$q]\n\n";
+	close($protf);
+
+	# What's our search chromosome? What are our nucleotide coords?
+	my $target_species = $TargetSpecies[$q];
+	my $chr = $SpeciesToChrs{$target_species};
+	my $revcomp = 0;
+	if ($chr =~ /\[revcomp\]/) {
+	    $chr =~ s/\[revcomp\]//;
+	    $revcomp = 1;
+	}
+
+	my @SearchRanges = split(/\|/,$TargetSpeciesRange[$q]);
+
+	# If we're at either terminii of our sequence, pull in an extra 20k (or as
+	# much as we can)
+	if ($SearchRanges[0] =~ /\:(\d+)/) {
+	    my $seq_start = $1;
+	    if ($revcomp) {
+		$SearchRanges[0] = Min($seq_start+20000,$ChrLensBySpecies{$target_species.'|'.$chr});		
+	    } else {
+		$SearchRanges[0] = Max($seq_start-20000,1);
+	    }
+	}
+	
+	if ($SearchRanges[1] =~ /\:(\d+)/) {
+	    my $seq_end = $1;
+	    if ($revcomp) {
+		$SearchRanges[1] = Max($seq_end-20000,1);
+	    } else {
+		$SearchRanges[1] = Min($seq_end+20000,$ChrLensBySpecies{$target_species.'|'.$chr});
+	    }
+	}
+
+	# Well, we sure know what sequence to pull in now, don't we!
+	my $sfetch_cmd = $sfetch.' -range '.$SearchRanges[0].'..'.$SearchRanges[1];
+	$sfetch_cmd = $sfetch_cmd.' '.$SpeciesToGenomes{$target_species}.' '.$chr;
+	$sfetch_cmd = $sfetch_cmd.' > '.$nucl_seq_fname;
+	RunSystemCommand($sfetch_cmd);
+
+	# Because of the wonders of filename standardization, we can do this!
+	RunSystemCommand($blat);
+
+	# What did we get?
+	my @HitAminoStarts;
+	my @HitAminoEnds;
+	my @HitNuclStarts;
+	my @HitNuclEnds;
+	my @HitEVals;
+	my $num_blat_hits = 0;
+	my $blatf = OpenInputFile($blat_out_fname);
+	while (my $line = <$blatf>) {
+	    if ($line) {
+		
+		my @HitData = split(/\s+/,$line);
+		my $amino_start = $HitData[6];
+		my $amino_end   = $HitData[7];
+		my $nucl_start  = $HitData[8];
+		my $nucl_end    = $HitData[9];
+		my $e_val       = $HitData[10];
+
+		# We'll take notice of any hits with an e-val with a '-'
+		next if ($e_val !~ /e\-/);
+
+		# What are the actual nucleotide coords?
+		if ($revcomp) {
+		    $nucl_start = $SearchRanges[0] - $nucl_start;
+		    $nucl_end   = $SearchRanges[0] - $nucl_end;
+		} else {
+		    $nucl_start += $SearchRanges[0];
+		    $nucl_end   += $SearchRanges[0];
+		}
+
+		push(@HitAminoStarts,$amino_start);
+		push(@HitAminoEnds,$amino_end);
+		push(@HitNuclStarts,$nucl_start);
+		push(@HitNuclEnds,$nucl_end);
+		push(@HitEVals,$e_val);
+		$num_blat_hits++;
+
+	    }
+	}
+	close($blatf);
+
+	# For outputting, let's get the textual representation of direction
+	# into the chromosome name
+	$chr = $chr.'[revcomp]' if ($revcomp);
+
+	# Speaking of outputting, let's just have these tidbits on-hand, too
+	my $source_species = $SourceSpecies[$q];
+
+	$MSAExonRanges[$q] =~ /(\d+)\.\.(\d+)/;
+	my $start_exon = $1;
+	my $end_exon = $2;
+	my $exon_str = 'MSA Exon';
+	if ($start_exon != $end_exon) {
+	    $exon_str = $exon_str.'s '.$start_exon.'..'.$end_exon;
+	} else {
+	    $exon_str = $exon_str.' '.$end_exon;
+	}
+
+	my $full_target_info = "$target_species $chr:$SearchRanges[0]..$SearchRanges[1] ($exon_str)";
+
+	# Is it an especially elusive ghost we're chasing?
+	if ($num_blat_hits == 0) {
+	    print $outf "[ ] Search failure\n";
+	    print $outf "    $full_target_info doesn't clearly encode the following sequence (from $source_species):\n";
+	    print $outf "    $SearchSeqs[$q]\n\n";
+	    next;
+	}
+	
+	# Oh, this is a most profitable Ghost Adventure indeed!
+	print $outf "[+] Search success!\n";
+	print $outf "    $full_target_info had $num_blat_hits hit";
+	print $outf "s" if ($num_blat_hits > 1);
+	print $outf " to the following sequence (from $source_species):\n";
+
+	# Let's illustrate how much of the sequence has been covered.
+	# NOTE: We're assuming that our hits are consistent with one another,
+	#   but we may want to double-check that in the future...
+	my @MappedSeq = split(//,lc($SearchSeqs[$q]));
+	for (my $hit=0; $hit<$num_blat_hits; $hit++) {
+	    for (my $pos=$HitAminoStarts[$hit]-1; $pos<$HitAminoEnds[$hit]; $pos++) {
+		$MappedSeq[$pos] = uc($MappedSeq[$pos]);
+	    }
+	}
+	my $mapped_seq = '';
+	foreach my $char (@MappedSeq) {
+	    $mapped_seq = $mapped_seq.$char;
+	}
+
+	print $outf "    $mapped_seq\n";
+	print $outf "    ";
+	foreach my $char (@MappedSeq) {
+	    if ($char eq uc($char)) { print $outf '-'; }
+	    else                    { print $outf ' '; }
+	}
+	print $outf "\n";
+
+	for (my $hit=0; $hit<$num_blat_hits; $hit++) {
+	    print $outf "    + Aminos $HitAminoStarts[$hit]..$HitAminoEnds[$hit] ";
+	    print $outf "mapped to $chr:$HitNuclStarts[$hit]..$HitNuclEnds[$hit] ";
+	    print $outf "($HitEVals[$hit])\n";
+	}
+	
+	print $outf "\n";
+	
+    }
+
+    close($outf);
+
+}
+
 
 
 
