@@ -64,24 +64,17 @@ my $all_species_dirname = ConfirmDirectory($input_dirname.'Species-MSAs');
 # TODO: Make these options available as commandline arguments
 my $options_ref = ParseArgs();
 my %Options = %{$options_ref};
+my $num_cpus = $Options{numcpus};
 my $outdirname = CreateDirectory($Options{outdirname});
 my $save_msas = $Options{savemsas}; # Do we want to write our spliced MSAs to files?
 my $bad_ali_cutoff = $Options{alicutoff};
 
-
-# Now that we have our output directory, we can go ahead and generate
-# some temporary filenames that we'll want to use (and, while we're at it,
-# fill in all of the wild 'n' wacky blat arguments we'll be using).
-my $nucl_seq_fname = $outdirname.'nucl.tmp.fa';
-my $prot_seq_fname = $outdirname.'prot.tmp.fa';
-my $blat_out_fname = $outdirname.'blat.tmp.out';
 
 # An astute observer will notice that these aren't the same settings as Quilter
 # uses, which is because this isn't frickin' Quilter, geez.
 # It's rad that our standardized filenames let us play like this!
 $blat = $blat.' -tileSize=5 -minIdentity=90 -maxIntron=0';
 $blat = $blat.' -t=dnax -q=prot -out=blast8 1>/dev/null 2>&1';
-$blat = $blat.' '.$nucl_seq_fname.' '.$prot_seq_fname.' '.$blat_out_fname;
 
 
 # Start off the real work by parsing the species guide, which will give
@@ -145,8 +138,39 @@ if ($save_msas) {
 }
 
 
-# Cool!  Now that we've imported the species guide, we can get down
-# to the real business!
+# We'll do a preliminary run through 'FinalMSAs' to compute the total number of
+# genes, so that we can figure out how to allocate work for each of our processes.
+my $FinalMSAs = OpenDirectory($final_results_dirname);
+my @GeneList;
+while (my $fname = readdir($FinalMSAs)) {
+    next if ($fname !~ /(\S+)\.afa$/);
+    push(@GeneList,$1);
+}
+closedir($FinalMSAs);
+
+# Are we asking for too many cpus?
+$num_cpus = Min($num_cpus,scalar(@GeneList));
+
+
+# Look away, children, the processes are spawning!
+my $threadID = SpawnProcesses($num_cpus);
+
+
+# I've been borned! What's my job?
+my $thread_portion = int(scalar(@GeneList)/$num_cpus);
+my $start_gene_id = $threadID * $thread_portion;
+my $end_gene_id = (1+$threadID) * $thread_portion;
+$end_gene_id = scalar(@GeneList) if ($threadID == $num_cpus-1);
+
+# Name temporary filenames that we'll want to use (and, while we're at it,
+# fill in all of the wild 'n' wacky blat arguments we'll be using).
+my $nucl_seq_fname = $outdirname.'nucl.tmp'.$threadID.'.fa';
+my $prot_seq_fname = $outdirname.'prot.tmp'.$threadID.'.fa';
+my $blat_out_fname = $outdirname.'blat.tmp'.$threadID.'.out';
+$blat = $blat.' '.$nucl_seq_fname.' '.$prot_seq_fname.' '.$blat_out_fname;
+
+
+# TIME FOR THE MAIN EVENT!
 #
 # We'll do this the easiest (laziest) way, which will just be running
 # through each of our final MSAs, loading in *only* those sequences
@@ -154,12 +178,12 @@ if ($save_msas) {
 #
 # Fun!
 #
-my $FinalMSAs = OpenDirectory($final_results_dirname);
-while (my $fname = readdir($FinalMSAs)) {
+my $total_ghost_exons = 0;
+my $total_ghosts_busted = 0;
+for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
 
-    next if ($fname !~ /(\S+)\.afa$/);
-    my $gene = $1;
-    $fname = $final_results_dirname.$fname;
+    my $gene = $GeneList[$gene_id];
+    $fname = $final_results_dirname.$gene.'.afa';
 
     # Pull in an MSA that's been (1) reduced to mapped sequences, and
     # (2) has splice site markers.
@@ -190,10 +214,79 @@ while (my $fname = readdir($FinalMSAs)) {
     
     # Now that we have our super-reduced splice-site-ified MSA, let's get real nasty
     # with it (by way of locating exons suggestive of "ghosts")!
-    FindGhostExons($gene,\@MSA,\@MapMSA,\@SpeciesNames,$num_species,$msa_len,\%SpeciesToChrs);
+    my ($num_ghost_exons, $num_ghosts_busted) =
+	FindGhostExons($gene,\@MSA,\@MapMSA,\@SpeciesNames,$num_species,$msa_len,\%SpeciesToChrs);
+
+    # Add onto our overarching tallies
+    $total_ghost_exons += $num_ghost_exons;
+    $total_ghosts_busted += $num_ghosts_busted;
     
 }
-closedir($FinalMSAs);
+
+# How'd I do?  I don't even know!
+if ($threadID) {
+    my $final_outf = OpenOutputFile($outdirname.$threadID.'.final-tally.out');
+    print $final_outf "$total_ghosts_busted / $total_ghost_exons\n";
+    close($final_outf);
+    exit(0);
+}
+
+# The age of threads is coming to a close!
+while (wait() != -1) {}
+
+
+# Woo-hoo!  Janitorial work is my favorite!
+for ($threadID=0; $threadID<$num_cpus; $threadID++) {
+
+    # Clear out all these files we don't need
+    $nucl_seq_fname = $outdirname.'nucl.tmp'.$threadID.'.fa';
+    $prot_seq_fname = $outdirname.'prot.tmp'.$threadID.'.fa';
+    $blat_out_fname = $outdirname.'blat.tmp'.$threadID.'.out';
+
+    if (-e $nucl_seq_fname) { system("rm $nucl_seq_fname"); }
+    if (-e $prot_seq_fname) { system("rm $prot_seq_fname"); }
+    if (-e $blat_out_fname) { system("rm $blat_out_fname"); }
+
+    # How did each of the helpers do?
+    if ($threadID) {
+
+	my $final_infname = $outdirname.$threadID.'.final-tally.out';
+	my $final_inf = OpenInputFile($final_infname);
+	my $line = <$final_inf>;
+	close($final_inf);
+
+	$line =~ /(\d+) \/ (\d+)/;
+	$total_ghosts_busted += $1;
+	$total_ghost_exons += 2;
+
+	# Now erase every last trace of that darn helper from the Earth!
+	system("rm $final_infname");
+    
+    }
+
+}
+
+
+# This is what we call "the final judgment": did we find *anything*?
+if ($total_ghost_exons == 0) {
+
+    # Wowza yowza bo-bowza!  Really?  Nothing?  Okay...
+    system("rm $outdirname");
+    print "\n  No potentially-unannotated exons detected\n\n";
+
+} else {
+
+    # WOOOOOOO, WE FOUND AT LEAST ONE THING TO POSSIBLY NOT CROSS-MAP!
+    my $bust_rate = int(1000.0*$total_ghosts_busted/$total_ghost_exons)/10;
+    print "\n";
+    print "  $total_ghost_exons possible unannotated exons detected,\n";
+    print "  $total_ghosts_busted of which have some sequence-level support ($bust_rate\%)\n";
+    print "\n";
+    print "  Results in '$outdirname'\n";
+    print "\n";
+
+}
+
 
 1;
 
@@ -220,7 +313,8 @@ closedir($FinalMSAs);
 sub ParseArgs
 {
 
-    my %Options = ( 
+    my %Options = (
+	cpus => 1,
         outdirname => 'Oasis-Results',
         savemsas => 0,
 	alicutoff => 0.4,
@@ -229,6 +323,7 @@ sub ParseArgs
     &GetOptions( 
         \%Options,
         "help",
+	"cpus=d",
         "outdirname=s",
 	"savemsas",
 	"alicutoff=s"
@@ -1111,14 +1206,16 @@ sub FindGhostExons
     }
 
     # I tried so hard, and got so far, but in the end it still mattered just a lil' bit
-    return if ($num_ghost_exons == 0);
-
+    return (0,0) if ($num_ghost_exons == 0);
+    
     # NOICE!  Time to get ready for some good 'n' nasty blattery!
     # (blattery will get you everywhere)
 
-    my $outf = OpenOutputFile($outdirname.$gene.'.out');
+    # We'll tally up the number of successes
+    my $ghosts_busted = 0;
 
     # We'll just go hit-by-hit, because that's what's sensible.  'q' for query
+    my $outf = OpenOutputFile($outdirname.$gene.'.out');
     for (my $q=0; $q<$num_ghost_exons; $q++) {
 
 	# Write out the protein sequence to our protein sequence file.
@@ -1236,6 +1333,9 @@ sub FindGhostExons
 	}
 	
 	# Oh, this is a most profitable Ghost Adventure indeed!
+	$ghosts_busted++;
+
+	# Sing it to high heaven!
 	print $outf "[+] Search success!\n";
 	print $outf "    $full_target_info had $num_blat_hits hit";
 	print $outf "s" if ($num_blat_hits > 1);
@@ -1274,6 +1374,9 @@ sub FindGhostExons
     }
 
     close($outf);
+
+    # How'd we do there?
+    return ($num_ghost_exons, $ghosts_busted);
 
 }
 
