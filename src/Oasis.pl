@@ -32,7 +32,7 @@ sub FindGhostExons;
 
 
 
-if (@ARGV != 2) { die "\n  USAGE:  ./Oasis.pl [Mirage-Results] [Species-Guide]\n\n"; }
+if (@ARGV < 2) { die "\n  USAGE:  ./Oasis.pl [Mirage-Results] [Species-Guide]\n\n"; }
 
 
 
@@ -55,12 +55,6 @@ elsif (uc($uname) =~ /^DARWIN /) { $blat = $blat.'blat.macOSX.x86_64'; }
 else                             { $blat = $blat.'blat.macOSX.i386';   }
 
 
-# Confirm that the input directory looks like the real deal
-my $input_dirname = ConfirmDirectory($ARGV[0]);
-my $final_results_dirname = ConfirmDirectory($input_dirname.'Final-MSAs');
-my $all_species_dirname = ConfirmDirectory($input_dirname.'Species-MSAs');
-
-
 # TODO: Make these options available as commandline arguments
 my $options_ref = ParseArgs();
 my %Options = %{$options_ref};
@@ -68,6 +62,11 @@ my $num_cpus = $Options{numcpus};
 my $outdirname = CreateDirectory($Options{outdirname});
 my $save_msas = $Options{savemsas}; # Do we want to write our spliced MSAs to files?
 my $bad_ali_cutoff = $Options{alicutoff};
+
+# Confirm that the input directory looks like the real deal
+my $input_dirname = ConfirmDirectory($ARGV[0]);
+my $final_results_dirname = ConfirmDirectory($input_dirname.'Final-MSAs');
+my $all_species_dirname = ConfirmDirectory($input_dirname.'Species-MSAs');
 
 
 # An astute observer will notice that these aren't the same settings as Quilter
@@ -182,8 +181,8 @@ my $total_ghost_exons = 0;
 my $total_ghosts_busted = 0;
 for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
 
-    my $gene = $GeneList[$gene_id];
-    $fname = $final_results_dirname.$gene.'.afa';
+    my $gene  = $GeneList[$gene_id];
+    my $fname = $final_results_dirname.$gene.'.afa';
 
     # Pull in an MSA that's been (1) reduced to mapped sequences, and
     # (2) has splice site markers.
@@ -323,7 +322,7 @@ sub ParseArgs
     &GetOptions( 
         \%Options,
         "help",
-	"cpus=d",
+	"cpus=i",
         "outdirname=s",
 	"savemsas",
 	"alicutoff=s"
