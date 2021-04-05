@@ -117,6 +117,10 @@ system("rm $blatTar")  if (-e $blatTar);
 my $MirageLink = "ln -s src/run_mirage2.sh mirage2";
 if (system($MirageLink)) { die "\n  Failed to create symbolic link to src/run_mirage2.sh\n\n"; }
 
+# Create a symbolic link for running bazaar
+my $BazaarLink = "ln -s src/run_bazaar.sh bazaar";
+if (system($BazaarLink)) { die "\n  Failed to create symbolic link to src/run_bazaar.sh\n\n"; }
+
 # Create a symbolic link for running oasis
 my $OasisLink = "ln -s src/run_oasis.sh oasis";
 if (system($OasisLink)) { die "\n  Failed to create symbolic link to src/run_oasis.sh\n\n"; }
