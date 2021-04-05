@@ -53,8 +53,10 @@ push(@srcFiles,'src/Mirage2.pl');
 push(@srcFiles,'src/MultiSeqNW.c');
 push(@srcFiles,'src/MultiSeqNW.h');
 push(@srcFiles,'src/MapsToMSAs.pl');
+push(@srcFiles,'src/Oasis.pl');
 push(@srcFiles,'src/Quilter2.pl');
 push(@srcFiles,'src/run_mirage2.sh');
+push(@srcFiles,'src/run_oasis.sh');
 foreach my $file (@srcFiles) {
     if (!(-e $file)) { die "\n  Failed to locate critical file '$file'\n\n"; }
 }
