@@ -65,12 +65,18 @@ if (scalar(@ChimericSeqNames) == 0) {
 
 # CHIMERAS AHOY!  Next up, we'll need to parse our species guide
 # to learn where all our happy little genomes live
+my $tildedir_check = OpenSystemCommand('echo ~');
+my $tildedir = <$tildedir_check>;
+$tildedir =~ s/\n|\r//g;
+$tildedir = ConfirmDirectory($tildedir);
+close($tildedir_check);
 my %SpeciesToGenome;
 my $SpeciesGuide = OpenInputFile($ARGV[1]);
 while (my $line = <$SpeciesGuide>) {
     if ($line =~ /^(\S+)\s+(\S+)/) {
 	my $species = lc($1);
-	my $genome  = $2;
+	my $genome = $2;
+	$genome =~ s/\~/$tildedir/;
 	if (!(-e $genome)) {
 	    print "\n  Warning: Can't find $species genome (looking at '$genome')\n\n";
 	} else {

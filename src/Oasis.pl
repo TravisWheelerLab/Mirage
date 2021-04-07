@@ -58,7 +58,7 @@ else                             { $blat = $blat.'blat.macOSX.i386';   }
 # TODO: Make these options available as commandline arguments
 my $options_ref = ParseArgs();
 my %Options = %{$options_ref};
-my $num_cpus = $Options{numcpus};
+my $num_cpus = $Options{cpus};
 my $outdirname = CreateDirectory($Options{outdirname});
 my $save_msas = $Options{savemsas}; # Do we want to write our spliced MSAs to files?
 my $bad_ali_cutoff = $Options{alicutoff};
@@ -78,6 +78,11 @@ $blat = $blat.' -t=dnax -q=prot -out=blast8 1>/dev/null 2>&1';
 
 # Start off the real work by parsing the species guide, which will give
 # us genome locations and chromosome lengths.
+my $tildedir_check = OpenSystemCommand('echo ~');
+my $tildedir = <$tildedir_check>;
+$tildedir =~ s/\n|\r//g;
+$tildedir = ConfirmDirectory($tildedir);
+close($tildedir_check);
 my $SpeciesGuide = OpenInputFile($ARGV[1]);
 my %SpeciesToGenomes;
 my %ChrLensBySpecies;
@@ -86,7 +91,8 @@ while (my $line = <$SpeciesGuide>) {
     $line =~ s/\n|\r//g;
     next if ($line !~ /(\S+)\s+(\S+)\s+\S+/);
     my $species = lc($1);
-    my $genome  = $2;
+    my $genome = $2;
+    $genome =~ s/\~/$tildedir/;
 
     $SpeciesToGenomes{$species} = $genome;
 
@@ -365,7 +371,7 @@ sub GetMappedSeqMSA
 	# NOTE: We're currently assuming that our names are formatted in
 	#       the Mirage-y way.
 	# TODO: Change this to accept UniProt formatting
-	$seqname =~ /\>([^\|]+)\|/;
+	$seqname =~ /^([^\|]+)\|/;
 	my $species = lc($1);
 
 	# If we've already pulled in this species' mapped sequences
@@ -383,7 +389,7 @@ sub GetMappedSeqMSA
 
 	# Oh boy! Time to read a file (right now, all we want is a roster
         # of mapped sequences)
-	my $mapf = OpenInputfile($mapfname);
+	my $mapf = OpenInputFile($mapfname);
 	my $canon_chr;
 	while (my $line = <$mapf>) {
 
@@ -439,7 +445,7 @@ sub GetMappedSeqMSA
 	    $SeqNames[$num_seqs] = $BaseSeqNames[$i];
 
 	    for (my $j=0; $j<$base_msa_len; $j++) {
-		$MSA[$num_seqs][$j] = $MSA[$i][$j];
+		$MSA[$num_seqs][$j] = $BaseMSA[$i][$j];
 	    }
 	    $num_seqs++;
 
