@@ -62,6 +62,7 @@ while (my $line = <$inf>) {
 	if ($full_header =~ /([^\#]+)(\#.*)/) {
 	    $orig_name = $1;
 	    $comments  = $2;
+	    $orig_name =~ s/\s+$//g;
 	}
 
 	# Next up, check the format of the sequence name.
@@ -71,11 +72,8 @@ while (my $line = <$inf>) {
 	#   2. More English-y version of (1.)
 	#   3. UniProt
 	#
-	if ($orig_name =~ /^([^\|]+)\|([^\|]+)\|([^\|]+)\s*$/) { ################# 1
+	if ($orig_name =~ /^([^\|]+)\|([^\|]+)\|([^\|]+)$/) { ################# 1
 
-	    # In case any trailing whitespace came along for the ride
-	    $orig_name =~ s/\s+$//;
-	    
 	    # The recommended format is being followed, so let's see if they nailed it!
 	    my $species = $1;
 	    my $input_genes = $2;
