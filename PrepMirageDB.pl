@@ -78,6 +78,9 @@ while (my $line = <$inf>) {
 	    my $input_genes = $2;
 	    my $id = $3;
 
+	    # Just in case we accidentally included some whitespace characters
+	    $id =~ s/\s//g;
+
 	    $species = ReplaceIllegalChars($species);
 
 	    my $genes = '';
@@ -153,6 +156,7 @@ while (my $line = <$inf>) {
 	    while ($NameUniquenessCheck{$species.'|'.$genes.'|'.$adj_id}) {
 		$attempt_num++;
 		$adj_id = $id.'.'.$attempt_num;
+		$adj_id =~ s/\s//g;
 	    }
 	    $NameUniquenessCheck{$species.'|'.$genes.'|'.$adj_id} = 1;
 
