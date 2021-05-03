@@ -536,6 +536,7 @@ sub GetMappedSeqMSA
 		} else {
 		    $MapMSA[$seq_row][$msa_pos] = 0;
 		}
+		$msa_pos++;
 	    }
 	    
 
