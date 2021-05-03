@@ -73,13 +73,13 @@ while (my $line = <$inf>) {
 	#
 	if ($orig_name =~ /^([^\|]+)\|([^\|]+)\|([^\|]+)\s*$/) { ################# 1
 
+	    # In case any trailing whitespace came along for the ride
+	    $orig_name =~ s/\s+$//;
+	    
 	    # The recommended format is being followed, so let's see if they nailed it!
 	    my $species = $1;
 	    my $input_genes = $2;
 	    my $id = $3;
-
-	    # Just in case we accidentally included some whitespace characters
-	    $id =~ s/\s//g;
 
 	    $species = ReplaceIllegalChars($species);
 
