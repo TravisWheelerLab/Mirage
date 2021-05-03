@@ -19,6 +19,7 @@ sub ParseAFA;
 sub RecordSplicedMSA;
 sub ReduceMSAToSpecies;
 sub FindGhostExons;
+sub FindAliQualityDrops;
 
 
 
@@ -976,6 +977,7 @@ sub FindGhostExons
 	    # to make a determination as to the nastiness of the pairing.
 	    my @ExonMatches;
 	    my @ExonMismatches;
+	    my @ExonPctsID;
 	    my @S1ExonAminos;
 	    my @S2ExonAminos;
 	    my @IsNastyExonPair;
@@ -1003,6 +1005,11 @@ sub FindGhostExons
 			$S2ExonAminos[$exon_id]++;
 		    }
 		    
+		}
+
+		$ExonPctsID[$exon_id] = 0;
+		if ($ExonMismatches[$exon_id] || $ExonMatches[$exon_id]) {
+		    $ExonPctsID[$exon_id] = 100.0 * $ExonMatches[$exon_id] / ($ExonMatches[$exon_id]+$ExonMismatches[$exon_id]+0.0);
 		}
 
 		# But now it's time for a hot take!
@@ -1036,13 +1043,25 @@ sub FindGhostExons
 		}
 
 		# Way to nastiness 3: The sequences have a reasonable alignment
-		#   region, but the alignment itself is low-quality.
+		#   region, but the alignment itself is ultra-low-quality.
 		my $pct_id = (0.0 + $ExonMatches[$exon_id]) / (0.0 + $ExonMatches[$exon_id] + $ExonMismatches[$exon_id]);
 		if ($pct_id <= $bad_ali_cutoff) {
 		    $IsNastyExonPair[$exon_id] = 3;
 		    next;
 		}
-		
+
+	    }
+
+	    # The last thing we'll do to identify nasty exon pairs is check
+	    # for drops in alignment quality.  I'm going to bump this over to
+	    # a seperate function.
+	    my $quality_drops_ref = FindAliQualityDrops(\@ExonPctsID,$num_exons);
+	    if ($quality_drops_ref) {
+		foreach my $exon_id (@{$quality_drops_ref}) {
+		    if ($IsNastyExonPair[$exon_id] == 0) {
+			$IsNastyExonPair[$exon_id] = 4;
+		    }
+		}
 	    }
 
 	    # Radical!  Now we can condense each of our runs of contiguous
@@ -1385,6 +1404,115 @@ sub FindGhostExons
 
 }
 
+
+
+
+
+
+###############################################################
+#
+#  Function: FindAliQualityDrops
+#
+sub FindAliQualityDrops
+{
+    my $pcts_id_ref = shift;
+    my $num_exons = shift;
+
+    my @PctsID = @{$pcts_id_ref};
+
+    # At what drop from a local maximum exon pair's quality
+    # do we get concerned?
+    my $q_drop_threshold = 30;
+
+    # We'll start off by computing the avg. pct ID (ignoring 0s)
+    # and initializing an array to store 'quality ratings'
+    my $avg_pct_id = 0.0;
+    my $num_nonzero = 0;
+    my @QualityRatings;
+    foreach my $pct_id (@PctsID) {
+	push(@QualityRatings,0);
+	if ($pct_id) {
+	    $avg_pct_id += $pct_id;
+	    $num_nonzero++;
+	}
+    }
+    
+    if ($num_nonzero) {
+	$avg_pct_id /= $num_nonzero;
+    } else {
+	return 0;
+    }
+
+    # Next up, we'll give a '1' to every exon pair that has an
+    # alignment quality equal to or above the average and a '-1'
+    # to every pair below the average
+    my @TopShelfExons;
+    for (my $i=0; $i<$num_exons; $i++) {
+	if ($PctsID[$i] >= $avg_pct_id) {
+	    $QualityRatings[$i] = 1;
+	} elsif ($PctsID[$i]) {
+	    $QualityRatings[$i] = -1;
+	}
+    }
+
+    # Find the local maxima
+    my @LocalMaxima;
+    for (my $i=0; $i<$num_exons; $i++) {
+
+        if ($QualityRatings[$i] == 1) {
+
+	    my $max_pct = $PctsID[$i];
+	    my $max_pos = $i;
+
+	    $i++;
+	    while ($i<$num_exons && $QualityRatings[$i] != -1) {
+		if ($PctsID[$i] > $max_pct) {
+		    $max_pct = $PctsID[$i];
+		    $max_pos = $i;
+		}
+		$i++;
+	    }
+
+	    $QualityRatings[$max_pos] = 2;
+	    push(@LocalMaxima,$max_pos);
+	    
+	}
+	
+    }
+
+    # Now we can run in both directions from each local maximum
+    # checking for drops below our q-drop threshold
+    foreach my $max_pos (@LocalMaxima) {
+
+	my $pct_id_cutoff = $PctsID[$max_pos] - $q_drop_threshold;
+
+	# Scan left
+	for (my $i=$max_pos-1; $i>=0; $i--) {
+	    last if ($QualityRatings[$i] == 2);
+	    if ($PctsID[$i] && $PctsID[$i] <= $pct_id_cutoff) {
+		$QualityRatings[$i] = -2;
+	    }
+	}
+	
+	# Scan right
+	for (my $i=$max_pos+1; $i<$num_exons; $i++) {
+	    last if ($QualityRatings[$i] == 2);
+	    if ($PctsID[$i] && $PctsID[$i] <= $pct_id_cutoff) {
+		$QualityRatings[$i] = -2;
+	    }
+	}
+	
+    }
+
+    # Finally, we can condense our below-threshold exons into a list
+    my @QDroppers;
+    for (my $i=0; $i<$num_exons; $i++) {
+	push(@QDroppers,$i) if ($QualityRatings[$i] == -2);
+    }
+
+    return \@QDroppers;
+    
+}
 
 
 
