@@ -1126,6 +1126,7 @@ sub FindGhostExons
 				$left_bound = $MapMSA[$s2][$j];
 				last;
 			    }
+			    $j--;
 			}
 		    }
 		    if (!$left_bound) {
@@ -1147,6 +1148,7 @@ sub FindGhostExons
 				$right_bound = $MapMSA[$s2][$j];
 				last;
 			    }
+			    $j++;
 			}
 		    }
 		    if (!$right_bound) {
@@ -1184,6 +1186,7 @@ sub FindGhostExons
 				$left_bound = $MapMSA[$s1][$j];
 				last;
 			    }
+			    $j--;
 			}
 		    }
 		    if (!$left_bound) {
@@ -1205,6 +1208,7 @@ sub FindGhostExons
 				$right_bound = $MapMSA[$s1][$j];
 				last;
 			    }
+			    $j++;
 			}
 		    }
 		    if (!$right_bound) {
