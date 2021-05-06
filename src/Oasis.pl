@@ -93,7 +93,7 @@ while (my $line = <$SpeciesGuide>) {
     next if ($line !~ /(\S+)\s+(\S+)\s+\S+/);
     my $species = lc($1);
     my $genome = $2;
-    $genome =~ s/\~/$tildedir/;
+    $genome =~ s/\~\//$tildedir/;
 
     $SpeciesToGenomes{$species} = $genome;
 
@@ -1011,6 +1011,9 @@ sub FindGhostExons
 		$ExonPctsID[$exon_id] = 0;
 		if ($ExonMismatches[$exon_id] || $ExonMatches[$exon_id]) {
 		    $ExonPctsID[$exon_id] = 100.0 * $ExonMatches[$exon_id] / ($ExonMatches[$exon_id]+$ExonMismatches[$exon_id]+0.0);
+		} else {
+		    $IsNastyExonPair[$exon_id] = 0;
+		    next;
 		}
 
 		# But now it's time for a hot take!
@@ -1158,7 +1161,7 @@ sub FindGhostExons
 		    # Heck yeah! Let's scream (and shout)!
 		    push(@SearchSeqs,$search_seq_1);
 		    push(@TargetSpecies,$species2);
-		    push(@TargetSpeciesRange,$left_bound.'..'.$right_bound);
+		    push(@TargetSpeciesRange,$left_bound.'|'.$right_bound);
 		    push(@SourceSpecies,$species1);
 		    push(@MSAExonRanges,($start_exon+1).'..'.($end_exon+1));
 		    $num_ghost_exons++;
