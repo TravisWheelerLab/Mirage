@@ -426,12 +426,15 @@ sub GetMappedSeqMSA
     # Before we go any further, if there's only one species mapping then we'll
     # bail.  Because 'SpeciesToMapfiles' initially has '-1' for any unmapped
     # species, we'll need to switch those to '0's
+    my $num_mapped_species = 0;
     foreach my $species (keys %SpeciesToMapfiles) {
 	if ($SpeciesToMapfiles{$species} eq "-1") {
 	    $SpeciesToMapfiles{$species} = 0;
+	} else {
+	    $num_mapped_species++;
 	}
     }
-    return (0,0,0,0,0,0) if (scalar(keys %SpeciesToMapfiles) <= 1);
+    return (0,0,0,0,0,0) if ($num_mapped_species <= 1);
     
 
     # Awesome!  Now we have a roster of sequences that mapped back to their
@@ -483,6 +486,8 @@ sub GetMappedSeqMSA
     #
     my @MapMSA;
     foreach my $species (keys %SpeciesToMapfiles) {
+
+	next if (!$SpeciesToMapfiles{$species});
 
 	my $mapf = OpenInputFile($SpeciesToMapfiles{$species});
 	while (my $line = <$mapf>) {
@@ -1388,12 +1393,16 @@ sub FindGhostExons
 	}
 
 	print $outf "    $mapped_seq\n";
-	print $outf "    ";
-	foreach my $char (@MappedSeq) {
-	    if ($char eq uc($char)) { print $outf '-'; }
-	    else                    { print $outf ' '; }
-	}
-	print $outf "\n";
+
+	# I'm going to take this 'underlining' out for now, and let the
+	# upper / lower case distinction speak for itself.
+	#
+	#print $outf "    ";
+	#foreach my $char (@MappedSeq) {
+	#if ($char eq uc($char)) { print $outf '-'; }
+	#else                    { print $outf ' '; }
+	#}
+	#print $outf "\n";
 
 	for (my $hit=0; $hit<$num_blat_hits; $hit++) {
 	    print $outf "    + Aminos $HitAminoStarts[$hit]..$HitAminoEnds[$hit] ";
