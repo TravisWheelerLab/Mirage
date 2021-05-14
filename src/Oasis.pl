@@ -277,7 +277,7 @@ for ($threadID=0; $threadID<$num_cpus; $threadID++) {
 if ($total_ghost_exons == 0) {
 
     # Wowza yowza bo-bowza!  Really?  Nothing?  Okay...
-    system("rm $outdirname");
+    system("rm -rf $outdirname");
     print "\n  No potentially-unannotated exons detected\n\n";
 
 } else {
@@ -597,11 +597,19 @@ sub GetMappedSeqMSA
 	my $paired_residue_against = 0;
 	for (my $i=0; $i<$num_seqs; $i++) {
 	    if ($MSA[$i][$splice_col] =~ /[A-Z]/ && $MSA[$i][$splice_col-1] =~ /[A-Z]/) {
+
+                # DEBUGGING
+		if (!($MapMSA[$i][$splice_col] && $MapMSA[$i][$splice_col-1])) {
+		    print "Mapping issue around col $splice_col in '$SeqNames[$i]'\n";
+		    next;
+		}
+		
 		if (abs($MapMSA[$i][$splice_col]-$MapMSA[$i][$splice_col-1])>4) {
 		    $paired_residue_for++;
 		} else {
 		    $paired_residue_against++;
 		}
+
 	    }
 	}
 
@@ -1439,7 +1447,119 @@ sub FindAliQualityDrops
 
     # At what drop from a local maximum exon pair's quality
     # do we get concerned?
-    my $q_drop_threshold = 30;
+    my $q_drop_threshold = 25; # rec. 35+ for the alt. approach.
+
+    # To avoid a bookkeeping headache, we'll just do two passes
+    # (left-to-right, right-to-left, DUH).
+    my @HasQDrop;
+    for (my $i=0; $i<$num_exons; $i++) {
+	$HasQDrop[$i] = 0;
+    }
+
+    my $exon_id = 0;
+    while ($PctsID[$exon_id] == 0) {
+	$exon_id++;
+    }
+    my $last_exon_pct_id = $PctsID[$exon_id++];
+
+    while ($exon_id < $num_exons) {
+	if ($PctsID[$exon_id]) {
+	    if ($last_exon_pct_id - $PctsID[$exon_id] >= $q_drop_threshold) {
+		$HasQDrop[$exon_id] = 1;
+	    }
+	    $last_exon_pct_id = $PctsID[$exon_id];
+	}
+	$exon_id++;
+    }
+
+    # Reverse course!
+    # Note that exon_id starts out-of-bounds, so we decrement before anything else
+    while ($exon_id) {
+	$exon_id--;
+	if ($PctsID[$exon_id]) {
+	    if ($last_exon_pct_id - $PctsID[$exon_id] >= $q_drop_threshold) {
+		$HasQDrop[$exon_id] = 1;
+	    }
+	    $last_exon_pct_id = $PctsID[$exon_id];
+	}	
+    }
+
+    # We can imagine a case where we have something like 100/50/45/50/100,
+    # but if we stick with what we have now, that middle exon isn't going
+    # to be seen as low-quality.
+    # To remedy this, we'll run along from each low-quality exon labeling any
+    # exons that don't improve by >5% as also low-quality.
+    # Again, to simplify this we'll just do a left-to-right and a right-to-left
+    # scan.
+    while ($exon_id < $num_exons) {
+	if ($HasQDrop[$exon_id]) {
+	    my $pct_to_beat = $PctsID[$exon_id] + 5.0;
+	    $exon_id++;
+	    while ($exon_id < $num_exons) {
+		if ($PctsID[$exon_id]) {
+		    if ($PctsID[$exon_id] < $pct_to_beat) {
+			$HasQDrop[$exon_id] = 1;
+		    } else {
+			last;
+		    }
+		}
+		$exon_id++;
+	    }
+	} else {
+	    $exon_id++;
+	}
+    }
+
+    while ($exon_id) {
+	$exon_id--;
+	if ($HasQDrop[$exon_id]) {
+	    my $pct_to_beat = $PctsID[$exon_id] + 5.0;
+	    $exon_id--;
+	    while ($exon_id >= 0) {
+		if ($PctsID[$exon_id]) {
+		    if ($PctsID[$exon_id] < $pct_to_beat) {
+			$HasQDrop[$exon_id] = 1;
+		    } else {
+			last;
+		    }
+		}
+		$exon_id--;
+	    }
+	}
+    }
+
+    # Phew! So close to being done!
+    # Now we just need to get a list of the QDroppers and be on
+    # our merry way.
+    my @LowQExonPairs;
+    for (my $i=0; $i<$num_exons; $i++) {
+	if ($HasQDrop[$i]) {
+	    push(@LowQExonPairs,$i);
+	}
+    }
+
+    if (scalar(@LowQExonPairs) == 0) {
+	return 0;
+    }
+    return \@LowQExonPairs;
+
+
+
+
+
+    ###########################################
+    #                                         #
+    #  ALT APPROACH: DROP FROM LOCAL MAXIMUM  #
+    #                                         #
+    ###########################################
+    #
+    # NOTE: An issue with this method was that we would see some
+    #       extremely high-quality exon alignments (e.g., 100%),
+    #       from which the alignment quality would slowly walk down
+    #       to something like 68%, thus flagging that lower-scoring
+    #       exon even if it were flanked by 70s-ish exons.
+    #
+
 
     # We'll start off by computing the avg. pct ID (ignoring 0s)
     # and initializing an array to store 'quality ratings'
@@ -1472,7 +1592,8 @@ sub FindAliQualityDrops
 	}
     }
 
-    # Find the local maxima
+    # Find the local maxima.  Note that this isn't "every peak,"
+    # but rather a maximum among a set of relatively strong exons.
     my @LocalMaxima;
     for (my $i=0; $i<$num_exons; $i++) {
 
@@ -1496,6 +1617,7 @@ sub FindAliQualityDrops
 	}
 	
     }
+
 
     # Now we can run in both directions from each local maximum
     # checking for drops below our q-drop threshold
