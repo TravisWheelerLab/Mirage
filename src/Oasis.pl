@@ -1510,7 +1510,7 @@ sub FindAliQualityDrops
 	}
     }
 
-    while ($exon_id) {
+    while ($exon_id > 0) {
 	$exon_id--;
 	if ($HasQDrop[$exon_id]) {
 	    my $pct_to_beat = $PctsID[$exon_id] + 5.0;
