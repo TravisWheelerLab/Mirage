@@ -976,6 +976,7 @@ sub FindGhostExons
     my @TargetSpeciesRange;
     my @SourceSpecies;
     my @MSAExonRanges;
+    my @UsedRegions;
     my $num_ghost_exons = 0;
     for (my $s1=0; $s1<$num_species-1; $s1++) {
 
@@ -1173,12 +1174,53 @@ sub FindGhostExons
 			$right_bound = '[end-of-coding-region:'.$MapMSA[$s2][$j].']';
 		    }
 
+		    
+		    # [3] We'll need to disqualify any nucleotides currently identified
+		    #     as contributing to our mapping, so we'll go exon-by-exon and
+		    #     record any already-used regions.
+
+		    my $used_regions_str;
+		    for (my $exon_id=$start_exon; $exon_id<=$end_exon; $exon_id++) {
+
+			my $region_start;
+			for (my $j=$ExonStarts[$exon_id]; $j<$ExonEnds[$exon_id]; $j++) {
+			    if ($MapMSA[$s2][$j]) {
+				$region_start = $MapMSA[$s2][$j];
+				last;
+			    }
+			}
+
+			my $region_end;
+			for (my $j=$ExonEnds[$exon_id]; $j>$ExonStarts[$exon_id]; $j--) {
+			    if ($MapMSA[$s2][$j]) {
+				$region_end = $MapMSA[$s2][$j];
+				last;
+			    }
+			}
+
+			if ($region_start && $region_end) {
+			    if ($used_regions_str) {
+				$used_regions_str = $used_regions_str.'&'.$region_start.'|'.$region_end;
+			    } else {
+				$used_regions_str = $region_start.'|'.$region_end;
+			    }
+			}
+			
+		    }
+
+		    # Just to make sure we're sticking something into our list
+		    if (!$used_regions_str) {
+			$used_regions_str = '0|0';
+		    }
+
+
 		    # Heck yeah! Let's scream (and shout)!
 		    push(@SearchSeqs,$search_seq_1);
 		    push(@TargetSpecies,$species2);
 		    push(@TargetSpeciesRange,$left_bound.'|'.$right_bound);
 		    push(@SourceSpecies,$species1);
 		    push(@MSAExonRanges,($start_exon+1).'..'.($end_exon+1));
+		    push(@UsedRegions,$used_regions_str);
 		    $num_ghost_exons++;
 		    
 		}
@@ -1192,11 +1234,13 @@ sub FindGhostExons
 		    #     region for sequence 1, starting with the left
 
 		    my $left_bound;
+		    my $left_bound_msa_pos;
 		    if ($start_exon) {
 			my $j=$ExonEnds[$start_exon-1]-1;
 			while ($j) {
 			    if ($MapMSA[$s1][$j]) {
 				$left_bound = $MapMSA[$s1][$j];
+				$left_bound_msa_pos = $j;
 				last;
 			    }
 			    $j--;
@@ -1208,17 +1252,20 @@ sub FindGhostExons
 			    $j++;
 			}
 			$left_bound = '[start-of-coding-region:'.$MapMSA[$s1][$j].']';
+			$left_bound_msa_pos = $j;
 		    }
 
 		    # [2] Find the coordinates to the right using a method that mirrors
 		    #     how we got coordinates to the left
 
 		    my $right_bound;
+		    my $right_bound_msa_pos;
 		    if ($end_exon+1 < $num_exons) {
 			my $j=$ExonStarts[$end_exon+1];
 			while ($j<$msa_len) {
 			    if ($MapMSA[$s1][$j]) {
 				$right_bound = $MapMSA[$s1][$j];
+				$right_bound_msa_pos = $j;
 				last;
 			    }
 			    $j++;
@@ -1231,7 +1278,48 @@ sub FindGhostExons
 			    $j--;
 			}
 			$right_bound = '[end-of-coding-region:'.$MapMSA[$s1][$j].']';
+			$right_bound_msa_pos = $j;
 		    }
+
+
+		    # [3] We'll need to disqualify any nucleotides currently identified
+		    #     as contributing to our mapping, so we'll go exon-by-exon and
+		    #     record any already-used regions.
+
+		    my $used_regions_str;
+		    for (my $exon_id=$start_exon; $exon_id<=$end_exon; $exon_id++) {
+
+			my $region_start;
+			for (my $j=$ExonStarts[$exon_id]; $j<$ExonEnds[$exon_id]; $j++) {
+			    if ($MapMSA[$s1][$j]) {
+				$region_start = $MapMSA[$s1][$j];
+				last;
+			    }
+			}
+
+			my $region_end;
+			for (my $j=$ExonEnds[$exon_id]; $j>$ExonStarts[$exon_id]; $j--) {
+			    if ($MapMSA[$s1][$j]) {
+				$region_end = $MapMSA[$s1][$j];
+				last;
+			    }
+			}
+
+			if ($region_start && $region_end) {
+			    if ($used_regions_str) {
+				$used_regions_str = $used_regions_str.'&'.$region_start.'|'.$region_end;
+			    } else {
+				$used_regions_str = $region_start.'|'.$region_end;
+			    }
+			}
+			
+		    }
+
+		    # Just to make sure we're sticking something into our list
+		    if (!$used_regions_str) {
+			$used_regions_str = '0|0';
+		    }
+
 
 		    # Heck yeah! Let's shout (and scream)!
 		    push(@SearchSeqs,$search_seq_2);
@@ -1239,6 +1327,7 @@ sub FindGhostExons
 		    push(@TargetSpeciesRange,$left_bound.'|'.$right_bound);
 		    push(@SourceSpecies,$species2);
 		    push(@MSAExonRanges,($start_exon+1).'..'.($end_exon+1));
+		    push(@UsedRegions,$used_regions_str);
 		    $num_ghost_exons++;
 		    
 		}
@@ -1309,6 +1398,10 @@ sub FindGhostExons
 	# Because of the wonders of filename standardization, we can do this!
 	RunSystemCommand($blat);
 
+	# Grab the list of coordinates that have already been used for mapping this
+	# sequence's analog (not the right word, maybe, but you know what I mean).
+	my @PrevUsedRegions = split(/\&/,$UsedRegions[$q]);
+
 	# What did we get?
 	my @HitAminoStarts;
 	my @HitAminoEnds;
@@ -1338,6 +1431,40 @@ sub FindGhostExons
 		    $nucl_start += $SearchRanges[0];
 		    $nucl_end   += $SearchRanges[0];
 		}
+
+		# We need to confirm that this isn't overlapping with any of
+		# the nucleotide regions that have been previously used to
+		# map this sequence.
+		my $was_prev_used = 0;
+		foreach my $prev_used_region (@PrevUsedRegions) {
+
+		    $prev_used_region =~ /^(\d+)\|(\d+)$/;
+		    my $prev_start = $1;
+		    my $prev_end = $2;
+
+		    if ($revcomp) {
+			if ($nucl_start <= $prev_start && $nucl_start >= $prev_end) {
+			    $was_prev_used = 1;
+			    last;
+			}
+			if ($nucl_end <= $prev_start && $nucl_end >= $prev_end) {
+			    $was_prev_used = 1;
+			    last;
+			}
+		    } else {
+			if ($nucl_start >= $prev_start && $nucl_start <= $prev_end) {
+			    $was_prev_used = 1;
+			    last;
+			}
+			if ($nucl_end >= $prev_start && $nucl_end <= $prev_end) {
+			    $was_prev_used = 1;
+			    last;
+			}
+		    }
+
+		}
+
+		next if ($was_prev_used);
 
 		push(@HitAminoStarts,$amino_start);
 		push(@HitAminoEnds,$amino_end);
