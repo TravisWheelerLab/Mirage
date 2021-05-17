@@ -186,6 +186,7 @@ $blat = $blat.' '.$nucl_seq_fname.' '.$prot_seq_fname.' '.$blat_out_fname;
 #
 my $total_ghost_exons = 0;
 my $total_ghosts_busted = 0;
+my @GenesWithBustedGhosts;
 for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
 
     my $gene  = $GeneList[$gene_id];
@@ -226,15 +227,30 @@ for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
     # Add onto our overarching tallies
     $total_ghost_exons += $num_ghost_exons;
     $total_ghosts_busted += $num_ghosts_busted;
+
+    # We'll want to record the 'busted' ghost exons' gene families, for
+    # ease of identification after the fact.
+    if ($num_ghosts_busted) {
+	push(@GenesWithBustedGhosts,$gene);
+    }
     
 }
 
+
 # How'd I do?  I don't even know!
 if ($threadID) {
+
     my $final_outf = OpenOutputFile($outdirname.$threadID.'.final-tally.out');
     print $final_outf "$total_ghosts_busted / $total_ghost_exons\n";
+
+    # Before we totally wrap up, write out all our 'busted ghosts'
+    foreach my $gene (@GenesWithBustedGhosts) {
+	print $final_outf "$gene\n";
+    }
+    
     close($final_outf);
     exit(0);
+
 }
 
 # The age of threads is coming to a close!
@@ -242,6 +258,7 @@ while (wait() != -1) {}
 
 
 # Woo-hoo!  Janitorial work is my favorite!
+my @AllMappedGhostGenes;
 for ($threadID=0; $threadID<$num_cpus; $threadID++) {
 
     # Clear out all these files we don't need
@@ -258,14 +275,21 @@ for ($threadID=0; $threadID<$num_cpus; $threadID++) {
 
 	my $final_infname = $outdirname.$threadID.'.final-tally.out';
 	my $final_inf = OpenInputFile($final_infname);
-	my $line = <$final_inf>;
-	close($final_inf);
 
+	my $line = <$final_inf>;
 	$line =~ /(\d+) \/ (\d+)/;
 	$total_ghosts_busted += $1;
 	$total_ghost_exons += 2;
 
+	while ($line = <$final_inf>) {
+	    $line =~ s/\n|\r//g;
+	    if ($line) {
+		push(@AllMappedGhostGenes,$line);
+	    }
+	}
+
 	# Now erase every last trace of that darn helper from the Earth!
+	close($final_inf);
 	system("rm $final_infname");
     
     }
@@ -282,6 +306,15 @@ if ($total_ghost_exons == 0) {
 
 } else {
 
+    # Create a file to list the names of every gene with at least one
+    # mapped ghost exon
+    my $final_outfname = $outdirname.'Oasis-Mapped-Genes.out';
+    my $final_outf = OpenOutputFile($final_outfname);
+    foreach my $gene (sort(@AllMappedGhostGenes)) {
+	print $final_outf "  $gene\n";
+    }
+    close($final_outf);
+
     # WOOOOOOO, WE FOUND AT LEAST ONE THING TO POSSIBLY NOT CROSS-MAP!
     my $bust_rate = int(1000.0*$total_ghosts_busted/$total_ghost_exons)/10;
     print "\n";
@@ -289,6 +322,7 @@ if ($total_ghost_exons == 0) {
     print "  $total_ghosts_busted of which have some sequence-level support ($bust_rate\%)\n";
     print "\n";
     print "  Results in '$outdirname'\n";
+    print "  All mapped genes listed in '$final_outfname'\n";
     print "\n";
 
 }
