@@ -996,6 +996,8 @@ sub FindGhostExons
 	    my @S1ExonAminos;
 	    my @S2ExonAminos;
 	    my @IsNastyExonPair;
+	    my @IsUsedAtAll;
+	    my @MicroExonic;
 	    for (my $exon_id=0; $exon_id<$num_exons; $exon_id++) {
 
 		$ExonMatches[$exon_id] = 0;
@@ -1022,20 +1024,32 @@ sub FindGhostExons
 		    
 		}
 
+
+		# But now it's time for a hot take!
 		$ExonPctsID[$exon_id] = 0;
+		$IsNastyExonPair[$exon_id] = 0;
+		$MicroExonic[$exon_id] = 0;
+		$IsUsedAtAll[$exon_id] = 1;
+
+		# Catch micro exons
+		if ($S1ExonAminos[$exon_id] <= $max_nonuse_aminos
+		    || $S2ExonAminos[$exon_id] <= $max_nonuse_aminos) {
+		    $MicroExonic[$exon_id] = 1;
+		}
+
 		if ($ExonMismatches[$exon_id] || $ExonMatches[$exon_id]) {
 		    $ExonPctsID[$exon_id] = 100.0 * $ExonMatches[$exon_id] / ($ExonMatches[$exon_id]+$ExonMismatches[$exon_id]+0.0);
 		} else {
 		    $IsNastyExonPair[$exon_id] = 0;
+		    if ($S1ExonAminos[$exon_id] == 0 && $S2ExonAminos[$exon_id] == 0) {
+			$IsUsedAtAll[$exon_id] = 0;
+		    }
 		    next;
 		}
 
-		# But now it's time for a hot take!
-		$IsNastyExonPair[$exon_id] = 0;
-
-		# Shortcut to non-nastiness: Neither sequence uses this exon
-		next if ($S1ExonAminos[$exon_id] <= $max_nonuse_aminos
-			 && $S2ExonAminos[$exon_id] <= $max_nonuse_aminos);
+		# If we have a micro exon we'll go ahead an bail (but we do
+		# hang onto the pct id for some reason...)
+		next if ($MicroExonic[$exon_id]);
 
 		# Way to nastiness 1: One sequence doesn't use this exon, but
 		#   the other does.
@@ -1079,6 +1093,29 @@ sub FindGhostExons
 		    if ($IsNastyExonPair[$exon_id] == 0) {
 			$IsNastyExonPair[$exon_id] = 4;
 		    }
+		}
+	    }
+
+	    # Just kidding about the last time I said 'this is the last thing
+	    # we'll do...' Now it's time to let our NastyExons (tm) seep into
+	    # any adjacent micro exons.
+	    # We'll do this in a forward and a backward pass
+	    my $in_nasty_zone = $IsNastyExonPair[0];
+	    for (my $exon_id=0; $exon_id<$num_exons; $exon_id++) {
+		next if (!$IsUsedAtAll[$exon_id]);
+		if ($MicroExonic[$exon_id] && $in_nasty_zone) {
+		    $IsNastyExonPair[$exon_id] = 5;
+		} else {
+		    $in_nasty_zone = $IsNastyExonPair[$exon_id];
+		}
+	    }
+
+	    for (my $exon_id=$num_exons-1; $exon_id>=0; $exon_id--) {
+		next if (!$IsUsedAtAll[$exon_id]);
+		if ($MicroExonic[$exon_id] && $in_nasty_zone) {
+		    $IsNastyExonPair[$exon_id] = 5;
+		} else {
+		    $in_nasty_zone = $IsNastyExonPair[$exon_id];
 		}
 	    }
 
