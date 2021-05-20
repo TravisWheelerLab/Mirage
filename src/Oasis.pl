@@ -243,15 +243,16 @@ if ($threadID) {
     }
     print $final_outf "\n";
     close($final_outf);
-    exit(0);
 }
 
 # The age of threads is coming to a close!
+if ($threadID) {
+    exit(0);
+}
 while (wait() != -1) {}
 
 
 # Woo-hoo!  Janitorial work is my favorite!
-my @FullGhostGeneList;
 for ($threadID=0; $threadID<$num_cpus; $threadID++) {
 
     # Clear out all these files we don't need
@@ -263,28 +264,28 @@ for ($threadID=0; $threadID<$num_cpus; $threadID++) {
     if (-e $prot_seq_fname) { system("rm $prot_seq_fname"); }
     if (-e $blat_out_fname) { system("rm $blat_out_fname"); }
 
-    # How did each of the helpers do?
+    # How'd ya do, helper?
     if ($threadID) {
-
+	
 	my $final_infname = $outdirname.$threadID.'.final-tally.out';
 	my $final_inf = OpenInputFile($final_infname);
-
+    
 	my $line = <$final_inf>;
 	$line =~ /(\d+) \/ (\d+)/;
 	$total_ghosts_busted += $1;
 	$total_ghost_exons += 2;
-
+	
 	$line = <$final_inf>;
 	foreach my $gene (split(/\|/,$line)) {
-	    push(@FullGhostGeneList,$gene);
+	    push(@GhostlyGenes,$gene);
 	}
 
 	# Now erase every last trace of that darn helper from the Earth!
 	close($final_inf);
 	system("rm $final_infname");
-    
-    }
 
+    }
+	
 }
 
 
@@ -300,9 +301,9 @@ if ($total_ghost_exons == 0) {
     # We'll list off all of our "busted" genes in a special file
     my $final_outfname = $outdirname.'Genes-With-Ghost-Exons.out';
     my $final_outf = OpenOutputFile($final_outfname);
-    my $num_busted_genes = scalar(@FullGhostGeneList);
-    print $final_outf "$num_busted_genes genes found with at least one ghost exon:\n";
-    foreach my $gene (sort(@FullGhostGeneList)) {
+    my $num_busted_genes = scalar(@GhostlyGenes);
+    print $final_outf "$num_busted_genes genes with at least one mapped ghost exon:\n";
+    foreach my $gene (sort(@GhostlyGenes)) {
 	print $final_outf "  $gene\n";
     }
     print $final_outf "\n";
