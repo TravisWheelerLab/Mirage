@@ -276,6 +276,7 @@ for ($threadID=0; $threadID<$num_cpus; $threadID++) {
 	$total_ghost_exons += 2;
 	
 	$line = <$final_inf>;
+	$line =~ s/\n|\r//g;
 	foreach my $gene (split(/\|/,$line)) {
 	    push(@GhostlyGenes,$gene);
 	}
@@ -1560,7 +1561,7 @@ sub FindGhostExons
 	    $exon_str = $exon_str.' '.$end_exon;
 	}
 
-	my $target_info = "    MSA Ali Region : $exon_str\n";
+	my $target_info = "MSA Ali Region : $exon_str\n";
 	$target_info = $target_info."    Target Genome  : $target_species ($chr:$SearchRanges[0]..$SearchRanges[1])\n";
 	$target_info = $target_info."    Source Species : $source_species\n";
 	
@@ -1591,9 +1592,9 @@ sub FindGhostExons
 
 	# Sing it to high heaven!
 	print $outf "[+] Search success!\n";
-	print $outf "    $target_info\n";
-	print $outf "    Num BLAT Hits  : $num_blat_hits\n";
+	print $outf "    $target_info";
 	print $outf "    Search Sequence: $mapped_seq\n";
+	print $outf "    Num BLAT Hits  : $num_blat_hits\n";
 
 	# I'm going to take this 'underlining' out for now, and let the
 	# upper / lower case distinction speak for itself.
