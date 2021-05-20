@@ -1560,8 +1560,6 @@ sub FindGhostExons
 	    $exon_str = $exon_str.' '.$end_exon;
 	}
 
-	my $full_target_info = "$target_species $chr:$SearchRanges[0]..$SearchRanges[1] ($exon_str)";
-
 	my $target_info = "    MSA Ali Region : $exon_str\n";
 	$target_info = $target_info."    Target Genome  : $target_species ($chr:$SearchRanges[0]..$SearchRanges[1])\n";
 	$target_info = $target_info."    Source Species : $source_species\n";
@@ -1569,7 +1567,7 @@ sub FindGhostExons
 	# Is it an especially elusive ghost we're chasing?
 	if ($num_blat_hits == 0) {
 	    print $outf "[ ] Search failure (no BLAT hits)\n";
-	    print $outf "    $full_target_info";
+	    print $outf "    $target_info";
 	    print $outf "    Search Sequence: $SearchSeqs[$q]\n\n";
 	    next;
 	}
@@ -1593,8 +1591,8 @@ sub FindGhostExons
 
 	# Sing it to high heaven!
 	print $outf "[+] Search success!\n";
-	print $outf "    $full_target_info";
-	print $outf "    Num BLAT Hits  : $num_blat_hits";
+	print $outf "    $target_info\n";
+	print $outf "    Num BLAT Hits  : $num_blat_hits\n";
 	print $outf "    Search Sequence: $mapped_seq\n";
 
 	# I'm going to take this 'underlining' out for now, and let the
