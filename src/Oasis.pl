@@ -237,8 +237,9 @@ for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
 if ($threadID) {
     my $final_outf = OpenOutputFile($outdirname.$threadID.'.final-tally.out');
     print $final_outf "$total_ghosts_busted / $total_ghost_exons\n";
-    foreach my $gene (@GhostlyGenes) {
-	print $final_outf "$gene|";
+    for (my $i=0; $i<scalar(@GhostlyGenes); $i++) {
+	print $final_outf '|' if ($i);
+	print $final_outf "$GhostlyGenes[$i]";
     }
     print $final_outf "\n";
     close($final_outf);
@@ -1551,7 +1552,7 @@ sub FindGhostExons
 	$MSAExonRanges[$q] =~ /(\d+)\.\.(\d+)/;
 	my $start_exon = $1;
 	my $end_exon = $2;
-	my $exon_str = 'MSA Exon';
+	my $exon_str = 'Exon';
 	if ($start_exon != $end_exon) {
 	    $exon_str = $exon_str.'s '.$start_exon.'..'.$end_exon;
 	} else {
@@ -1560,22 +1561,20 @@ sub FindGhostExons
 
 	my $full_target_info = "$target_species $chr:$SearchRanges[0]..$SearchRanges[1] ($exon_str)";
 
+	my $target_info = "    MSA Ali Region : $exon_str\n";
+	$target_info = $target_info."    Target Genome  : $target_species ($chr:$SearchRanges[0]..$SearchRanges[1])\n";
+	$target_info = $target_info."    Source Species : $source_species\n";
+	
 	# Is it an especially elusive ghost we're chasing?
 	if ($num_blat_hits == 0) {
-	    print $outf "[ ] Search failure\n";
-	    print $outf "    $full_target_info doesn't clearly encode the following sequence (from $source_species):\n";
-	    print $outf "    $SearchSeqs[$q]\n\n";
+	    print $outf "[ ] Search failure (no BLAT hits)\n";
+	    print $outf "    $full_target_info";
+	    print $outf "    Search Sequence: $SearchSeqs[$q]\n\n";
 	    next;
 	}
 	
 	# Oh, this is a most profitable Ghost Adventure indeed!
 	$ghosts_busted++;
-
-	# Sing it to high heaven!
-	print $outf "[+] Search success!\n";
-	print $outf "    $full_target_info had $num_blat_hits hit";
-	print $outf "s" if ($num_blat_hits > 1);
-	print $outf " to the following sequence (from $source_species):\n";
 
 	# Let's illustrate how much of the sequence has been covered.
 	# NOTE: We're assuming that our hits are consistent with one another,
@@ -1591,7 +1590,11 @@ sub FindGhostExons
 	    $mapped_seq = $mapped_seq.$char;
 	}
 
-	print $outf "    $mapped_seq\n";
+	# Sing it to high heaven!
+	print $outf "[+] Search success!\n";
+	print $outf "    $full_target_info";
+	print $outf "    Num BLAT Hits  : $num_blat_hits";
+	print $outf "    Search Sequence: $mapped_seq\n";
 
 	# I'm going to take this 'underlining' out for now, and let the
 	# upper / lower case distinction speak for itself.
@@ -1605,7 +1608,7 @@ sub FindGhostExons
 
 	for (my $hit=0; $hit<$num_blat_hits; $hit++) {
 	    print $outf "    + Aminos $HitAminoStarts[$hit]..$HitAminoEnds[$hit] ";
-	    print $outf "mapped to $chr:$HitNuclStarts[$hit]..$HitNuclEnds[$hit] ";
+	    print $outf "mapped to $target_species $chr:$HitNuclStarts[$hit]..$HitNuclEnds[$hit] ";
 	    print $outf "($HitEVals[$hit])\n";
 	}
 	
