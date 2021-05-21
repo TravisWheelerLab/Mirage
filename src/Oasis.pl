@@ -1532,7 +1532,7 @@ sub FindGhostExons
 			    $was_prev_used = 1;
 			    last;
 			}
-			if ($nucl_start <= $prev_start && $nucle_end >= $prev_end) {
+			if ($nucl_start <= $prev_start && $nucl_end >= $prev_end) {
 			    $was_prev_used = 1;
 			    last;
 			}
