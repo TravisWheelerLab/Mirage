@@ -1502,6 +1502,7 @@ sub FindGhostExons
 		# We need to confirm that this isn't overlapping with any of
 		# the nucleotide regions that have been previously used to
 		# map this sequence.
+		# It also can't fully contain an exon, ding-dong!
 		my $was_prev_used = 0;
 		foreach my $prev_used_region (@PrevUsedRegions) {
 
@@ -1518,12 +1519,20 @@ sub FindGhostExons
 			    $was_prev_used = 1;
 			    last;
 			}
+			if ($nucl_start >= $prev_start && $nucl_end <= $prev_end) {
+			    $was_prev_used = 1;
+			    last;
+			}
 		    } else {
 			if ($nucl_start >= $prev_start && $nucl_start <= $prev_end) {
 			    $was_prev_used = 1;
 			    last;
 			}
 			if ($nucl_end >= $prev_start && $nucl_end <= $prev_end) {
+			    $was_prev_used = 1;
+			    last;
+			}
+			if ($nucl_start <= $prev_start && $nucle_end >= $prev_end) {
 			    $was_prev_used = 1;
 			    last;
 			}
