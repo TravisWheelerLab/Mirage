@@ -14,13 +14,16 @@ use DisplayProgress;
 
 # Subroutines
 sub ParseArgs;
+sub ParseGTF;
 sub GetMappedSeqMSA;
 sub ParseAFA;
 sub RecordSplicedMSA;
 sub ReduceMSAToSpecies;
 sub FindGhostExons;
 sub FindAliQualityDrops;
-
+sub GenTransMSAs;
+sub GetMapSummaryStats;
+sub CollapseAndCountOverlaps;
 
 
 
@@ -86,14 +89,19 @@ $tildedir = ConfirmDirectory($tildedir);
 close($tildedir_check);
 my $SpeciesGuide = OpenInputFile($ARGV[1]);
 my %SpeciesToGenomes;
+my %SpeciesHasGTF;
+my %GTFStartsToEnds;
+my %GTFEndsToStarts;
 my %ChrLensBySpecies;
 while (my $line = <$SpeciesGuide>) {
 
     $line =~ s/\n|\r//g;
-    next if ($line !~ /(\S+)\s+(\S+)\s+\S+/);
+    next if ($line !~ /(\S+)\s+(\S+)\s+(\S+)/);
     my $species = lc($1);
     my $genome = $2;
+    my $gtf = $3;
     $genome =~ s/\~\//$tildedir/;
+    $gtf =~ s/\~\//$tildedir/;
 
     $SpeciesToGenomes{$species} = $genome;
 
@@ -117,6 +125,14 @@ while (my $line = <$SpeciesGuide>) {
 	}
     }
     close ($SstatOut);
+
+    # We'll read in the species' GTF info so we can determine whether
+    # any ghost exons we hit on are known coding regions (and not just
+    # members of proteoforms that are missing from our database).
+    if (-e $gtf) {
+	$SpeciesHasGTF{$species} = 1;
+	ParseGTF($species,$gtf);
+    }
     
 }
 close($SpeciesGuide);
@@ -228,8 +244,15 @@ for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
     $total_ghost_exons += $num_ghost_exons;
     $total_ghosts_busted += $num_ghosts_busted;
 
-    # If we busted any ghosts, take note of this gene
-    push(@GhostlyGenes,$gene) if ($num_ghosts_busted);
+    # If we didn't bust any ghosts, then there aren't any MSAs to build or
+    # GTFs to examine... yay?
+    next if (!$num_ghosts_busted);
+
+    # Eeek! Ghosts!
+    push(@GhostlyGenes,$gene);
+
+    # Time to get granular about it!
+    
     
 }
 
@@ -297,30 +320,22 @@ if ($total_ghost_exons == 0) {
     system("rm -rf $outdirname");
     print "\n  No potentially-unannotated exons detected\n\n";
 
-} else {
-
-    # We'll list off all of our "busted" genes in a special file
-    my $final_outfname = $outdirname.'Genes-With-Ghost-Exons.out';
-    my $final_outf = OpenOutputFile($final_outfname);
-    my $num_busted_genes = scalar(@GhostlyGenes);
-    print $final_outf "$num_busted_genes genes with at least one mapped ghost exon:\n";
-    foreach my $gene (sort(@GhostlyGenes)) {
-	print $final_outf "  $gene\n";
-    }
-    print $final_outf "\n";
-    close($final_outf);
-
-    # WOOOOOOO, WE FOUND AT LEAST ONE THING TO POSSIBLY NOT CROSS-MAP!
-    my $bust_rate = int(1000.0*$total_ghosts_busted/$total_ghost_exons)/10;
-    print "\n";
-    print "  $total_ghost_exons possible unannotated exons detected,\n";
-    print "  $total_ghosts_busted of which have some sequence-level support ($bust_rate\%)\n";
-    print "\n";
-    print "  Results in '$outdirname'\n";
-    print "  List of genes with successfully mapped ghost exons in '$final_outfname'\n";
-    print "\n";
+    exit(0);
 
 }
+
+# We'll list off all of our "busted" genes in a special file
+my $final_outfname = $outdirname.'Genes-With-Ghost-Exons.out';
+
+# WOOOOOOO, WE FOUND AT LEAST ONE THING TO POSSIBLY NOT CROSS-MAP!
+my $bust_rate = int(1000.0*$total_ghosts_busted/$total_ghost_exons)/10;
+print "\n";
+print "  $total_ghost_exons possible unannotated exons detected,\n";
+print "  $total_ghosts_busted of which have some sequence-level support ($bust_rate\%)\n";
+print "\n";
+print "  Results in '$outdirname'\n";
+print "  List of genes with successfully mapped ghost exons in '$final_outfname'\n";
+print "\n";
 
 
 1;
@@ -371,6 +386,67 @@ sub ParseArgs
 
     return \%Options;
     
+}
+
+
+
+
+
+###############################################################
+#
+#  Function: ParseGTF
+#
+sub ParseGTF
+{
+    my $species = shift;
+    my $gtf_fname = shift;
+
+    my $gtf = OpenInputFile($gtf_fname);
+    while (my $line = <$gtf>) {
+
+	my $entry_type = '';
+        if ($line =~ /^\S+\s+\S+\s+(\S+)/) {
+            $entry_type = lc($1);
+        }
+        
+        if ($line =~ /^\#/ || ($entry_type ne 'exon' && $entry_type ne 'cds')) {
+            next;
+        }
+
+        # Note that startPos is always less than endPos, even when we're
+        # indexing into the reverse complement.
+        $line =~ /^(\S+)\s+\S+\s+\S+\s+(\d+)\s+(\d+)\s+\S+\s+([\+\-])/;
+        my $chr     = $1;
+        my $start   = $2;
+        my $end     = $3;
+        my $revcomp = $4;
+
+	if ($revcomp eq '-') {
+	    $chr = $chr.'[revcomp]';
+	    my $temp = $start;
+	    $start = $end;
+	    $end = $temp;
+	}
+
+	my $key1 = $species.'|'.$chr.'|'.$start;
+	my $key2 = $species.'|'.$chr.'|'.$end;
+
+	# NOTE: This hash is declared top-level of script
+	if ($GTFStartsToEnds{$key1}) {
+	    $GTFStartsToEnds{$key1} = $GTFStartsToEnds{$key1}.'|'.$end;
+	} else {
+	    $GTFStartsToEnds{$key1} = $end;
+	}
+
+	if ($GTFEndsToStarts{$key2}) {
+	    $GTFEndsToStarts{$key2} = $GTFEndsToStarts{$key2}.'|'.$start;
+	} else {
+	    $GTFEndsToStarts{$key2} = $start;
+	}
+	
+    }
+    close($gtf);
+
 }
 
 
@@ -1416,7 +1492,8 @@ sub FindGhostExons
     my $ghosts_busted = 0;
 
     # We'll just go hit-by-hit, because that's what's sensible.  'q' for query
-    my $outf = OpenOutputFile($outdirname.$gene.'.out');
+    my $gene_resultdir = CreateDirectory($outdirname.$gene);
+    my $outf = OpenOutputFile($gene_resultdir.'search.out');
     for (my $q=0; $q<$num_ghost_exons; $q++) {
 
 	# Write out the protein sequence to our protein sequence file.
@@ -1554,7 +1631,9 @@ sub FindGhostExons
 	close($blatf);
 
 	# For outputting, let's get the textual representation of direction
-	# into the chromosome name
+	# into the chromosome name (after recording the chromosome length of
+	# our target species, for exon overlap checking).
+	my $chr_len = $ChrLensBySpecies{$target_species.'|'.$chr};
 	$chr = $chr.'[revcomp]' if ($revcomp);
 
 	# Speaking of outputting, let's just have these tidbits on-hand, too
@@ -1616,9 +1695,144 @@ sub FindGhostExons
 	#print $outf "\n";
 
 	for (my $hit=0; $hit<$num_blat_hits; $hit++) {
+
 	    print $outf "    + Aminos $HitAminoStarts[$hit]..$HitAminoEnds[$hit] ";
 	    print $outf "mapped to $target_species $chr:$HitNuclStarts[$hit]..$HitNuclEnds[$hit] ";
 	    print $outf "($HitEVals[$hit])\n";
+
+	    # Does this hit overlap with a known (GTF-recorded) coding region?
+	    my $start_nucl = $HitNuclStarts[$hit];
+	    my $end_nucl = $HitNuclEnds[$hit];
+
+	    my $keybase = $target_species.'|'.$chr.'|';
+	    my $gtf_overlap = 0;
+
+	    my $increment = 1;
+	    $increment = -1 if ($revcomp);
+	    for (my $i=$start_nucl; $i<=$end_nucl; $i+=$increment) {
+
+		my $key = $keybase.$i;
+
+		if ($GTFStartsToEnds{$key}) {
+
+		    my @EndList;
+		    if ($revcomp) {
+			@EndList = sort { $a <=> $b } split(/\|/,$GTFStartsToEnds{$key});
+		    } else {
+			@EndList = sort { $b <=> $a } split(/\|/,$GTFStartsToEnds{$key});
+		    }
+
+		    $gtf_overlap = $i.'..'.$EndList[0];
+		    last;
+		    
+		}
+
+		if ($GTFEndsToStarts{$key}) {
+
+		    my @StartList;
+		    if ($revcomp) {
+			@StartList = sort { $b <=> $a } split(/\|/,$GTFEndsToStarts{$key});
+		    } else {
+			@StartList = sort { $a <=> $b } split(/\|/,$GTFEndsToStarts{$key});
+		    }
+		    
+		    $gtf_overlap = $StartList[0].'..'.$i;
+		    last;
+		    
+		}
+		
+	    }
+
+	    # Aw rats, overlap!
+	    if ($gtf_overlap) {
+		print $outf "      - Overlaps with annotated exon $chr:$gtf_overlap\n";
+		next;
+	    }
+
+	    # One last thing that we'll do is scan backwards and forwards to the
+	    # next annotated exon to make sure the range we've found isn't square
+	    # in the middle of an exon.
+	    if ($revcomp) {
+
+		my $low_scan = $end_nucl-1;
+		while ($low_scan) {
+		    if ($GTFEndsToStarts{$low_scan}) {
+			my @StartList = sort { $b <=> $a } split(/\|/,$GTFEndsToStarts{$low_scan});
+			my $highest_start = $StartList[0];
+			if ($highest_start > $end_nucl) {
+			    $gtf_overlap = $highest_start.'..'.$low_scan;
+			}
+			last;
+		    }
+		    $low_scan--;
+		}
+
+	    } else {
+
+		my $low_scan = $start_nucl-1;
+		while ($low_scan) {
+		    if ($GTFStartsToEnds{$low_scan}) {
+			my @EndList = sort { $b <=> $a } split(/\|/,$GTFStartsToEnds{$low_scan});
+			my $highest_end = $EndList[0];
+			if ($highest_end > $start_nucl) {
+			    $gtf_overlap = $low_scan.'..'.$highest_end;
+			}
+			last;
+		    }
+		    $low_scan--;
+		}
+
+	    }
+
+	    # Aw Rats, OverLap!
+	    if ($gtf_overlap) {
+		print $outf "      - Overlaps with annotated exon $chr:$gtf_overlap\n";
+		next;
+	    }
+
+	    # FINAL SCAN! Finding a high point and seeing if it's lowest corresponding
+	    # low point is problematic (i.e., implies that this exon is known)
+	    if ($revcomp) {
+
+		my $high_scan = $start_nucl-1;
+		while ($high_scan < $chr_len) {
+		    if ($GTFStartsToEnds{$high_scan}) {
+			my @EndList = sort { $a <=> $b } split(/\|/,$GTFStartsToEnds{$high_scan});
+			my $lowest_end = $EndList[0];
+			if ($lowest_end < $start_nucl) {
+			    $gtf_overlap = $high_scan.'..'.$lowest_end;
+			}
+			last;
+		    }
+		    $high_scan++;;
+		}
+
+	    } else {
+
+		my $high_scan = $end_nucl+1;
+		while ($high_scan < $chr_len) {
+		    if ($GTFEndsToStarts{$high_scan}) {
+			my @StartList = sort { $a <=> $b } split(/\|/,$GTFEndsToStarts{$high_scan});
+			my $lowest_start = $StartList[0];
+			if ($lowest_start < $end_nucl) {
+			    $gtf_overlap = $lowest_start.'..'.$high_scan;
+			}
+			last;
+		    }
+		    $high_scan++;
+		}
+
+	    }
+	    
+	    # AW RATS, OVERLAP!
+	    if ($gtf_overlap) {
+		print $outf "      - Overlaps with annotated exon $chr:$gtf_overlap\n";
+		next;
+	    }
+
+	    # AW GOOD RATS, NO OVERLAP!!!
+	    print $outf "      + No observed overlap with annotated exons\n";
+	    
 	}
 	
 	print $outf "\n";
@@ -1855,6 +2069,282 @@ sub FindAliQualityDrops
     return \@QDroppers;
     
 }
+
+
+
+
+
+
+###############################################################
+#
+#  Function:  GetMapSummaryStats
+#
+sub GetMapSummaryStats
+{
+
+    my $ghostlygenes_ref = shift;
+    my @GhostlyGenes = @{$ghostlygenes_ref};
+
+    my $outf = $outdirname.'Search-Summary.out';
+    
+    foreach my $gene (@GhostlyGenes) {
+	
+	my $infname = $outdirname.$gene.'search.out';
+	my $inf = OpenInputFile($infname);
+	
+	print $outf "\n  $gene\n";
+	
+	# We'll want to know how many ranges had mappings for this gene
+	# (e.g., distinct blocks in the MSA).
+	my $num_mapped_ranges = 0;
+	my %MapsByExonRange;
+	while (my $line = <$inf>) {
+	    
+	    # The sure-fire sign of a good time!
+	    if ($line =~ /\[\+\]/) {
+		
+		# Where in the MSA is this mapping from?
+		$line = <$inf>;
+		$line =~ /Exons? (\S+)/;
+		my $exon_range = $1;
+		
+		# Which genome was being searched against?
+		$line = <$inf>;
+		$line =~ /\: (\S+) \((\S+)\)\s*$/;
+		my $target_species = $1;
+		my $target_region = $2;
+		
+		# Which species provided the protein sequence?
+		$line = <$inf>;
+		$line =~ /\: (\S+)/;
+		my $source_species = $1;
+		
+		# What was the protein sequence we were searching with?
+		# Note that mapped residues are uppercase, so we can
+		#   compute the percentage of the search sequence that
+		#   was mapped.
+		$line = <$inf>;
+		$line =~ /\: (\S+)/;
+		my $num_mapped_chars = 0;
+		my $num_unmapped_chars = 0;
+		foreach my $char (split(//,$line)) {
+		    if ($char =~ /[A-Z]/) { $num_mapped_chars++;   }
+		    else                  { $num_unmapped_chars++; }
+		}
+		my $search_seq_len = $num_mapped_chars + $num_unmapped_chars;
+		my $pct_seq_mapped = int(1000.0 * $num_mapped_chars / $search_seq_len) / 10.0;
+		
+		# How many BLAT hits? (this plays into the final part of our hash val)
+		$line = <$inf>;
+		$line =~ /\: (\d+)/;
+		my $num_hits = $1;
+		
+		# We'll store this data in a hash, which we can then sort by
+		# MSA position (further broken down by target species).
+		my $hash_val = $target_species.'|'.$target_region.'|'.$source_species;
+		$hash_val = $hash_val.'|'.$search_seq_len.'|'.$pct_seq_mapped;
+		
+		# Add the list of hit regions to 
+		for (my $i=0; $i<$num_hits; $i++) {
+		    $line = <$inf>;
+		    $line =~ /mapped to \S+ \S+\:(\d+\.\.\d+)/;
+		    my $map_range = $1;
+		    $line = <$inf>;
+		    my $known_exon_overlap = 1;
+		    $known_exon_overlap = 0 if ($line =~ /\+ No overlap/);
+		    $hash_val = $hash_val.'|'.$map_range.'/'.$known_exon_overlap;
+		}
+		
+		if ($MapsByExonRange{$exon_range}) {
+		    $MapsByExonRange{$exon_range} = $MapsByExonRange{$exon_range}.'&'.$hash_val;
+		} else {
+		    $MapsByExonRange{$exon_range} = $hash_val;
+		    $num_mapped_ranges++;
+		}
+		
+	    }
+	    
+	}
+	
+	close($inf);
+	
+	# Print out the number of mapped ranges 
+	print $outf "  $num_mapped_ranges exon range";
+	print $outf "s" if ($num_mapped_ranges > 1);
+	print $outf " in MSA produced ghost exon mappings\n";
+	
+	# We now have all the info. we could need to grab from the file,
+	# so it's time to organize it!
+	foreach my $exon_range (sort keys %MapsByExonRange) {
+	    
+	    my %MapsByTargetSpecies;
+	    my $num_targets_in_range = 0;
+	    foreach my $map_in_range (split(/\&/,$MapsByExonRange{$exon_range})) {
+
+		$map_in_range =~ /^([^\|]+)\|/;
+		my $species = $1;
+		
+		if ($MapsByTargetSpecies{$species}) {
+		    $MapsByTargetSpecies{$species} = $MapsByTargetSpecies{$species}.'&'.$map_in_range;
+		} else {
+		    $MapsByTargetSpecies{$species} = $map_in_range;
+		    $num_targets_in_range++;
+		}
+		
+	    }
+	    
+	    # Announce this range
+	    print $outf "\n    > MSA exon";
+	    print $outf "s" if ($exon_range =~ /\.\./);
+	    print $outf " $exon_range: Found mappings to $num_targets_in_range genome";
+	    print $outf "s" if ($num_targets_in_range > 1);
+	    print $outf "\n";
+	    
+	    # We can now consider searches within this exon range by order
+	    # of target species.
+	    foreach my $target_species (sort keys %MapsByTargetSpecies) {
+		
+		my @MapsToSpecies = split(/\&/,$MapsByTargetSpecies{$target_species});
+		
+		# We'll go ahead and grab the region of the target species' genome that
+		# was mapped to (should be consistent...)
+		$MapsToSpecies[0] =~ /^[^\|]+\|([^\|]+)\|/;
+		my $target_species_region = $1;
+		
+		my $num_maps_to_species = scalar(@MapsToSpecies);
+		
+		# As is customary in this region, we must declare the number of mappings
+		# made to this species' genome.
+		print $outf "\n        $num_maps_to_species mapping";
+		print $outf "s" if ($num_maps_to_species > 1);
+		print $outf " to target species $target_species ($target_species_region)\n";
+		
+		# We'll want to record all of the genomic coordinate ranges that we hit
+		# to so that we can infer the number of putative exons suggested by the
+		# sum of mappings.
+		my @RangeList;
+		my @KnownExon;
+		
+		foreach my $map_to_species (@MapsToSpecies) {
+		    
+		    # Recover the details of our mapping
+		    my @MappingDetails = split(/\|/,$map_to_species);
+		    my $source_species = $MappingDetails[2];
+		    my $search_seq_len = $MappingDetails[3];
+		    my $pct_seq_mapped = $MappingDetails[4];
+		    
+		    # Pull in all of the genomic ranges we mapped to
+		    for (my $i=5; $i<scalar(@MappingDetails); $i++) {
+			$MappingDetails[$i] =~ /^([^\/]+)\/(\d)$/;
+			push(@RangeList,$1);
+			push(@KnownExon,$2);
+		    }
+		    
+		    # Yell about 'em!
+		    print $outf "          + $source_species:";
+		    print $outf " $pct_seq_mapped\% of $search_seq_len-amino search sequence mapped\n";
+		    
+		}
+		
+		# Before we move along, we'll use the genomic coordinates to determine
+		# how many distinct putative exons are suggested by our data
+		my ($num_suggested_exons,$num_annotated_exons)
+		    = CollapseAndCountOverlaps(\@RangeList,\@KnownExon);
+		print $outf "          = $num_suggested_exons unique exon";
+		print $outf "s" if ($num_suggested_exons > 1);
+		print $outf " suggested ($num_annotated_exons ";
+		if ($num_annotated_exons == 1) { print $outf "has";  }
+		else                           { print $outf "have"; }
+		print $outf " GTF annotations)\n";
+		
+	    }
+	    
+	}
+	
+    }
+
+    close($outf);
+    
+}
+
+
+
+
+
+
+#################################################################
+#
+#  Function:  CollapseAndCountOverlaps
+#
+sub CollapseAndCountOverlaps
+{
+    my $range_list_ref = shift;
+    my @RangeList = @{$range_list_ref};
+
+    my $known_exon_ref = shift;
+    my @KnownExon = @{$known_exon_ref};
+    
+    my @RangeStarts;
+    my @RangeEnds;
+    foreach my $range (@RangeList) {
+	$range =~ /^(\d+)\.\.(\d+)$/;
+	push(@RangeStarts,$1);
+	push(@RangeEnds,$2);
+    }
+    
+    my $num_ranges = scalar(@RangeList);
+    
+    # Because we're just identifying overlaps, we can swap things around
+    # so that start < end (i.e., de-revcomp)
+    if ($RangeStarts[0] > $RangeEnds[0]) {
+	for (my $i=0; $i<$num_ranges; $i++) {
+	    my $temp = $RangeStarts[$i];
+	    $RangeStarts[$i] = $RangeEnds[$i];
+	    $RangeEnds[$i] = $temp;
+	}
+    }
+    
+    my %StartsToEnds;
+    my %StartsToKnownExons;
+    for (my $i=0; $i<$num_ranges; $i++) {
+	my $start = $RangeStarts[$i];
+	my $end = $RangeEnds[$i];
+	if (!$StartsToEnds{$start}
+	    || ($StartsToEnds{$start} && $StartsToEnds{$start} < $end)) {
+	    $StartsToEnds{$start} = $end;
+	}
+	if ($KnownExon[$i]) {
+	    $StartsToKnownExons{$start} = 1;
+	}
+    }
+    
+    my @CollapsedStarts = sort { $a <=> $b } keys %StartsToEnds;
+    my @CollapsedEnds;
+    foreach my $start (@CollapsedStarts) {
+	push(@CollapsedEnds,$StartsToEnds{$start});
+    }
+
+    my $num_known = 0;
+    my $is_known = 0;
+    $is_known = 1 if ($StartsToKnownExons{$CollapsedStarts[0]});
+    my $num_exons = 1;
+    my $current_end = $CollapsedEnds[0];
+    for (my $i=1; $i<scalar(@CollapsedEnds); $i++) {
+	if ($current_end < $CollapsedStarts[$i]) {
+	    $num_exons++;
+	    $num_known += $is_known;
+	    $is_known = 0;
+	}
+	$is_known = 1 if ($StartsToKnownExons{$CollapsedStarts[$i]});
+	$current_end = MAX($current_end,$CollapsedEnds[$i]);
+    }
+
+    $num_known += $is_known;
+
+    return ($num_exons,$num_known);
+    
+}
+
 
 
 
