@@ -17,11 +17,11 @@ sub ParseArgs;
 sub ParseGTF;
 sub GetMappedSeqMSA;
 sub ParseAFA;
-sub RecordSplicedMSA;
+sub RecordMSA;
 sub ReduceMSAToSpecies;
 sub FindGhostExons;
 sub FindAliQualityDrops;
-sub GenTransMSAs;
+sub RecordGhostMSAs;
 sub GetMapSummaryStats;
 sub CollapseAndCountOverlaps;
 
@@ -221,10 +221,11 @@ for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
     my @SeqNames = @{$seqnames_ref};
     my %SpeciesToChrs = %{$speciestochrs_ref};
 
-    # Do we want to write this out to a spliced msa file?
-    if ($save_msas) {
-	RecordSplicedMSA($spliced_dirname.$gene.'.afa',\@MSA,\@SeqNames,$num_seqs,$msa_len);
-    }
+    # At this point, it makes sense to create the result directory for this gene
+    my $gene_outdir = CreateDirectory($outdirname.$gene);
+
+    # Get your butt into this file, mister!
+    RecordMSA(\@MSA,\@SeqNames,$num_seqs,$msa_len,$gene_outdir.$gene.'-seqs.afa');
 
     # Now we'll reduce our MSA even further, down to just one sequence per
     # species!
@@ -234,6 +235,9 @@ for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
     @MapMSA = @{$mapmsa_ref};
     my @SpeciesNames = @{$seqnames_ref};
     my $num_species = $num_seqs;
+
+    # Write this one out, too!
+    RecordMSA(\@MSA,\@SpeciesNames,$num_seqs,$msa_len,$gene_outdir.$gene.'-species.afa');
     
     # Now that we have our super-reduced splice-site-ified MSA, let's get real nasty
     # with it (by way of locating exons suggestive of "ghosts")!
@@ -251,8 +255,8 @@ for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
     # Eeek! Ghosts!
     push(@GhostlyGenes,$gene);
 
-    # Time to get granular about it!
-    
+    # Time to build some gorgeous translated MSAs!
+    RecordGhostMSAs($gene);
     
 }
 
@@ -318,14 +322,15 @@ if ($total_ghost_exons == 0) {
 
     # Wowza yowza bo-bowza!  Really?  Nothing?  Okay...
     system("rm -rf $outdirname");
-    print "\n  No potentially-unannotated exons detected\n\n";
+    print "\n  No potentially unannotated exons detected\n\n";
 
     exit(0);
 
 }
 
-# We'll list off all of our "busted" genes in a special file
-my $final_outfname = $outdirname.'Genes-With-Ghost-Exons.out';
+# We'll write out summary statistics for the full collection of genes
+# that had hits
+GetMapSummaryStats(\@GhostlyGenes);
 
 # WOOOOOOO, WE FOUND AT LEAST ONE THING TO POSSIBLY NOT CROSS-MAP!
 my $bust_rate = int(1000.0*$total_ghosts_busted/$total_ghost_exons)/10;
@@ -333,8 +338,7 @@ print "\n";
 print "  $total_ghost_exons possible unannotated exons detected,\n";
 print "  $total_ghosts_busted of which have some sequence-level support ($bust_rate\%)\n";
 print "\n";
-print "  Results in '$outdirname'\n";
-print "  List of genes with successfully mapped ghost exons in '$final_outfname'\n";
+print "  Results in '$outdirname' (Summary info in file 'Search-Summary.out')\n";
 print "\n";
 
 
@@ -875,17 +879,14 @@ sub ParseAFA
 sub RecordSplicedMSA
 {
 
-    my $outfname = shift;
     my $msa_ref = shift;
     my $seqnames_ref = shift;
     my $num_seqs = shift;
     my $msa_len = shift;
+    my $outfname = shift;
 
     my @MSA = @{$msa_ref};
     my @SeqNames = @{$seqnames_ref};
-    
-    # Duplicates are *not* invited to my birthday party
-    RunSystemCommand("rm $outfname") if (-e $outfname);
     
     my $outf = OpenOutputFile($outfname);
     for (my $i=0; $i<$num_seqs; $i++) {
@@ -1491,9 +1492,10 @@ sub FindGhostExons
     # We'll tally up the number of successes
     my $ghosts_busted = 0;
 
+    # Prepare to write some stuff to a file!
+    my $outf = OpenOutputFile($outdirname.$gene.'/search.out');
+
     # We'll just go hit-by-hit, because that's what's sensible.  'q' for query
-    my $gene_resultdir = CreateDirectory($outdirname.$gene);
-    my $outf = OpenOutputFile($gene_resultdir.'search.out');
     for (my $q=0; $q<$num_ghost_exons; $q++) {
 
 	# Write out the protein sequence to our protein sequence file.
@@ -2067,6 +2069,219 @@ sub FindAliQualityDrops
     }
 
     return \@QDroppers;
+    
+}
+
+
+
+
+
+
+###############################################################
+#
+#  Function:  RecordGhostMSAs
+#
+sub RecordGhostMSAs
+{
+    my $gene = shift;
+
+    # First things first, we're going to need to grab ahold of this gene's dir
+    my $genedir = ConfirmDirectory($outdirname.$gene);
+
+    # Open up the file with all of the hits for this gene and read in all
+    # successful maps
+    my $inf = OpenInputFile($genedir.'search.out');
+
+    my %TargetSpeciesToHits;
+    while (my $line = <$inf>) {
+
+	next if ($line !~ /Search success/);
+
+	$line = <$inf>; # MSA position info.
+	
+	$line = <$inf>; # Full target search region
+	$line =~ /\: (\S+) \(([^\:]+)\:/;
+	my $target_species = $1;
+	my $target_chr = $2;
+	my $revcomp = 0;
+	$revcomp = 1 if ($target_chr =~ /\[revcomp\]/);
+
+	$line = <$inf>; # The source (amino) species
+	$line =~ /\: (\S+)/;
+	my $source_species = $1;
+
+	$line = <$inf>; # The sequence searched against the target genome
+	$line =~ /\: (\S+)/;
+	my $source_seq = uc($1);
+
+	$line = <$inf>; # How many separate BLAT hits did we get?
+	$line =~ /\: (\d+)/;
+	my $num_blat_hits = $1;
+
+	my $wide_start = 0;
+	my $wide_end = 0;
+	my $novel_exon = 1;
+	while ($num_blat_hits) {
+
+	    $line = <$inf>;
+	    $line =~ /\:(\d+)\.\.(\d+)/;
+	    my $hit_start = $1;
+	    my $hit_end = $2;
+
+	    if ($revcomp) {
+		if (!$wide_start || $hit_start > $wide_start) {
+		    $wide_start = $hit_start;
+		}
+		if (!$wide_end || $hit_end < $wide_end) {
+		    $wide_end = $hit_end;
+		}
+	    } else {
+		if (!$wide_start || $hit_start < $wide_start) {
+		    $wide_start = $hit_start;
+		}
+		if (!$wide_end || $hit_end > $wide_end) {
+		    $wide_end = $hit_end;
+		}
+	    }
+
+	    $line = <$inf>;
+	    $novel_exon = 0 if ($line =~ /\- Overlaps/);
+
+	    $num_blat_hits--;
+	    
+	}
+
+	# Time to record this bad boi!
+	my $hash_val = $target_chr.':'.$wide_start.'..'.$wide_end;
+	$hash_val = $hash_val.'|'.$source_species.':'.$source_seq;
+	$hash_val = $hash_val.'|'.$novel_exon;
+
+	if ($TargetSpeciesToHits{$target_species}) {
+	    $TargetSpeciesToHits{$target_species} = $TargetSpeciesToHits{$target_species}.'&'.$hash_val;
+	} else {
+	    $TargetSpeciesToHits{$target_species} = $hash_val;
+	}
+
+    }
+
+    close($inf);
+
+    # Now we can run through our species actually building up some dang MSAs!
+    foreach my $target_species (keys %TargetSpeciesToHits) {
+
+	my @AllSpeciesHits = split(/\&/,$TargetSpeciesToHits{$target_species});
+
+	# We'll need to make sure that our hits are split into exon groups
+	my $num_exons = 0;
+	my @ExonChrs; # Just to be super sure!
+	my @ExonNuclStarts;
+	my @ExonNuclEnds;
+	my @ExonHits;
+	foreach my $hit (@AllSpeciesHits) {
+
+	    $hit =~ /^([^\:]+)\:(\d+)\.\.(\d+)/;
+	    my $hit_chr = $1;
+	    my $hit_start = $2;
+	    my $hit_end = $3;
+
+	    my $revcomp = 0;
+	    $revcomp = 1 if ($hit_chr =~ /\[revcomp\]/);
+
+	    if (!$num_exons) {
+		push(@ExonChrs,$hit_chr);
+		push(@ExonNuclStarts,$hit_start);
+		push(@ExonNuclEnds,$hit_end);
+		$ExonHits[0] = $hit;
+		$num_exons++;
+		next;
+	    }
+
+	    my $exon_group = -1;
+	    for (my $i=0; $i<$num_exons; $i++) {
+
+		next if ($hit_chr ne $ExonChrs[$i]);
+
+		if ($revcomp) {
+
+		    if (($hit_start > $ExonNuclStarts[$i] && $hit_end < $ExonNuclStarts[$i])
+			|| ($hit_end < $ExonNuclEnds[$i] && $hit_start > $ExonNuclEnds[$i])) {
+			$exon_group = $i;
+			$ExonNuclStarts[$i] = Max($hit_start,$ExonNuclStarts[$i]);
+			$ExonNuclEnds[$i] = Min($hit_end,$ExonNuclEnds[$i]);
+			last;
+		    }
+
+		} else {
+		    
+		    if (($hit_start < $ExonNuclStarts[$i] && $hit_end > $ExonNuclStarts[$i])
+			|| ($hit_end > $ExonNuclEnds[$i] && $hit_start < $ExonNuclEnds[$i])) {
+			$exon_group = $i;
+			$ExonNuclStarts[$i] = Min($hit_start,$ExonNuclStarts[$i]);
+			$ExonNuclEnds[$i] = Max($hit_end,$ExonNuclEnds[$i]);
+			last;
+		    }
+
+		}
+		
+	    }
+
+	    if ($exon_group == -1) {
+		push(@ExonChrs,$hit_chr);
+		push(@ExonNuclStarts,$hit_start);
+		push(@ExonNuclEnds,$hit_end);
+		push(@ExonHits,$hit);
+		$num_exons++;
+	    } else {
+		$ExonHits[$exon_group] = $ExonHits[$exon_group].'&'.$hit;
+	    }
+	    
+	}
+
+	
+	# Them's some exons!  Now we can go through each exon-group and generate
+	# an MSA representing the translated target sequence and each of the source
+	# species' amino acid sequences
+	for (my $i=0; $i<$num_exons; $i++) {
+
+	    my $chr = $ExonChrs[$i];
+	    my $revcomp = 0;
+	    if ($chr =~ /\[revcomp\]/) {
+		$chr =~ s/\[revcomp\]//;
+		$revcomp = 1;
+	    }
+	    
+	    my $search_start = $ExonNuclStarts[$i];
+	    my $search_end = $ExonNuclEnds[$i];
+
+	    my $extra_window;
+	    if ($revcomp) {
+		$search_start += $extra_window;
+		$search_end -= $extra_window;
+	    } else {
+		$search_start -= $extra_window;
+		$search_end += $extra_window;
+	    }
+
+	    my $sfetch_cmd = $sfetch.' -range '.$search_start.'..'.$search_end;
+	    $sfetch_cmd = $sfetch_cmd.' '.$SpeciesToGenomes{$target_species}.' '.$chr;
+	    my $nucl_inf = OpenSystemCommand($sfetch_cmd);
+	    my $header_line = <$nucl_inf>;
+	    my $nucl_seq;
+	    while (my $line = <$nucl_inf>) {
+		$line =~ s/\n|\r//g;
+		$nucl_seq = $nucl_seq.lc($line);
+	    }
+	    close($nucl_inf);
+
+	    # We'll need to figure out which reading frame we're hanging out in.
+	    # To do this, we'll translate out all three and find the one that aligns
+	    # best to our first hit.
+	    
+	}
+
+    }
+
+    
     
 }
 
