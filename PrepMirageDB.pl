@@ -156,7 +156,7 @@ while (my $line = <$inf>) {
 	    } else {
 		#close($outf); RunSystemCommand("rm \"$outfname\"");
 		#close($namechangef); RunSystemCommand("rm \"$namechangefname\"");
-		$print $excludef "- Failed to determine id (id:[id]):\n  $line\n";
+		print $excludef "- Failed to determine id (id:[id]):\n  $line\n";
 		$skip_seq = 1;
 		next;
 	    }
