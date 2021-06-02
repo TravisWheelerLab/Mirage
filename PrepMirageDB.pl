@@ -37,15 +37,20 @@ my $outfname = $infname_base.'.mirage-ready.'.$infname_ext;
 if (-e $outfname) { die "\n  Mirage-ready database '$outfname' already exists\n\n"; }
 my $outf = OpenOutputFile($outfname);
 
-# We'll also want a file to track name changes
+# We'll also want files to track name changes and
+# sequences that we couldn't convert to a Mirage-friendly form
 my $namechangefname = $infname_base.'.name-changes.out';
 open(my $namechangef,'>',$namechangefname);
+
+my $excludefname = $infname_base.'.parse-failed.out';
+open(my $excludef,'>',$excludefname);
 
 # If we're getting non-Miragey sequence names, we'll want to be able to generate our
 # own ID numbers
 my %NameUniquenessCheck;
 
 # Generate our Mirage-ready version of the protein database
+my $skip_seq = 0;
 while (my $line = <$inf>) {
 
     # Clean it up
@@ -53,6 +58,9 @@ while (my $line = <$inf>) {
 
     # Is this a header line?
     if ($line =~ /^\>(.*)$/) {
+
+	# Let's just go ahead and assume we won't be skipping this bad boi
+	$skip_seq = 0;
 
 	my $full_header = $1;
 
@@ -171,7 +179,14 @@ while (my $line = <$inf>) {
 
 	} else { ################################################################### 3
 
-	    my ($species,$genes,$id,$new_comments) = ParseUniProt($orig_name);
+	    my ($species,$genes,$id,$new_comments,$error) = ParseUniProt($orig_name);
+
+	    # If we ran into an issue with this sequence, complain!
+	    if ($error) {
+		print $excludef "$error"; # includes newlines
+		$skip_seq = 1;
+		next;
+	    }
 
 	    # If we already have comments, add the 'new' comments to the end
 	    if ($comments && $new_comments) {
@@ -210,7 +225,7 @@ while (my $line = <$inf>) {
     } else {
 
 	# Sequence line: copy-paste
-	print $outf "$line\n";
+	print $outf "$line\n" if (!$skip_seq);
 
     }
 
@@ -220,6 +235,7 @@ while (my $line = <$inf>) {
 close($inf);
 close($outf);
 close($namechangef);
+close($excludef);
 
 # If there's no difference between the input file and the output file,
 # then our work was unnecessary (but it's always empowering to know that
@@ -230,7 +246,8 @@ close($diff);
 if ($num_diff_lines =~ /^\s*0\s*$/) {
 
     RunSystemCommand("rm \"$outfname\"");
-    RunSystemCommand("rm \"namechangefname\"");
+    RunSystemCommand("rm \"$namechangefname\"");
+    RunSystemCommand("rm \"$excludefname\"");
     print "\n  Input sequence file is formatted beautifully and ready for Mirage!\n\n";
 
 } else {
@@ -297,7 +314,6 @@ sub ParseUniProt
     $EvidenceMeanings[3] = 'Predicted(4)';
     $EvidenceMeanings[4] = 'Uncertain(5)';
     $EvidenceMeanings[5] = 'No-evidence-indicator';
-
     
     my $species;
     if ($orig_name =~ /OS\=([^\=]+\=?)/) {
@@ -305,9 +321,10 @@ sub ParseUniProt
 	$species =~ s/\s+\S\S\=$//;
 	$species = ReplaceIllegalChars($species);
     } else {
-	close($outf); RunSystemCommand("rm \"$outfname\"");
-	close($namechangef); RunSystemCommand("rm \"$namechangefname\"");
-	die "\n  Failed to determine species (OS=[name]) in '$orig_name'\n\n";
+	#close($outf); RunSystemCommand("rm \"$outfname\"");
+	#close($namechangef); RunSystemCommand("rm \"$namechangefname\"");
+	my $error = "- Failed to determine species (OS=[species]):\n  $orig_name\n";
+	return (0,0,0,0,$error);
     }
     
     # Let's see if it's pulled straight from UniProt (and thus full of juicy tidbits)
@@ -336,9 +353,9 @@ sub ParseUniProt
     } elsif ($long_gene) {
 	$gene = $long_gene;
     } else {
-	close($outf); RunSystemCommand("rm \"$outfname\"");
-	close($namechangef); RunSystemCommand("rm \"$namechangefname\"");
-	die "\n  Failed to determine gene (GN=[name]) in '$orig_name'\n\n";
+	#close($outf); RunSystemCommand("rm \"$outfname\"");
+	#close($namechangef); RunSystemCommand("rm \"$namechangefname\"");
+	return(0,0,0,0,"- Failed to determine gene (GN=[gene]):\n  $orig_name\n");
     }
     
     my $evidence = 6; # No Entry
@@ -355,7 +372,7 @@ sub ParseUniProt
     }
     if ($new_comments) { $new_comments = '#'.$new_comments; }
 
-    return ($species,$gene,$recommended_id,$new_comments);
+    return ($species,$gene,$recommended_id,$new_comments,0);
     
 }
 
