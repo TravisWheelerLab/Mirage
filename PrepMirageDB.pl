@@ -133,9 +133,11 @@ while (my $line = <$inf>) {
 	    if ($lc_line =~ /genes?\:\s*(\S+)/) {
 		$input_genes = $1;
 	    } else {
-		close($outf); RunSystemCommand("rm \"$outfname\"");
-		close($namechangef); RunSystemCommand("rm \"$namechangefname\"");
-		die "\n  Failed to determine gene (gene:[name]) in '$line'\n\n";
+		#close($outf); RunSystemCommand("rm \"$outfname\"");
+		#close($namechangef); RunSystemCommand("rm \"$namechangefname\"");
+		print $excludef "- Failed to determine gene (gene:[gene]):\n  $line\n";
+		$skip_seq = 1;
+		next;
 	    }
 
 	    my $genes = '';
@@ -152,9 +154,11 @@ while (my $line = <$inf>) {
 	    if ($lc_line =~ /id\:\s*(\S+)/) {
 		$id = $1;
 	    } else {
-		close($outf); RunSystemCommand("rm \"$outfname\"");
-		close($namechangef); RunSystemCommand("rm \"$namechangefname\"");
-		die "\n  Failed to determine id (id:[name]) in '$line'\n\n";
+		#close($outf); RunSystemCommand("rm \"$outfname\"");
+		#close($namechangef); RunSystemCommand("rm \"$namechangefname\"");
+		$print $excludef "- Failed to determine id (id:[id]):\n  $line\n";
+		$skip_seq = 1;
+		next;
 	    }
 
 	    my $attempt_num = 0;
@@ -222,10 +226,10 @@ while (my $line = <$inf>) {
 	    
 	}
 
-    } else {
+    } elsif ($skip_seq == 0) {
 
 	# Sequence line: copy-paste
-	print $outf "$line\n" if (!$skip_seq);
+	print $outf "$line\n";
 
     }
 
@@ -257,7 +261,9 @@ if ($num_diff_lines =~ /^\s*0\s*$/) {
     print "  Database preparation complete!\n";
     print "\n";
     print "  Mirage-ready sequence database: $outfname\n";
+    print "\n";
     print "  List of sequence name changes : $namechangefname\n";
+    print "  List of unparseable sequences : $excludefname\n";
     print "\n";
 
 }
