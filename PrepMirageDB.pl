@@ -45,6 +45,10 @@ open(my $namechangef,'>',$namechangefname);
 my $excludefname = $infname_base.'.parse-failed.out';
 open(my $excludef,'>',$excludefname);
 
+# We'll track whether there are any changes made to the input file so that we know
+# if it's good-to-go as-is
+my $num_changes = 0;
+
 # If we're getting non-Miragey sequence names, we'll want to be able to generate our
 # own ID numbers
 my %NameUniquenessCheck;
@@ -111,6 +115,7 @@ while (my $line = <$inf>) {
 	    # If we changed the name, report it -- otherwise, cruise on along!
 	    my $new_name = $species.'|'.$genes.'|'.$adj_id;
 	    if ($new_name ne $orig_name) {
+		$num_changes++;
 		print $namechangef "$orig_name ===[changed-to]==> $new_name\n";
 	    }
 	    
@@ -136,6 +141,7 @@ while (my $line = <$inf>) {
 		#close($outf); RunSystemCommand("rm \"$outfname\"");
 		#close($namechangef); RunSystemCommand("rm \"$namechangefname\"");
 		print $excludef "- Failed to determine gene (gene:[gene]):\n  $line\n";
+		$num_changes++;
 		$skip_seq = 1;
 		next;
 	    }
@@ -157,6 +163,7 @@ while (my $line = <$inf>) {
 		#close($outf); RunSystemCommand("rm \"$outfname\"");
 		#close($namechangef); RunSystemCommand("rm \"$namechangefname\"");
 		print $excludef "- Failed to determine id (id:[id]):\n  $line\n";
+		$num_changes++;
 		$skip_seq = 1;
 		next;
 	    }
@@ -185,6 +192,10 @@ while (my $line = <$inf>) {
 
 	    my ($species,$genes,$id,$new_comments,$error) = ParseUniProt($orig_name);
 
+	    # Regardless of whether we succeeded in parsing the name, there's a
+	    # different name in the output file for this sequence.
+	    $num_changes++;
+
 	    # If we ran into an issue with this sequence, complain!
 	    if ($error) {
 		print $excludef "$error"; # includes newlines
@@ -202,14 +213,14 @@ while (my $line = <$inf>) {
 	    my $adj_id;
 	    if ($id) {
 		my $attempt_num = 0;
-		my $adj_id = $id;
+		$adj_id = $id;
 		while ($NameUniquenessCheck{$species.'|'.$genes.'|'.$adj_id}) {
 		    $attempt_num++;
 		    $adj_id = $id.'.'.$attempt_num;
 		}
 		$NameUniquenessCheck{$species.'|'.$genes.'|'.$adj_id} = 1;
 	    } else {
-		my $adj_id = 1;
+		$adj_id = 1;
 		while ($NameUniquenessCheck{$species.'|'.$genes.'|'.$adj_id}) {
 		    $adj_id++;
 		}
@@ -222,7 +233,7 @@ while (my $line = <$inf>) {
 	    if ($comments) {
 		print $outf " $comments";
 	    }
-	    print $outf "\n";		
+	    print $outf "\n";
 	    
 	}
 
@@ -241,13 +252,7 @@ close($outf);
 close($namechangef);
 close($excludef);
 
-# If there's no difference between the input file and the output file,
-# then our work was unnecessary (but it's always empowering to know that
-# you started off with a beautifully-formatted database!)
-my $diff = OpenSystemCommand("diff \"$infname\" \"$outfname\" \| wc -l");
-my $num_diff_lines = <$diff>;
-close($diff);
-if ($num_diff_lines =~ /^\s*0\s*$/) {
+if ($num_changes == 0) {
 
     RunSystemCommand("rm \"$outfname\"");
     RunSystemCommand("rm \"$namechangefname\"");
