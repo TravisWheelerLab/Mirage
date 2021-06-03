@@ -42,7 +42,7 @@ my $outf = OpenOutputFile($outfname);
 my $namechangefname = $infname_base.'.name-changes.out';
 open(my $namechangef,'>',$namechangefname);
 
-my $excludefname = $infname_base.'.parse-failed.out';
+my $excludefname = $infname_base.'.could-not-parse.out';
 open(my $excludef,'>',$excludefname);
 
 # We'll track whether there are any changes made to the input file so that we know
