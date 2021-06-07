@@ -71,10 +71,12 @@ while (my $line = <$inf>) {
 	# If there are any comments (a '#' followed by whatever) clear 'em out
 	my $orig_name = $full_header;
 	my $comments  = '';
-	if ($full_header =~ /([^\#]+)(\#.*)/) {
+	if ($full_header =~ /([^\#]+)\#(.*)/) {
 	    $orig_name = $1;
 	    $comments  = $2;
 	    $orig_name =~ s/\s+$//g;
+	    $comments  =~ s/^\s+//g;
+	    $comments  =~ s/\s+$//g;
 	}
 
 	# Next up, check the format of the sequence name.
@@ -121,7 +123,7 @@ while (my $line = <$inf>) {
 	    
 	    print $outf "\>$new_name";
 	    if ($comments) {
-		print $outf " $comments";
+		print $outf " # $comments";
 	    }
 	    print $outf "\n";
 	    
@@ -184,7 +186,7 @@ while (my $line = <$inf>) {
 	    print $namechangef "$orig_name ===[changed-to]==> $new_name\n";
 	    print $outf "\>$new_name";
 	    if ($comments) {
-		print $outf " $comments";
+		print $outf " # $comments";
 	    }
 	    print $outf "\n";
 
@@ -204,9 +206,8 @@ while (my $line = <$inf>) {
 	    }
 
 	    # If we already have comments, add the 'new' comments to the end
-	    if ($comments && $new_comments) {
-		$new_comments =~ s/^\#/ /;
-		$comments = $comments.$new_comments;
+	    if ($new_comments) {
+		$comments = $comments.' '.$new_comments;
 	    }
 
 	    # Can we use the recommended id? (if there is one...)
@@ -231,7 +232,7 @@ while (my $line = <$inf>) {
 	    print $namechangef "$orig_name ===[changed-to]==> $new_name\n";
 	    print $outf "\>$new_name";
 	    if ($comments) {
-		print $outf " $comments";
+		print $outf " # $comments";
 	    }
 	    print $outf "\n";
 	    
@@ -381,7 +382,6 @@ sub ParseUniProt
 	$evidence = $EvidenceMeanings[$evidence-1];
 	$new_comments = $new_comments.' '.$evidence;
     }
-    if ($new_comments) { $new_comments = '#'.$new_comments; }
 
     return ($species,$gene,$recommended_id,$new_comments,0);
     
