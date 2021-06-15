@@ -82,11 +82,60 @@ while (my $line = <$inf>) {
 	# Next up, check the format of the sequence name.
 	# We'll allow for three formats:
 	#
-	#   1. species|gene(s)|id
-	#   2. More English-y version of (1.)
-	#   3. UniProt
+	#   1. UniProt
+	#   2. species|gene(s)|id
+	#   3. More English-y version of (1.)
 	#
-	if ($orig_name =~ /^([^\|]+)\|([^\|]+)\|([^\|]+)$/) { ################# 1
+	# Because the uniprot naming conventions usually also start with an
+	# 'x|y|z' style piece, we'll need to check for that first
+	#
+	if ($orig_name =~ /GN\=/ && $orig_name =~ /OS\=/) { ######################## 1
+
+	    my ($species,$genes,$id,$new_comments,$error) = ParseUniProt($orig_name);
+
+	    # Regardless of whether we succeeded in parsing the name, there's a
+	    # different name in the output file for this sequence.
+	    $num_changes++;
+
+	    # If we ran into an issue with this sequence, complain!
+	    if ($error) {
+		print $excludef "$error"; # includes newlines
+		$skip_seq = 1;
+		next;
+	    }
+
+	    # If we already have comments, add the 'new' comments to the end
+	    if ($new_comments) {
+		$comments = $comments.' '.$new_comments;
+	    }
+
+	    # Can we use the recommended id? (if there is one...)
+	    my $adj_id;
+	    if ($id) {
+		my $attempt_num = 0;
+		$adj_id = $id;
+		while ($NameUniquenessCheck{$species.'|'.$genes.'|'.$adj_id}) {
+		    $attempt_num++;
+		    $adj_id = $id.'.'.$attempt_num;
+		}
+		$NameUniquenessCheck{$species.'|'.$genes.'|'.$adj_id} = 1;
+	    } else {
+		$adj_id = 1;
+		while ($NameUniquenessCheck{$species.'|'.$genes.'|'.$adj_id}) {
+		    $adj_id++;
+		}
+	    }
+	    
+	    my $new_name = $species.'|'.$genes.'|'.$adj_id;
+
+	    print $namechangef "$orig_name ===[changed-to]==> $new_name\n";
+	    print $outf "\>$new_name";
+	    if ($comments) {
+		print $outf " # $comments";
+	    }
+	    print $outf "\n";
+	    
+	} elsif ($orig_name =~ /^([^\|]+)\|([^\|]+)\|([^\|]+)$/) { ################# 2
 
 	    # The recommended format is being followed, so let's see if they nailed it!
 	    my $species = $1;
@@ -127,7 +176,7 @@ while (my $line = <$inf>) {
 	    }
 	    print $outf "\n";
 	    
-	} elsif (lc($orig_name) =~ /species\:/) { ################################## 2
+	} elsif (lc($orig_name) =~ /species\:/) { ################################## 3
 
 	    # Looks like it's the more verbose version of the Mirage name format,
 	    # so let's see what we can get
@@ -190,52 +239,12 @@ while (my $line = <$inf>) {
 	    }
 	    print $outf "\n";
 
-	} else { ################################################################### 3
+	} else { ################################################################### 4
 
-	    my ($species,$genes,$id,$new_comments,$error) = ParseUniProt($orig_name);
+	    # I can't tell what's going on with this sequence!  Skip it!
+	    print $excludef "Failed to parse sequence '$orig_name'\n";
+	    $skip_seq = 1;
 
-	    # Regardless of whether we succeeded in parsing the name, there's a
-	    # different name in the output file for this sequence.
-	    $num_changes++;
-
-	    # If we ran into an issue with this sequence, complain!
-	    if ($error) {
-		print $excludef "$error"; # includes newlines
-		$skip_seq = 1;
-		next;
-	    }
-
-	    # If we already have comments, add the 'new' comments to the end
-	    if ($new_comments) {
-		$comments = $comments.' '.$new_comments;
-	    }
-
-	    # Can we use the recommended id? (if there is one...)
-	    my $adj_id;
-	    if ($id) {
-		my $attempt_num = 0;
-		$adj_id = $id;
-		while ($NameUniquenessCheck{$species.'|'.$genes.'|'.$adj_id}) {
-		    $attempt_num++;
-		    $adj_id = $id.'.'.$attempt_num;
-		}
-		$NameUniquenessCheck{$species.'|'.$genes.'|'.$adj_id} = 1;
-	    } else {
-		$adj_id = 1;
-		while ($NameUniquenessCheck{$species.'|'.$genes.'|'.$adj_id}) {
-		    $adj_id++;
-		}
-	    }
-	    
-	    my $new_name = $species.'|'.$genes.'|'.$adj_id;
-
-	    print $namechangef "$orig_name ===[changed-to]==> $new_name\n";
-	    print $outf "\>$new_name";
-	    if ($comments) {
-		print $outf " # $comments";
-	    }
-	    print $outf "\n";
-	    
 	}
 
     } elsif ($skip_seq == 0) {
