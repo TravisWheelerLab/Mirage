@@ -46,8 +46,8 @@ if (scalar(@ARGV) != 1){
     print "\n";
     print "  USAGES:\n";
     print "\n";
-    print "  % ./DownloadGenomicData.pl --full   <-- Downloads ALL UCSC genome data\n";
     print "  % ./DownloadGenomicData.pl [file]   <-- Downloads genome data for species listed in file\n";
+    print "  % ./DownloadGenomicData.pl --full   <-- Downloads ALL UCSC genome data (this is a LOT)\n";
     die   "\n";
 }
 
@@ -126,11 +126,15 @@ while (my $line = <$UCSCf>) {
     # 1. Identify the genome download link
 
     # Download the directory
-    RunSystemCommand("wget -O $temp_html_fname $genome_dir_fname");
-    my $BigZips = OpenInputFile($temp_html_fname);
+    if ("wget -O $temp_html_fname $genome_dir_fname") {
+	my $trouble_key = $plain_species_name.' ('.$shorthand_species_name.')';
+	$TroubleSpecies{$trouble_key} = 1;
+	next;
+    }
 
     # Luckily, this is (mostly) plain-text rather than html, so we should have an
     # easy time parsing it.
+    my $BigZips = OpenInputFile($temp_html_fname);
     my $genome_fname = 0;
     while (my $bz_line = <$BigZips>) {
 	if ($bz_line =~ /^\s*(\S+) \- \"Soft-masked\" assembly sequence in one file/) {
@@ -138,11 +142,11 @@ while (my $line = <$UCSCf>) {
 	    last;
 	}
     }
+    close($BigZips);
 
     # If we hit the end of the file and didn't find a genome download link,
     # note this as a "trouble species" and move on
     if (!$genome_fname) {
-	close($BigZips);
 	my $trouble_key = $plain_species_name.' ('.$shorthand_species_name.')';
 	$TroubleSpecies{$trouble_key} = 1;
 	next;
@@ -154,23 +158,10 @@ while (my $line = <$UCSCf>) {
     
     # 2. Pull in any gtfs that might be floating around
 
-    # To confirm that there are gtfs, keep scanning our genome directory file for
-    # a hyperlink to 'genes'
-    my $gtf_dir_fname = 0;
-    while (my $bz_line = <$BigZips>) {
-	if ($bz_line =~ /\<a href\=\"genes\/\"\>/) {
-	    $gtf_dir_fname = $genome_dir_fname.'genes/';
-	    last;
-	}
-    }
-    close($BigZips);
-
-    # If we didn't find a gtf file, no big deal (that's what I tell myself so I
-    # don't cry myself to sleep every night that I don't have a gtf file).
-    next if (!$gtf_dir_fname);
-
-    # Download the html page with gtf links
-    RunSystemCommand("wget -O $temp_html_fname $gtf_dir_fname");
+    # If there's a directory with gtfs it'll be named 'genes' (assuming conventions
+    # from time of writing).
+    my $gtf_dir_fname = $genome_dir_fname.'genes/';
+    next if ("wget -O $temp_html_fname $gtf_dir_fname");
 
     # Get the names of all the gtf files
     my $Genesf = OpenInputFile($temp_html_fname);
@@ -184,7 +175,8 @@ while (my $line = <$UCSCf>) {
     }
     close($Genesf);
 
-    # If there weren't any gtf files (1.) weird...?, but (2.) whatever
+    # If there weren't any gtf files in our 'genes' dir, then I have two thoughts:
+    # (1.) weird...?, and (2.) whatever
     next if (!$gtf_list_str);
 
     # GTFs AHOY!

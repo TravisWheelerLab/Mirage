@@ -17,7 +17,7 @@ sub ParseArgs;
 sub ParseGTF;
 sub GetMappedSeqMSA;
 sub ParseAFA;
-sub RecordMSA;
+sub RecordSplicedMSA;
 sub ReduceMSAToSpecies;
 sub FindGhostExons;
 sub FindAliQualityDrops;
@@ -225,7 +225,7 @@ for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
     my $gene_outdir = CreateDirectory($outdirname.$gene);
 
     # Get your butt into this file, mister!
-    RecordMSA(\@MSA,\@SeqNames,$num_seqs,$msa_len,$gene_outdir.$gene.'-seqs.afa');
+    RecordSplicedMSA(\@MSA,\@SeqNames,$num_seqs,$msa_len,$gene_outdir.$gene.'-seqs.afa');
 
     # Now we'll reduce our MSA even further, down to just one sequence per
     # species!
@@ -237,7 +237,7 @@ for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
     my $num_species = $num_seqs;
 
     # Write this one out, too!
-    RecordMSA(\@MSA,\@SpeciesNames,$num_seqs,$msa_len,$gene_outdir.$gene.'-species.afa');
+    RecordSplicedMSA(\@MSA,\@SpeciesNames,$num_seqs,$msa_len,$gene_outdir.$gene.'-species.afa');
     
     # Now that we have our super-reduced splice-site-ified MSA, let's get real nasty
     # with it (by way of locating exons suggestive of "ghosts")!
@@ -256,7 +256,7 @@ for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
     push(@GhostlyGenes,$gene);
 
     # Time to build some gorgeous translated MSAs!
-    RecordGhostMSAs($gene);
+    #RecordGhostMSAs($gene); # DEBUGGING
     
 }
 
@@ -2273,9 +2273,31 @@ sub RecordGhostMSAs
 	    }
 	    close($nucl_inf);
 
+	    my @NuclSeq = split(//,$nucl_seq);
+
 	    # We'll need to figure out which reading frame we're hanging out in.
 	    # To do this, we'll translate out all three and find the one that aligns
 	    # best to our first hit.
+	    my $best_frame_num = -1;
+	    my $best_frame_str;
+	    my $best_ali_str;
+	    my $best_ali_score = 0;
+	    for (my $frame=0; $frame<3; $frame++) {
+
+		# Pull in the reading frame
+		my $frame_str = '';
+		my $trans_str = '';
+		for (my $i=$frame; $i+2<scalar(@NuclSeq); $i+=3) {
+
+		    my $codon = $NuclSeq[$i].$NuclSeq[$i+1].$NuclSeq[$i+2];
+		    $frame_str = $frame_str.$codon;
+
+		    my $trans_aa = TranslateCodon($codon);
+		    $trans_str = $trans_str.$trans_aa;
+
+		}
+
+	    }
 	    
 	}
 
