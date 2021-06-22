@@ -187,8 +187,8 @@ close($UCSCf);
 
 
 # No need for the main UCSC directory file or the temp html file anymore!
-RunSystemCommand("rm $ucsc_dir_fname");
-RunSystemCommand("rm $temp_html_fname");
+RunSystemCommand("rm $ucsc_dir_fname") if (-e $ucsc_dir_fname);
+RunSystemCommand("rm $temp_html_fname") if (-e $temp_html_fname);
 
 
 # If we didn't get any genomes that isn't ideal...
