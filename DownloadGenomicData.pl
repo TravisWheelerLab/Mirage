@@ -42,20 +42,36 @@ sub CreateDirectory;
 # of sequence data, we'll require the user to specify that they either
 # want to download *everything* or else provide a file listing species
 # of interest
-if (scalar(@ARGV) != 1){
+if (scalar(@ARGV) < 1){
     print "\n";
     print "  USAGES:\n";
     print "\n";
-    print "  % ./DownloadGenomicData.pl [file]   <-- Downloads genome data for species listed in file\n";
-    print "  % ./DownloadGenomicData.pl --full   <-- Downloads ALL UCSC genome data (this is a LOT)\n";
+    print "  % ./DownloadGenomicData.pl [OPT.s] [file]   <-- Downloads genome data for species listed in file\n";
+    print "  % ./DownloadGenomicData.pl [OPT.s] --full   <-- Downloads ALL UCSC genome data (this is a LOT)\n";
+    print "\n";
+    print "  OPT.s:\n";
+    print "\n";
+    print "    -outdirname [string] : Name the output directory to write all files to\n";
     die   "\n";
+}
+
+
+# See if the user wants to try their hand at providing some commandline
+# arguments.
+my $outdirname = 'Genomic-Data';
+for (my $opt_num = 0; $opt_num < scalar(@ARGV)-1; $opt_num++) {
+    if (lc($ARGV[$opt_num]) =~ /\-outdirname/) {
+	$outdirname = $ARGV[++$opt_num];
+    } else {
+	print "  Unrecognized option '$ARGV[$opt_num]' ignored\n";
+    }
 }
 
 
 # See if there's a file to parse
 my %SpeciesToDownload;
 my $download_all = 1;
-if (lc($ARGV[0]) !~ /\-full/) {
+if (lc($ARGV[scalar(@ARGV)-1]) !~ /\-full/) {
 
     $download_all = 0;
     
@@ -77,7 +93,7 @@ if (lc($ARGV[0]) !~ /\-full/) {
 
 
 # Make an output directory where we can save all our fun files!
-my $outdirname = CreateDirectory("Genomic-Data");
+$outdirname = CreateDirectory($outdirname);
 
 
 # Now it's time to do the terrible work of downloading some GD html
