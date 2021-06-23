@@ -743,8 +743,8 @@ sub GetMappedSeqMSA
 	$run_end++;
 	my $run_votes = $VetoedColsVotes[$run_start];
 	while ($run_end < scalar(@VetoedCols) && $VetoedCols[$run_end] - $VetoedCols[$run_end-1] < 3) {
-	    $run_end++;
 	    $run_votes += $VetoedColsVotes[$run_end];
+	    $run_end++;
 	}
 
 	# If there isn't a run of nearby vetoes, then we'll move right along
@@ -2326,7 +2326,7 @@ sub GetMapSummaryStats
     
     foreach my $gene (@GhostlyGenes) {
 	
-	my $infname = $outdirname.$gene.'search.out';
+	my $infname = $outdirname.$gene.'/search.out';
 	my $inf = OpenInputFile($infname);
 	
 	print $outf "\n  $gene\n";
