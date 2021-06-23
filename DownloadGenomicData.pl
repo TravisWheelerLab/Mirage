@@ -93,11 +93,15 @@ my $UCSCf = OpenInputFile($ucsc_dir_fname);
 my %SpeciesToGenomes;
 my %SpeciesToGTFs;
 my %TroubleSpecies;
-while (my $line = <$UCSCf>) {
+my $ucscf_line = <$UCSCf>; # prime our reader
+while (!eof($UCSCf)) {
 
     # Look for the next section break (these had BETTER stay consistent!)
-    $line =~ s/\n|\r//g;
-    next if ($line !~ /\<\!\-\- (.+) Download/);
+    $ucscf_line =~ s/\n|\r//g;
+    if ($ucscf_line !~ /\<\!\-\- (.+) Download/) {
+	$ucscf_line = <$UCSCf>;
+	next;
+    }
 
     # What would a human being call this species?
     my $plain_species_name = lc($1);
@@ -105,15 +109,27 @@ while (my $line = <$UCSCf>) {
 
     # If we have a list of species to look for, see if this dude's made the cut
     unless ($download_all || $SpeciesToDownload{$plain_species_name}) {
+	$ucscf_line = <$UCSCf>;
 	next;
     }
 
     # The game is afoot!  What's your shorthand name?
-    while ($line = <$UCSCf>) {
-	last if ($line =~ /\<\/h3\>/);
+    while ($ucscf_line = <$UCSCf>) {
+	if ($ucscf_line =~ /\<\/h3\>/ || $ucscf_line =~ /\<\!\-\-/) {
+	    last;
+	}
     }
-    $line =~ /\>([^\<]+)\<\/a\>\)\<\/h3\>/;
-    my $shorthand_species_name = $1;
+
+    # There are some utility sections that use the same general formatting,
+    # so we need to make sure that if we aren't looking at a genome then
+    # we can jump ship at an appropriate time.
+    my $shorthand_species_name;
+    if ($ucscf_line =~ /\>([^\<]+)\<\/a\>\)\<\/h3\>/) {
+	$shorthand_species_name = $1;
+    } else {
+	# NOTE: We don't pull in a new line in case we 'last'-ed to a '<!--'
+	next;
+    }
 
     # Assuming everything holds, we don't really need to parse anything else,
     # since there's a standard convention for the URLs containing genome data
@@ -129,6 +145,7 @@ while (my $line = <$UCSCf>) {
     if ("wget -O $temp_html_fname $genome_dir_fname") {
 	my $trouble_key = $plain_species_name.' ('.$shorthand_species_name.')';
 	$TroubleSpecies{$trouble_key} = 1;
+	$ucscf_line = <$UCSCf>;
 	next;
     }
 
@@ -149,6 +166,7 @@ while (my $line = <$UCSCf>) {
     if (!$genome_fname) {
 	my $trouble_key = $plain_species_name.' ('.$shorthand_species_name.')';
 	$TroubleSpecies{$trouble_key} = 1;
+	$ucscf_line = <$UCSCf>;
 	next;
     }
 
@@ -177,11 +195,18 @@ while (my $line = <$UCSCf>) {
 
     # If there weren't any gtf files in our 'genes' dir, then I have two thoughts:
     # (1.) weird...?, and (2.) whatever
-    next if (!$gtf_list_str);
+    if (!$gtf_list_str) {
+	$ucscf_line = <$UCSCf>;
+	next;
+    }
 
     # GTFs AHOY!
     $SpeciesToGTFs{$plain_species_name} = $gtf_list_str;
+
     
+    # Moving right along
+    $ucscf_line = <$UCSCf>;
+
 }
 close($UCSCf);
 
