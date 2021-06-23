@@ -115,10 +115,11 @@ while (!eof($UCSCf)) {
 
     # The game is afoot!  What's your shorthand name?
     while ($ucscf_line = <$UCSCf>) {
-	if ($ucscf_line =~ /\<\/h3\>/ || $ucscf_line =~ /\<\!\-\-/) {
+	if ($ucscf_line =~ /\<\/h3\>/ || $ucscf_line =~ /\<\!\-\- .+ Download/) {
 	    last;
 	}
     }
+    last if (eof($UCSCf));
 
     # There are some utility sections that use the same general formatting,
     # so we need to make sure that if we aren't looking at a genome then
@@ -142,7 +143,7 @@ while (!eof($UCSCf)) {
     # 1. Identify the genome download link
 
     # Download the directory
-    if ("wget -O $temp_html_fname $genome_dir_fname") {
+    if (system("wget -O $temp_html_fname $genome_dir_fname")) {
 	my $trouble_key = $plain_species_name.' ('.$shorthand_species_name.')';
 	$TroubleSpecies{$trouble_key} = 1;
 	$ucscf_line = <$UCSCf>;
@@ -179,8 +180,8 @@ while (!eof($UCSCf)) {
     # If there's a directory with gtfs it'll be named 'genes' (assuming conventions
     # from time of writing).
     my $gtf_dir_fname = $genome_dir_fname.'genes/';
-    next if ("wget -O $temp_html_fname $gtf_dir_fname");
-
+    next if (system("wget -O $temp_html_fname $gtf_dir_fname"));
+    
     # Get the names of all the gtf files
     my $Genesf = OpenInputFile($temp_html_fname);
     my $gtf_list_str = '';
@@ -212,13 +213,16 @@ close($UCSCf);
 
 
 # No need for the main UCSC directory file or the temp html file anymore!
-RunSystemCommand("rm $ucsc_dir_fname") if (-e $ucsc_dir_fname);
-RunSystemCommand("rm $temp_html_fname") if (-e $temp_html_fname);
+#
+# DEBUGGING: turned off these 2 rms and the following rmdir
+#
+#RunSystemCommand("rm $ucsc_dir_fname") if (-e $ucsc_dir_fname);
+#RunSystemCommand("rm $temp_html_fname") if (-e $temp_html_fname);
 
 
 # If we didn't get any genomes that isn't ideal...
 if (scalar(keys %SpeciesToGenomes) == 0) {
-    RunSystemCommand("rmdir $outdirname");
+    #RunSystemCommand("rmdir $outdirname");
     die "\n  No genomes located...\n\n";
 }
 
