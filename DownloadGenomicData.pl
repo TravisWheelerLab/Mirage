@@ -229,17 +229,17 @@ close($UCSCf);
 
 
 # No need for the main UCSC directory file or the temp html file anymore!
-#
-# DEBUGGING: turned off these 2 rms and the following rmdir
-#
-#RunSystemCommand("rm $ucsc_dir_fname") if (-e $ucsc_dir_fname);
-#RunSystemCommand("rm $temp_html_fname") if (-e $temp_html_fname);
+RunSystemCommand("rm $ucsc_dir_fname") if (-e $ucsc_dir_fname);
+RunSystemCommand("rm $temp_html_fname") if (-e $temp_html_fname);
 
 
 # If we didn't get any genomes that isn't ideal...
 if (scalar(keys %SpeciesToGenomes) == 0) {
-    #RunSystemCommand("rmdir $outdirname");
-    die "\n  No genomes located...\n\n";
+    RunSystemCommand("rmdir $outdirname");
+    print "\n";
+    print "  No genomes downloaded (likely reason: failed to match listed species names)\n";
+    print "  Program exiting\n";
+    die "\n";
 }
 
 
