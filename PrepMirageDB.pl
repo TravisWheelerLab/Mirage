@@ -89,7 +89,7 @@ while (my $line = <$inf>) {
 	# Because the uniprot naming conventions usually also start with an
 	# 'x|y|z' style piece, we'll need to check for that first
 	#
-	if ($orig_name =~ /GN\=/ && $orig_name =~ /OS\=/) { ######################## 1
+	if ($orig_name =~ /OS\=/) { ################################################ 1
 
 	    my ($species,$genes,$id,$new_comments,$error) = ParseUniProt($orig_name);
 
@@ -106,7 +106,11 @@ while (my $line = <$inf>) {
 
 	    # If we already have comments, add the 'new' comments to the end
 	    if ($new_comments) {
-		$comments = $comments.' '.$new_comments;
+		if ($comments) {
+		    $comments = $comments.$new_comments;
+		} else {
+		    $comments = $new_comments;
+		}
 	    }
 
 	    # Can we use the recommended id? (if there is one...)
@@ -329,12 +333,12 @@ sub ParseUniProt
     my $orig_name = shift;
 
     my @EvidenceMeanings;
-    $EvidenceMeanings[0] = 'Protein-level-evidence(1)';
-    $EvidenceMeanings[1] = 'Transcript-level-evidence(2)';
-    $EvidenceMeanings[2] = 'Homology-inferred(3)';
-    $EvidenceMeanings[3] = 'Predicted(4)';
-    $EvidenceMeanings[4] = 'Uncertain(5)';
-    $EvidenceMeanings[5] = 'No-evidence-indicator';
+    $EvidenceMeanings[1] = 'Protein-level-evidence(1)';
+    $EvidenceMeanings[2] = 'Transcript-level-evidence(2)';
+    $EvidenceMeanings[3] = 'Homology-inferred(3)';
+    $EvidenceMeanings[4] = 'Predicted(4)';
+    $EvidenceMeanings[5] = 'Uncertain(5)';
+    $EvidenceMeanings[6] = 'No-evidence-indicator';
     
     my $species;
     if ($orig_name =~ /OS\=([^\=]+\=?)/) {
@@ -353,7 +357,7 @@ sub ParseUniProt
     my $accession;
     my $long_gene;
     my $recommended_id = 0;
-    if ($orig_name =~ /\>([^\|]+)\|([^\|]+)\|([^\|]+)/) {
+    if ($orig_name =~ /^([^\|]+)\|([^\|]+)\|(\S+)/) {
 	$source_db = 'Database:'.$1;
 	$accession = 'Accession:'.$2;
 	$long_gene = lc($3);
@@ -388,7 +392,7 @@ sub ParseUniProt
     if ($source_db) { $new_comments = $new_comments.' '.$source_db; }
     if ($accession) { $new_comments = $new_comments.' '.$accession; }
     if ($new_comments || $evidence != 6) {
-	$evidence = $EvidenceMeanings[$evidence-1];
+	$evidence = $EvidenceMeanings[$evidence];
 	$new_comments = $new_comments.' '.$evidence;
     }
 
