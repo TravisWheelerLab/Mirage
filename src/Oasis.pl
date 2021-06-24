@@ -2322,7 +2322,7 @@ sub GetMapSummaryStats
     my $ghostlygenes_ref = shift;
     my @GhostlyGenes = @{$ghostlygenes_ref};
 
-    my $outf = $outdirname.'Search-Summary.out';
+    my $outf = OpenOutputFile($outdirname.'Search-Summary.out');
     
     foreach my $gene (@GhostlyGenes) {
 	
