@@ -59,9 +59,13 @@ if (scalar(@ARGV) < 1){
 # See if the user wants to try their hand at providing some commandline
 # arguments.
 my $outdirname = 'Genomic-Data';
+my $relative_outdir = 1;
 for (my $opt_num = 0; $opt_num < scalar(@ARGV)-1; $opt_num++) {
     if (lc($ARGV[$opt_num]) =~ /\-outdirname/) {
 	$outdirname = $ARGV[++$opt_num];
+	if ($outdirname =~ /^\// || $outdirname =~ /^\~/) {
+	    $relative_outdir = 0;
+	}
     } else {
 	print "  Unrecognized option '$ARGV[$opt_num]' ignored\n";
     }
@@ -294,7 +298,7 @@ foreach my $species (sort keys %SpeciesToGenomes) {
 
     # Record the full path to the file
     $dl_genome_fname =~ s/\.gz$//g;
-    $dl_genome_fname = $pwd.$dl_genome_fname;
+    $dl_genome_fname = $pwd.$dl_genome_fname if ($relative_outdir);
     $SpeciesToGenomes{$species} = $dl_genome_fname;
 
     $longest_genome_len = length($dl_genome_fname)
@@ -330,8 +334,12 @@ foreach my $species (sort keys %SpeciesToGenomes) {
     RunSystemCommand($cat_cmd);
 
     # Record the loooooooong name
-    $SpeciesToGTFs{$species} = $pwd.$dl_gtf_dirname.$species_shorthand.'.gtf';
-
+    if ($relative_outdir) {
+	$SpeciesToGTFs{$species} = $pwd.$dl_gtf_dirname.$species_shorthand.'.gtf';
+    } else {
+	$SpeciesToGTFs{$species} = $dl_gtf_dirname.$species_shorthand.'.gtf';
+    }
+    
     # We got our big honkin' nasty boi, so let's clean up our lil' beepin' chill gals!
     foreach my $dl_gtf_fname (@GTFList) {
 	RunSystemCommand("rm $dl_gtf_fname");
