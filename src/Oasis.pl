@@ -2573,7 +2573,7 @@ sub CollapseAndCountOverlaps
 	    $is_known = 0;
 	}
 	$is_known = 1 if ($StartsToKnownExons{$CollapsedStarts[$i]});
-	$current_end = MAX($current_end,$CollapsedEnds[$i]);
+	$current_end = Max($current_end,$CollapsedEnds[$i]);
     }
 
     $num_known += $is_known;
