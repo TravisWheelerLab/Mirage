@@ -300,7 +300,7 @@ for ($threadID=0; $threadID<$num_cpus; $threadID++) {
 	my $line = <$final_inf>;
 	$line =~ /(\d+) \/ (\d+)/;
 	$total_ghosts_busted += $1;
-	$total_ghost_exons += 2;
+	$total_ghost_exons += $2;
 	
 	$line = <$final_inf>;
 	$line =~ s/\n|\r//g;
@@ -333,7 +333,7 @@ if ($total_ghost_exons == 0) {
 GetMapSummaryStats(\@GhostlyGenes);
 
 # WOOOOOOO, WE FOUND AT LEAST ONE THING TO POSSIBLY NOT CROSS-MAP!
-my $bust_rate = int(1000.0*$total_ghosts_busted/$total_ghost_exons)/10;
+my $bust_rate = int(1000.0*$total_ghosts_busted/$total_ghost_exons)/10.0;
 print "\n";
 print "  $total_ghost_exons possible unannotated exons detected,\n";
 print "  $total_ghosts_busted of which have some sequence-level support ($bust_rate\%)\n";
