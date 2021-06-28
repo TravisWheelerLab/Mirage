@@ -2324,7 +2324,7 @@ sub GetMapSummaryStats
 
     my $outf = OpenOutputFile($outdirname.'Search-Summary.out');
     
-    foreach my $gene (@GhostlyGenes) {
+    foreach my $gene (sort @GhostlyGenes) {
 	
 	my $infname = $outdirname.$gene.'/search.out';
 	my $inf = OpenInputFile($infname);
@@ -2388,7 +2388,7 @@ sub GetMapSummaryStats
 		    my $map_range = $1;
 		    $line = <$inf>;
 		    my $known_exon_overlap = 1;
-		    $known_exon_overlap = 0 if ($line =~ /\+ No overlap/);
+		    $known_exon_overlap = 0 if ($line =~ /\+ No observed overlap/);
 		    $hash_val = $hash_val.'|'.$map_range.'/'.$known_exon_overlap;
 		}
 		
