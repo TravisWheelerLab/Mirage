@@ -64,6 +64,7 @@ my $options_ref = ParseArgs();
 my %Options = %{$options_ref};
 my $num_cpus = $Options{cpus};
 my $outdirname = CreateDirectory($Options{outdirname});
+my $outgenesdir = CreateDirectory($outdirname.'Results-by-Gene');
 my $save_msas = $Options{savemsas}; # Do we want to write our spliced MSAs to files?
 my $bad_ali_cutoff = $Options{alicutoff};
 
@@ -87,6 +88,7 @@ my $tildedir = <$tildedir_check>;
 $tildedir =~ s/\n|\r//g;
 $tildedir = ConfirmDirectory($tildedir);
 close($tildedir_check);
+
 my $SpeciesGuide = OpenInputFile($ARGV[1]);
 my %SpeciesToGenomes;
 my %SpeciesHasGTF;
@@ -186,9 +188,9 @@ $end_gene_id = scalar(@GeneList) if ($threadID == $num_cpus-1);
 
 # Name temporary filenames that we'll want to use (and, while we're at it,
 # fill in all of the wild 'n' wacky blat arguments we'll be using).
-my $nucl_seq_fname = $outdirname.'nucl.tmp'.$threadID.'.fa';
-my $prot_seq_fname = $outdirname.'prot.tmp'.$threadID.'.fa';
-my $blat_out_fname = $outdirname.'blat.tmp'.$threadID.'.out';
+my $nucl_seq_fname = $outgenesdir.'nucl.tmp'.$threadID.'.fa';
+my $prot_seq_fname = $outgenesdir.'prot.tmp'.$threadID.'.fa';
+my $blat_out_fname = $outgenesdir.'blat.tmp'.$threadID.'.out';
 $blat = $blat.' '.$nucl_seq_fname.' '.$prot_seq_fname.' '.$blat_out_fname;
 
 
@@ -222,7 +224,7 @@ for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
     my %SpeciesToChrs = %{$speciestochrs_ref};
 
     # At this point, it makes sense to create the result directory for this gene
-    my $gene_outdir = CreateDirectory($outdirname.$gene);
+    my $gene_outdir = CreateDirectory($outgenesdir.$gene);
 
     # Get your butt into this file, mister!
     RecordSplicedMSA(\@MSA,\@SeqNames,$num_seqs,$msa_len,$gene_outdir.$gene.'-seqs.afa');
@@ -262,7 +264,7 @@ for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
 
 # How'd I do?  I don't even know!
 if ($threadID) {
-    my $final_outf = OpenOutputFile($outdirname.$threadID.'.final-tally.out');
+    my $final_outf = OpenOutputFile($outgenesdir.$threadID.'.final-tally.out');
     print $final_outf "$total_ghosts_busted / $total_ghost_exons\n";
     for (my $i=0; $i<scalar(@GhostlyGenes); $i++) {
 	print $final_outf '|' if ($i);
@@ -283,9 +285,9 @@ while (wait() != -1) {}
 for ($threadID=0; $threadID<$num_cpus; $threadID++) {
 
     # Clear out all these files we don't need
-    $nucl_seq_fname = $outdirname.'nucl.tmp'.$threadID.'.fa';
-    $prot_seq_fname = $outdirname.'prot.tmp'.$threadID.'.fa';
-    $blat_out_fname = $outdirname.'blat.tmp'.$threadID.'.out';
+    $nucl_seq_fname = $outgenesdir.'nucl.tmp'.$threadID.'.fa';
+    $prot_seq_fname = $outgenesdir.'prot.tmp'.$threadID.'.fa';
+    $blat_out_fname = $outgenesdir.'blat.tmp'.$threadID.'.out';
 
     if (-e $nucl_seq_fname) { system("rm $nucl_seq_fname"); }
     if (-e $prot_seq_fname) { system("rm $prot_seq_fname"); }
@@ -294,7 +296,7 @@ for ($threadID=0; $threadID<$num_cpus; $threadID++) {
     # How'd ya do, helper?
     if ($threadID) {
 	
-	my $final_infname = $outdirname.$threadID.'.final-tally.out';
+	my $final_infname = $outgenesdir.$threadID.'.final-tally.out';
 	my $final_inf = OpenInputFile($final_infname);
     
 	my $line = <$final_inf>;
@@ -1493,7 +1495,7 @@ sub FindGhostExons
     my $ghosts_busted = 0;
 
     # Prepare to write some stuff to a file!
-    my $outf = OpenOutputFile($outdirname.$gene.'/search.out');
+    my $outf = OpenOutputFile($outgenesdir.$gene.'/search.out');
 
     # We'll just go hit-by-hit, because that's what's sensible.  'q' for query
     for (my $q=0; $q<$num_ghost_exons; $q++) {
@@ -2086,7 +2088,7 @@ sub RecordGhostMSAs
     my $gene = shift;
 
     # First things first, we're going to need to grab ahold of this gene's dir
-    my $genedir = ConfirmDirectory($outdirname.$gene);
+    my $genedir = ConfirmDirectory($outgenesdir.$gene);
 
     # Open up the file with all of the hits for this gene and read in all
     # successful maps
@@ -2326,7 +2328,7 @@ sub GetMapSummaryStats
     
     foreach my $gene (sort @GhostlyGenes) {
 	
-	my $infname = $outdirname.$gene.'/search.out';
+	my $infname = $outgenesdir.$gene.'/search.out';
 	my $inf = OpenInputFile($infname);
 	
 	print $outf "\n  $gene\n";
