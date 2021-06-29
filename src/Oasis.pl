@@ -2325,6 +2325,10 @@ sub GetMapSummaryStats
     my @GhostlyGenes = @{$ghostlygenes_ref};
 
     my $outf = OpenOutputFile($outdirname.'Search-Summary.out');
+
+    my %TargetSpeciesToSuggested;
+    my %TargetSpeciesToAnnotated;
+    my @FullHitList;
     
     foreach my $gene (sort @GhostlyGenes) {
 	
@@ -2495,6 +2499,22 @@ sub GetMapSummaryStats
 		if ($num_annotated_exons == 1) { print $outf "has";  }
 		else                           { print $outf "have"; }
 		print $outf " GTF annotations)\n";
+
+		if ($TargetSpeciesToSuggested{$target_species}) {
+		    $TargetSpeciesToSuggested{$target_species} += $num_suggested_exons;
+		} else {
+		    $TargetSpeciesToSuggested{$target_species}  = $num_suggested_exons;
+		}
+
+		if ($TargetSpeciesToAnnotated{$target_species}) {
+		    $TargetSpeciesToAnnotated{$target_species} += $num_annotated_exons;
+		} else {
+		    $TargetSpeciesToAnnotated{$target_species}  = $num_annotated_exons;
+		}
+
+		# Finally, record this gene's hit ratio
+		my $hit_info = $target_species.'|'.$gene.'|'.$num_suggested_exons.'|'.$num_annotated_exons;
+		push(@FullHitList,$hit_info);
 		
 	    }
 	    
@@ -2503,6 +2523,38 @@ sub GetMapSummaryStats
     }
 
     close($outf);
+
+    # Now we'll run through each of our target species and give a little bit of info.
+    foreach my $species (keys %TargetSpeciesToSuggested) {
+
+	$outf = OpenOutputFile($outdirname.$species.'-summary.out');
+
+	my $num_suggested_exons = $TargetSpeciesToSuggested{$species};
+	my $num_annotated_exons = 0;
+	$num_annotated_exons = $TargetSpeciesToAnnotated{$species};
+
+	print $outf "Species: $species\n";
+	print $outf "Total BLAT-suggested Exons: $num_suggested_exons\n";
+	print $outf "Number GTF-annotated Exons: $num_annotated_exons\n";
+	print $outf "\n";
+
+	print $outf "Gene  # Suggested  # Annotated\n";
+	print $outf "----  -----------  -----------\n";
+
+	foreach my $hit (@FullHitList) {
+
+	    my @HitData = split(/\|/,$hit);
+	    next if ($HitData[0] ne $species);
+
+	    print $outf "$HitData[1]  $HitData[2]  $HitData[3]\n";
+	    
+	}
+
+	print $outf "\n";
+
+	close($outf);
+	
+    }
     
 }
 
