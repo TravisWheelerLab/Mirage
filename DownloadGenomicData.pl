@@ -154,7 +154,7 @@ while (!eof($UCSCf)) {
 
 	# The funny thing about these description files is that the best place to
 	# consistently get the species' scientific name is as the photo caption...
-	my $descf = OpenInputFile($temp_html);
+	my $descf = OpenInputFile($temp_html_fname);
 	while (my $desc_line = <$descf>) {
 	    if ($desc_line =~ /\<FONT SIZE\=\-1\>\<em\>([^\<]+)\<\/em\>\<BR\>/) {
 		$scientific_name = lc($1);
