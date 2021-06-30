@@ -147,7 +147,7 @@ while (!eof($UCSCf)) {
 	next;
     }
 
-    # We'll want to grab the species' scientific name, for the good of humanity
+    # We'll want to grab the species' scientific name, for smartness
     my $desc_fname = 'https://hgdownload.soe.ucsc.edu/gbdb/'.$shorthand_species_name.'/html/description.html';
     my $scientific_name = $shorthand_species_name; # Placeholder
     if (!system("wget -O $temp_html_fname $desc_fname")) {
