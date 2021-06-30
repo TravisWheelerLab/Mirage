@@ -111,6 +111,7 @@ my $temp_html_fname = $outdirname.'temp.html';
 # subdirectories containing species data we're interested in
 my $UCSCf = OpenInputFile($ucsc_dir_fname);
 my %SpeciesToGenomes;
+my %SpeciesToSciNames;
 my %SpeciesToGTFs;
 my %TroubleSpecies;
 my $ucscf_line = <$UCSCf>; # prime our reader
@@ -127,13 +128,7 @@ while (!eof($UCSCf)) {
     my $plain_species_name = lc($1);
     $plain_species_name =~ s/\s/\_/g;
 
-    # If we have a list of species to look for, see if this dude's made the cut
-    unless ($download_all || $SpeciesToDownload{$plain_species_name}) {
-	$ucscf_line = <$UCSCf>;
-	next;
-    }
-
-    # The game is afoot!  What's your shorthand name?
+    # What's your shorthand name?
     while ($ucscf_line = <$UCSCf>) {
 	if ($ucscf_line =~ /\<\/h3\>/ || $ucscf_line =~ /\<\!\-\- .+ Download/) {
 	    last;
@@ -149,6 +144,33 @@ while (!eof($UCSCf)) {
 	$shorthand_species_name = $1;
     } else {
 	# NOTE: We don't pull in a new line in case we 'last'-ed to a '<!--'
+	next;
+    }
+
+    # We'll want to grab the species' scientific name, for the good of humanity
+    my $desc_fname = 'https://hgdownload.soe.ucsc.edu/gbdb/'.$shorthand_species_name.'/html/description.html';
+    my $scientific_name = $shorthand_species_name; # Placeholder
+    if (!system("wget -O $temp_html_fname $desc_fname")) {
+
+	# The funny thing about these description files is that the best place to
+	# consistently get the species' scientific name is as the photo caption...
+	my $descf = OpenInputFile($temp_html);
+	while (my $desc_line = <$descf>) {
+	    if ($desc_line =~ /\<FONT SIZE\=\-1\>\<em\>([^\<]+)\<\/em\>\<BR\>/) {
+		$scientific_name = lc($1);
+		$scientific_name =~ s/\s/\_/g;
+		last;
+	    }
+	}
+	close($descf);
+	
+    }
+
+    $SpeciesToSciNames{$plain_species_name} = $scientific_name;
+
+    # If we have a list of species to look for, see if this dude's made the cut
+    unless ($download_all || $SpeciesToDownload{$plain_species_name} || $SpeciesToDownload{$scientific_name}) {
+	$ucscf_line = <$UCSCf>;
 	next;
     }
 
@@ -265,8 +287,9 @@ $pwd = $pwd.'/' if ($pwd !~ /\/$/);
 
 # We'll want to position ourselves to really easily build a species guide out of
 # what we download, so let's just frickin' do it!
-my %SpeciesToSuperNames; # english name + shorthand
+my %SpeciesToSuperNames; # english name + scientific name + shorthand
 my $longest_name_len = 0;
+my $longest_sci_name_len = 0;
 my $longest_genome_len = 0;
 my $longest_supername_len = 0;
 
@@ -281,8 +304,12 @@ foreach my $species (sort keys %SpeciesToGenomes) {
     my $species_shorthand = $1;
     my $genome_extension  = $2;
 
+    my $scientific_name = $SpeciesToSciNames{$species};
+    $longest_sci_name_len = length($scientific_name)
+	if (length($scientific_name) > $longest_sci_name_len);
+
     # What's your "supername"?
-    my $supername = $species.' ('.$species_shorthand.')';
+    my $supername = $species.' ('.$scientific_name.'/'.$species_shorthand.')';
     $longest_supername_len = length($supername)
 	if (length($supername) > $longest_supername_len);
     $SpeciesToSuperNames{$species} = $supername;
@@ -353,7 +380,8 @@ foreach my $species (sort keys %SpeciesToGenomes) {
 # how we did overall.
 
 
-my $SpeciesGuide = OpenOutputFile($outdirname.'Species-Guide');
+# 1. Common name species guide
+my $SpeciesGuide = OpenOutputFile($outdirname.'Common-Species-Guide');
 foreach my $species (sort keys %SpeciesToGenomes) {
 
     my $genome = $SpeciesToGenomes{$species};
@@ -372,6 +400,32 @@ foreach my $species (sort keys %SpeciesToGenomes) {
     }
 
     print $SpeciesGuide "$species $genome $gtf\n";
+
+}
+close($SpeciesGuide);
+
+# 2. Scientific name species guide
+$SpeciesGuide = OpenOutputFile($outdirname.'Latin-Species-Guide');
+foreach my $species (sort keys %SpeciesToGenomes) {
+
+    my $scientific_name = $SpeciesToSciNames{$species};
+    
+    my $genome = $SpeciesToGenomes{$species};
+
+    my $gtf = '-';
+    if ($SpeciesToGTFs{$species}) {
+	$gtf = $SpeciesToGTFs{$species};
+    }
+
+    while (length($scientific_name) < $longest_sci_name_len) {
+	$scientific_name = $scientific_name.' ';
+    }
+
+    while (length($genome) < $longest_genome_len) {
+	$genome = $genome.' ';
+    }
+
+    print $SpeciesGuide "$scientific_name $genome $gtf\n";
 
 }
 close($SpeciesGuide);
@@ -418,10 +472,12 @@ foreach my $species (sort keys %AllSpecies) {
     my @NameComponents = split(/ /,$supername);
     $supername = '';
     for (my $i=0; $i<scalar(@NameComponents); $i++) {
-	if ($NameComponents[$i] =~ /^([a-z])/) {
+	if ($NameComponents[$i] !~ /\// && $NameComponents[$i] =~ /^([a-z])/) {
 	    my $first_letter = uc($1);
-	    $NameComponents[$i] =~ s/^[a-z]//;
-	    $NameComponents[$i] = $first_letter.$NameComponents[$i];
+	    $NameComponents[$i] =~ s/^[a-z]/$first_letter/;
+	} elsif ($NameComponents[$i] =~ /^\(([a-z])/) {
+	    my $first_letter = uc($1);
+	    $NameComponents[$i] =~ s/^\([a-z]/\($first_letter/;
 	}
 	$supername = $supername.' ' if ($supername);
 	$supername = $supername.$NameComponents[$i];
