@@ -152,24 +152,33 @@ while (!eof($UCSCf)) {
     my $scientific_name = $shorthand_species_name; # Placeholder
     if (!system("wget -O $temp_html_fname $desc_fname")) {
 
-	# The funny thing about these description files is that the best place to
-	# consistently get the species' scientific name is as the photo caption...
-	# NOTE: The only exception is dog (which has a picture of a great Dane labeled
-	#       'Zoey')
-	if (lc($shorthand_species_name) =~ /^canfam/) {
-	    $scientific_name = 'canis_lupus_familiaris';
-	    last;
-	}
-	
+	# We'll look for the scientific name in either the genome ID (preferred)
+	# or under the photo description.
 	my $descf = OpenInputFile($temp_html_fname);
+	my $photo_name = 0;
+	my $gen_id_name = 0;
 	while (my $desc_line = <$descf>) {
-	    if ($desc_line =~ /\<FONT SIZE\=\-1\>\<em\>([^\<]+)\<\/em\>\<BR\>/) {
-		$scientific_name = lc($1);
-		$scientific_name =~ s/\s/\_/g;
-		last;
+	    if (lc($desc_line) =~ /\<font size\=\-1\>\<em\>([^\<]+)\<\/em\>\<br\>/) {
+		$photo_name = $1;
+		$photo_name =~ s/\s/\_/g;
+	    } elsif ($desc_line =~ /NCBI Genome ID\:/) {
+		while (!eof($descf) && lc($desc_line) !~ /\<\/a\>\s*\(/) {
+		    $desc_line = <$descf>;
+		}
+		last if (eof($descf));
+		if (lc($desc_line) =~ /\<\/a\>\s*\(([^\)]+)\)/) {
+		    $gen_id_name = $1;
+		    $gen_id_name =~ s/\s/\_/g;
+		}
 	    }
 	}
 	close($descf);
+
+	if ($gen_id_name) {
+	    $scientific_name = $gen_id_name;
+	} elsif ($photo_name) {
+	    $scientific_name = $photo_name;
+	}
 	
     }
 
