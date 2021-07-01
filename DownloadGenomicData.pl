@@ -154,6 +154,13 @@ while (!eof($UCSCf)) {
 
 	# The funny thing about these description files is that the best place to
 	# consistently get the species' scientific name is as the photo caption...
+	# NOTE: The only exception is dog (which has a picture of a great Dane labeled
+	#       'Zoey')
+	if (lc($shorthand_species_name) =~ /^canfam/) {
+	    $scientific_name = 'canis_lupus_familiaris';
+	    last;
+	}
+	
 	my $descf = OpenInputFile($temp_html_fname);
 	while (my $desc_line = <$descf>) {
 	    if ($desc_line =~ /\<FONT SIZE\=\-1\>\<em\>([^\<]+)\<\/em\>\<BR\>/) {
