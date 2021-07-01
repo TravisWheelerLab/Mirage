@@ -160,14 +160,18 @@ while (!eof($UCSCf)) {
 	while (my $desc_line = <$descf>) {
 	    if (lc($desc_line) =~ /\<font size\=\-1\>\<em\>([^\<]+)\<\/em\>\<br\>/) {
 		$photo_name = $1;
+		$photo_name =~ s/^\s+//g;
+		$photo_name =~ s/\s+$//g;
 		$photo_name =~ s/\s/\_/g;
 	    } elsif ($desc_line =~ /NCBI Genome ID\:/) {
 		while (!eof($descf) && lc($desc_line) !~ /\<\/a\>\s*\(/) {
 		    $desc_line = <$descf>;
 		}
 		last if (eof($descf));
-		if (lc($desc_line) =~ /\<\/a\>\s*\(([^\)]+)\)/) {
+		if (lc($desc_line) =~ /\<\/a\>\s*\(([^\)|\(]+)/) {
 		    $gen_id_name = $1;
+		    $gen_id_name =~ s/^\s+//;
+		    $gen_id_name =~ s/\s+$//;
 		    $gen_id_name =~ s/\s/\_/g;
 		}
 	    }
