@@ -158,7 +158,7 @@ while (!eof($UCSCf)) {
 	my $photo_name = 0;
 	my $gen_id_name = 0;
 	while (my $desc_line = <$descf>) {
-	    if (lc($desc_line) =~ /\<font size\=\-1\>\<em\>([^\<]+)\<\/em\>\<br\>/) {
+	    if (lc($desc_line) =~ /\<font size\=\-1\>\s*\<em\>([^\<]+)\<\/em\>\s*\<br\>/) {
 		$photo_name = $1;
 		$photo_name =~ s/^\s+//g;
 		$photo_name =~ s/\s+$//g;
@@ -178,7 +178,21 @@ while (!eof($UCSCf)) {
 	}
 	close($descf);
 
-	if ($gen_id_name) {
+	# In case there are both gen_id and scientific names, we'll want
+	# to make sure that we grab whichever one looks the most Latin
+	# (i.e., has spaces).
+	# NOTE that even though there seems to be some redundancies in how
+	# this is coded it's reflecting a series of preferences, so we need
+	# all this conditioning.
+	if ($gen_id_name && $photo_name) {
+	    if ($gen_id_name =~ /\_/) {
+		$scientific_name = $gen_id_name;
+	    } elsif ($photo_name =~ /\_/) {
+		$scientific_name = $photo_name;
+	    } else {
+		$scientific_name = $gen_id_name;
+	    }
+	} elsif ($gen_id_name) {
 	    $scientific_name = $gen_id_name;
 	} elsif ($photo_name) {
 	    $scientific_name = $photo_name;
