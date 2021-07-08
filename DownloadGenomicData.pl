@@ -6,6 +6,10 @@ use POSIX;
 
 #  FUNCTIONAL SUBROUTINES
 #
+sub ParseSpeciesTreeFile;
+sub RecursiveTreeCheck;
+sub GetLatinToCommon;
+sub GetStaticLatinToCommon;
 
 
 #  BEUREAUCRATIC SUBROUTINES
@@ -51,7 +55,8 @@ if (scalar(@ARGV) < 1){
     print "\n";
     print "  OPT.s:\n";
     print "\n";
-    print "    -outdirname [string] : Name the output directory to write all files to\n";
+    print "    -outdirname [string] : Name the output directory (default:Genomic-Data)\n";
+    print "    --parse-species-tree : Instead of downloading genomic data, parse phylip tree from NCBI (see README)\n";
     die   "\n";
 }
 
@@ -66,6 +71,26 @@ for (my $opt_num = 0; $opt_num < scalar(@ARGV)-1; $opt_num++) {
 	if ($outdirname =~ /^\// || $outdirname =~ /^\~/) {
 	    $relative_outdir = 0;
 	}
+    } elsif (lc($ARGV[$opt_num]) =~ /\-parse\-species\-tree/) {
+
+	if (@ARGV < 3) {
+	    die "\n  USAGE:  ./DownloadGenomicData.pl --parse-species-tree [tree.phy] [scientific-to-common-names.txt OR -]\n\n";
+	}
+	my ($latin_tree_str,$common_tree_str)
+	    = ParseSpeciesTreeFile($ARGV[scalar(@ARGV)-2],$ARGV[scalar(@ARGV)-1]);
+	
+	print "\n\n";
+	print "Latin Species Tree\n";
+	print "------------------\n";
+	print "$latin_tree_str\n";
+	print "\n\n";
+	print "Common Species Tree (if known)\n";
+	print "-------------------\n";
+	print "$common_tree_str\n";
+	print "\n\n";
+    
+	exit(0);
+
     } else {
 	print "  Unrecognized option '$ARGV[$opt_num]' ignored\n";
     }
@@ -102,7 +127,7 @@ $outdirname = CreateDirectory($outdirname);
 
 # Now it's time to do the terrible work of downloading some GD html
 my $ucsc_dir_fname = $outdirname.'ucsc-dir.html';
-RunSystemCommand("wget -O $ucsc_dir_fname https://hgdownload.soe.ucsc.edu/downloads.html");
+RunSystemCommand("wget --quiet -O $ucsc_dir_fname https://hgdownload.soe.ucsc.edu/downloads.html");
 
 # We'll use a standard filename for temporary html downloads
 my $temp_html_fname = $outdirname.'temp.html';
@@ -150,7 +175,7 @@ while (!eof($UCSCf)) {
     # We'll want to grab the species' scientific name, for smartness
     my $desc_fname = 'https://hgdownload.soe.ucsc.edu/gbdb/'.$shorthand_species_name.'/html/description.html';
     my $scientific_name = $shorthand_species_name; # Placeholder
-    if (!system("wget -O $temp_html_fname $desc_fname")) {
+    if (!system("wget --quiet -O $temp_html_fname $desc_fname")) {
 
 	# We'll look for the scientific name in either the genome ID (preferred)
 	# or under the photo description.
@@ -219,7 +244,7 @@ while (!eof($UCSCf)) {
     # 1. Identify the genome download link
 
     # Download the directory
-    if (system("wget -O $temp_html_fname $genome_dir_fname")) {
+    if (system("wget --quiet -O $temp_html_fname $genome_dir_fname")) {
 	my $trouble_key = $plain_species_name.' ('.$shorthand_species_name.')';
 	$TroubleSpecies{$trouble_key} = 1;
 	$ucscf_line = <$UCSCf>;
@@ -256,7 +281,7 @@ while (!eof($UCSCf)) {
     # If there's a directory with gtfs it'll be named 'genes' (assuming conventions
     # from time of writing).
     my $gtf_dir_fname = $genome_dir_fname.'genes/';
-    next if (system("wget -O $temp_html_fname $gtf_dir_fname"));
+    next if (system("wget --quiet -O $temp_html_fname $gtf_dir_fname"));
     
     # Get the names of all the gtf files
     my $Genesf = OpenInputFile($temp_html_fname);
@@ -551,10 +576,190 @@ print "\n";
 
 #################################################################
 #
-#  FUNCTION:  
+#  FUNCTION:  ParseSpeciesTreeFile
 #
+sub ParseSpeciesTreeFile
+{
+    my $treefname = shift;
+    my $mapfname  = shift;
+
+    my $latin_to_common_ref = GetLatinToCommon($mapfname);
+    my %LatinToCommon = %{$latin_to_common_ref};
+
+    my $treef = OpenInputFile($treefname);
+    my $giant_str = '';
+    while (my $line = <$treef>) {
+
+	$line =~ s/\n|\r//g;
+	next if (!$line);
+
+	if ($line =~ /\)/) {
+	    $line = '),'; # We only want species, not families etc.
+	}
+	$line =~ s/\'//g;
+	$line =~ s/\:\d+//g;
+	$line =~ s/\s/\_/g;
+
+	$giant_str = $giant_str.$line;
+
+    }
+    close($treef);
+
+    $giant_str =~ s/\,$//;
+    return RecursiveTreeCheck(lc($giant_str),\%LatinToCommon);
+
+}
 
 
+
+
+
+
+#################################################################
+#
+#  FUNCTION:  RecursiveTreeCheck
+#
+sub RecursiveTreeCheck
+{
+    my $in_tree_str = shift;
+    my @TreeChars = split(//,$in_tree_str);
+
+    my $latin_to_common_ref = shift;
+    my %LatinToCommon = %{$latin_to_common_ref};
+
+    # What we'll do here is sort all characters into either being
+    # at this sub-tree's node, or belonging to a subtree of their own
+    my $tree_depth = 0;
+    my $node_str = '';
+    my $subtree_str;
+    my @SubTreeStrs;
+    for (my $char_pos=1; $char_pos < scalar(@TreeChars)-1; $char_pos++) {
+
+	my $char = $TreeChars[$char_pos];
+
+	if ($char eq '(') {
+	    $subtree_str = '' if (!$tree_depth);
+	    $tree_depth++;
+	}
+
+	if ($tree_depth) { $subtree_str = $subtree_str.$char; }
+	else             { $node_str    =    $node_str.$char; }
+
+	if ($char eq ')') {
+	    $tree_depth--;
+	    push(@SubTreeStrs,$subtree_str) if (!$tree_depth);
+	}
+	
+    }
+
+    while ($node_str =~ /\,\,/) {
+	$node_str =~ s/\,\,/\,/;
+    }
+
+    my $latin_out_tree_str = '';
+    my $common_out_tree_str = '';
+    foreach my $species (split(/\,/,$node_str)) {
+
+	my $common_species;
+	if ($LatinToCommon{$species}) {
+	    $common_species = $LatinToCommon{$species};
+	} else {
+	    $common_species = $species;
+	}
+	
+	if ($latin_out_tree_str) {
+	    $latin_out_tree_str = '('.$latin_out_tree_str.','.$species.')';
+	    $common_out_tree_str = '('.$common_out_tree_str.','.$common_species.')';
+	} else {
+	    $latin_out_tree_str = $species;
+	    $common_out_tree_str = $common_species;
+	}
+
+    }
+
+    my $latin_out_subtree_str = '';
+    my $common_out_subtree_str = '';
+    for (my $i=0; $i<scalar(@SubTreeStrs); $i++) {
+
+	my ($latin_subtree_str,$common_subtree_str)
+	    = RecursiveTreeCheck($SubTreeStrs[$i],\%LatinToCommon);
+
+	if ($latin_out_subtree_str) {
+	    $latin_out_subtree_str = '('.$latin_out_subtree_str.','.$latin_subtree_str.')';
+	    $common_out_subtree_str = '('.$common_out_subtree_str.','.$latin_subtree_str.')';
+	} else {
+	    $latin_out_subtree_str = $latin_subtree_str;
+	    $common_out_subtree_str = $common_subtree_str;
+	}
+
+    }
+
+    if ($latin_out_subtree_str) {
+	$latin_out_tree_str = '('.$latin_out_tree_str.','.$latin_out_subtree_str.')';
+	$common_out_tree_str = '('.$common_out_tree_str.','.$common_out_subtree_str.')';
+    }
+
+    return ($latin_out_tree_str,$common_out_tree_str);
+    
+}
+
+
+
+
+
+
+#################################################################
+#
+#  FUNCTION:  GetLatinToCommon
+#
+sub GetLatinToCommon
+{
+    my $fname = shift;
+    return GetStaticLatinToCommon() if ($fname eq '-');
+
+    my $mapf = OpenInputFile($fname);
+    my %LatinToCommon;
+    while (my $line = <$mapf>) {
+
+	if ($line =~ /^([^\=]+)\=([^\=]+)$/) {
+
+	    my $latin_name  = lc($1);
+	    my $common_name = lc($2);
+
+	    $latin_name =~ s/^\s+//;
+	    $latin_name =~ s/\s+$//;
+	    $latin_name =~ s/\s/\_/g;
+
+	    $common_name =~ s/^\s+//;
+	    $common_name =~ s/\s+$//;
+	    $common_name =~ s/\s/\_/g;
+
+	    $LatinToCommon{$latin_name} = $common_name;
+
+	}
+
+    }
+    close($mapf);
+
+    return \%LatinToCommon;
+    
+}
+
+
+
+
+
+
+#################################################################
+#
+#  FUNCTION:  GetStaticLatinToCommon
+#
+sub GetStaticLatinToCommon
+{
+    my %LatinToCommon;
+
+    return \%LatinToCommon;
+}
 
 
 
