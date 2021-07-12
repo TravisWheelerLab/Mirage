@@ -8,8 +8,11 @@ use POSIX;
 #
 sub ParseSpeciesTreeFile;
 sub RecursiveTreeCheck;
+sub RecursiveTreeReduce;
 sub GetLatinToCommon;
 sub GetStaticLatinToCommon;
+sub GetStaticLatinTree;
+sub GetStaticCommonTree;
 
 
 #  BEUREAUCRATIC SUBROUTINES
@@ -139,7 +142,13 @@ my %SpeciesToGenomes;
 my %SpeciesToSciNames;
 my %SpeciesToGTFs;
 my %TroubleSpecies;
+
 my $ucscf_line = <$UCSCf>; # prime our reader
+
+# Let the user know what we're doing, since there'll be a bit of time
+# spent performing quiet downloads
+print "\n  Scanning UCSC Genome Browser for available genomes...\n";
+
 while (!eof($UCSCf)) {
 
     # Look for the next section break (these had BETTER stay consistent!)
@@ -439,8 +448,19 @@ foreach my $species (sort keys %SpeciesToGenomes) {
 # how we did overall.
 
 
+# ... But first, how about we decide what our species trees should look like?
+#
+my %ReducedSpeciesToSciNames;
+foreach my $species (keys %SpeciesToGenomes) {
+    $ReducedSpeciesToSciNames{$species} = $SpeciesToSciNames{$species};
+}
+my ($common_tree,$latin_tree)
+    = RecursiveTreeReduce(GetStaticCommonTree(),\%ReducedSpeciesToSciNames);
+
+
 # 1. Common name species guide
 my $SpeciesGuide = OpenOutputFile($outdirname.'Common-Species-Guide');
+print $SpeciesGuide "$common_tree\n";
 foreach my $species (sort keys %SpeciesToGenomes) {
 
     my $genome = $SpeciesToGenomes{$species};
@@ -465,9 +485,12 @@ close($SpeciesGuide);
 
 # 2. Scientific name species guide
 $SpeciesGuide = OpenOutputFile($outdirname.'Latin-Species-Guide');
+print $SpeciesGuide "$latin_tree\n";
+my %AllSciSpeciesNames;
 foreach my $species (sort keys %SpeciesToGenomes) {
 
     my $scientific_name = $SpeciesToSciNames{$species};
+    $AllSciSpeciesNames{$scientific_name} = 1;
     
     my $genome = $SpeciesToGenomes{$species};
 
@@ -488,6 +511,14 @@ foreach my $species (sort keys %SpeciesToGenomes) {
 
 }
 close($SpeciesGuide);
+
+# If any of the requested species weren't in UCSC, we'll want to be sure to
+# add them to the 'TroubleSpecies' hash
+foreach my $species (keys %SpeciesToDownload) {
+    if (!$SpeciesToGenomes{$species} && !$AllSciSpeciesNames{$species}) {
+	$TroubleSpecies{$species} = 1;
+    }
+}
 
 my %AllSpecies;
 foreach my $species (keys %SpeciesToGenomes) { $AllSpecies{$species} = 1; }
@@ -686,7 +717,7 @@ sub RecursiveTreeCheck
 
 	if ($latin_out_subtree_str) {
 	    $latin_out_subtree_str = '('.$latin_out_subtree_str.','.$latin_subtree_str.')';
-	    $common_out_subtree_str = '('.$common_out_subtree_str.','.$latin_subtree_str.')';
+	    $common_out_subtree_str = '('.$common_out_subtree_str.','.$common_subtree_str.')';
 	} else {
 	    $latin_out_subtree_str = $latin_subtree_str;
 	    $common_out_subtree_str = $common_subtree_str;
@@ -701,6 +732,99 @@ sub RecursiveTreeCheck
 
     return ($latin_out_tree_str,$common_out_tree_str);
     
+}
+
+
+
+
+
+
+#################################################################
+#
+#  FUNCTION:  RecursiveTreeReduce
+#
+sub RecursiveTreeReduce
+{
+    my $in_tree_str = shift;
+    my @TreeChars = split(//,$in_tree_str);
+    
+    my $common_to_latin_ref = shift;
+    my %CommonToLatin = %{$common_to_latin_ref};
+
+    # Sadly, I'm essentially repeating what's in 'RecursiveTreeCheck' but with
+    # the additional bit of computation involved in reacting to absent species
+    my $tree_depth = 0;
+    my $node_str = '';
+    my $subtree_str;
+    my @SubTreeStrs;
+    for (my $char_pos=1; $char_pos < scalar(@TreeChars)-1; $char_pos++) {
+
+	my $char = $TreeChars[$char_pos];
+
+	if ($char eq '(') {
+	    $subtree_str = '' if (!$tree_depth);
+	    $tree_depth++;
+	}
+
+	if ($tree_depth) { $subtree_str = $subtree_str.$char; }
+	else             { $node_str    =    $node_str.$char; }
+
+	if ($char eq ')') {
+	    $tree_depth--;
+	    push(@SubTreeStrs,$subtree_str) if (!$tree_depth);
+	}
+	
+    }
+
+    # Because we're going off our pre-formatted string, we have a guarantee that
+    # no node will have more than two species
+    my $common_node_str = '';
+    my $latin_node_str = '';
+    foreach my $species (split(/\,/,$node_str)) {
+	if ($CommonToLatin{$species}) {
+	    if ($common_node_str) {
+		$common_node_str = '('.$common_node_str.','.$species.')';
+		$latin_node_str = '('.$latin_node_str.','.$CommonToLatin{$species}.')';
+	    } else {
+		$common_node_str = $species;
+		$latin_node_str = $CommonToLatin{$species};
+	    }
+	}
+    }
+
+    # Get the subtree string(s) (if there are any)
+    my $common_subtree_str = '';
+    my $latin_subtree_str = '';
+    foreach $subtree_str (@SubTreeStrs) {
+	my ($common_sub_str,$latin_sub_str)
+	    = RecursiveTreeReduce($subtree_str,\%CommonToLatin);
+	if ($common_subtree_str) {
+	    $common_subtree_str = '('.$common_subtree_str.','.$common_sub_str.')';
+	    $latin_subtree_str = '('.$latin_subtree_str.','.$latin_sub_str.')';
+	} else {
+	    $common_subtree_str = $common_sub_str;
+	    $latin_subtree_str = $latin_sub_str;
+	}
+    }
+
+    # Put it all together!
+    my $common_out_str = '';
+    my $latin_out_str = '';
+    if ($common_node_str) {
+	if ($common_subtree_str) {
+	    $common_out_str = '('.$common_node_str.','.$common_subtree_str.')';
+	    $latin_out_str = '('.$latin_node_str.','.$latin_subtree_str.')';
+	} else {
+	    $common_out_str = $common_node_str;
+	    $latin_out_str = $latin_node_str;
+	}
+    } elsif ($common_subtree_str) {
+	$common_out_str = $common_subtree_str;
+	$latin_out_str = $latin_subtree_str;
+    }
+
+    return ($common_out_str,$latin_out_str);
+
 }
 
 
@@ -758,7 +882,111 @@ sub GetStaticLatinToCommon
 {
     my %LatinToCommon;
 
+    $LatinToCommon{'anopheles_gambiae'} = 'a._gambiae';
+    $LatinToCommon{'vicugna_pacos'} = 'alpaca';
+    $LatinToCommon{'alligator_mississippiensis'} = 'american_alligator';
+    $LatinToCommon{'dasypus_novemcinctus'} = 'armadillo';
+    $LatinToCommon{'gadus_morhua'} = 'atlantic_cod';
+    $LatinToCommon{'papio_anubis'} = 'baboon';
+    $LatinToCommon{'bison_bison_bison'} = 'bison';
+    $LatinToCommon{'pan_paniscus'} = 'bonobo';
+    $LatinToCommon{'apteryx_australis'} = 'brown_kiwi';
+    $LatinToCommon{'melopsittacus_undulatus'} = 'budgerigar';
+    $LatinToCommon{'otolemur_garnettii'} = 'bushbaby';
+    $LatinToCommon{'felis_catus'} = 'cat';
+    $LatinToCommon{'gallus_gallus'} = 'chicken';
+    $LatinToCommon{'pan_troglodytes'} = 'chimp';
+    $LatinToCommon{'cricetulus_griseus'} = 'chinese_hamster';
+    $LatinToCommon{'manis_pentadactyla'} = 'chinese_pangolin';
+    $LatinToCommon{'ciona_intestinalis'} = 'ciona';
+    $LatinToCommon{'latimeria_chalumnae'} = 'coelacanth';
+    $LatinToCommon{'bos_taurus'} = 'cow';
+    $LatinToCommon{'macaca_fascicularis'} = 'crab-eating_macaque';
+    $LatinToCommon{'drosophila_melanogaster'} = 'd._melanogaster';
+    $LatinToCommon{'canis_lupus_familiaris'} = 'dog';
+    $LatinToCommon{'tursiops_truncatus'} = 'dolphin';
+    $LatinToCommon{'loxodonta_africana'} = 'elephant';
+    $LatinToCommon{'callorhinchus_milii'} = 'elephant_shark';
+    $LatinToCommon{'mustela_putorius_furo'} = 'ferret';
+    $LatinToCommon{'takifugu_rubripes'} = 'fugu';
+    $LatinToCommon{'thamnophis_sirtalis'} = 'garter_snake';
+    $LatinToCommon{'nomascus_leucogenys'} = 'gibbon';
+    $LatinToCommon{'aquila_chrysaetos_canadensis'} = 'golden_eagle';
+    $LatinToCommon{'rhinopithecus_roxellana'} = 'golden_snub-nosed_monkey';
+    $LatinToCommon{'gorilla_gorilla_gorilla'} = 'gorilla';
+    $LatinToCommon{'chlorocebus_sabaeus'} = 'green_monkey';
+    $LatinToCommon{'cavia_porcellus'} = 'guinea_pig';
+    $LatinToCommon{'neomonachus_schauinslandi'} = 'hawaiian_monk_seal';
+    $LatinToCommon{'erinaceus_europaeus'} = 'hedgehog';
+    $LatinToCommon{'equus_caballus'} = 'horse';
+    $LatinToCommon{'homo_sapiens'} = 'human';
+    $LatinToCommon{'dipodomys_ordii'} = 'kangaroo_rat';
+    $LatinToCommon{'petromyzon_marinus'} = 'lamprey';
+    $LatinToCommon{'anolis_carolinensis'} = 'lizard';
+    $LatinToCommon{'galeopterus_variegatus'} = 'malayan_flying_lemur';
+    $LatinToCommon{'trichechus_manatus_latirostris'} = 'manatee';
+    $LatinToCommon{'callithrix_jacchus'} = 'marmoset';
+    $LatinToCommon{'oryzias_latipes'} = 'medaka';
+    $LatinToCommon{'geospiza_fortis'} = 'medium_ground_finch';
+    $LatinToCommon{'pteropus_vampyrus'} = 'megabat';
+    $LatinToCommon{'myotis_lucifugus'} = 'microbat';
+    $LatinToCommon{'balaenoptera_acutorostrata_scammoni'} = 'minke_whale';
+    $LatinToCommon{'mus_musculus'} = 'mouse';
+    $LatinToCommon{'microcebus_murinus'} = 'mouse_lemur';
+    $LatinToCommon{'heterocephalus_glaber'} = 'naked_mole-rat';
+    $LatinToCommon{'oreochromis_niloticus'} = 'nile_tilapia';
+    $LatinToCommon{'pongo_pygmaeus_abelii'} = 'orangutan';
+    $LatinToCommon{'chrysemys_picta_bellii'} = 'painted_turtle';
+    $LatinToCommon{'ailuropoda_melanoleuca'} = 'panda';
+    $LatinToCommon{'sus_scrofa'} = 'pig';
+    $LatinToCommon{'ochotona_princeps'} = 'pika';
+    $LatinToCommon{'ornithorhynchus_anatinus'} = 'platypus';
+    $LatinToCommon{'nasalis_larvatus'} = 'proboscis_monkey';
+    $LatinToCommon{'oryctolagus_cuniculus'} = 'rabbit';
+    $LatinToCommon{'rattus_norvegicus'} = 'rat';
+    $LatinToCommon{'macaca_mulatta'} = 'rhesus';
+    $LatinToCommon{'procavia_capensis'} = 'rock_hyrax';
+    $LatinToCommon{'aplysia_californica'} = 'sea_hare';
+    $LatinToCommon{'ovis_aries'} = 'sheep';
+    $LatinToCommon{'sorex_araneus'} = 'shrew';
+    $LatinToCommon{'choloepus_hoffmanni'} = 'sloth';
+    $LatinToCommon{'enhydra_lutris_nereis'} = 'southern_sea_otter';
+    $LatinToCommon{'spermophilus_tridecemlineatus'} = 'squirrel';
+    $LatinToCommon{'saimiri_boliviensis'} = 'squirrel_monkey';
+    $LatinToCommon{'tarsius_syrichta'} = 'tarsier';
+    $LatinToCommon{'sarcophilus_harrisii'} = 'tasmanian_devil';
+    $LatinToCommon{'echinops_telfairi'} = 'tenrec';
+    $LatinToCommon{'nanorana_parkeri'} = 'tibetan_frog';
+    $LatinToCommon{'tupaia_belangeri'} = 'tree_shrew';
+    $LatinToCommon{'meleagris_gallopavo'} = 'turkey';
+    $LatinToCommon{'strongylocentrotus_purpuratus'} = 'urchin';
+    $LatinToCommon{'notamacropus_eugenii'} = 'wallaby';
+    $LatinToCommon{'ceratotherium_simum'} = 'white_rhinoceros';
+    $LatinToCommon{'xenopus_tropicalis'} = 'x._tropicalis';
+    $LatinToCommon{'taeniopygia_guttata'} = 'zebra_finch';
+    $LatinToCommon{'danio_rerio'} = 'zebrafish';
+    
     return \%LatinToCommon;
+
+}
+
+
+
+
+
+
+
+#################################################################
+#
+#  FUNCTION:  GetStaticLatinTree / GetStaticCommonTree
+#
+sub GetStaticLatinTree
+{
+    return '((strongylocentrotus_purpuratus,aplysia_californica),(((((((alligator_mississippiensis,chrysemys_picta_bellii),latimeria_chalumnae),callorhinchus_milii),petromyzon_marinus),ciona_intestinalis),(((((thamnophis_sirtalis,anolis_carolinensis),((((((((((((galeopterus_variegatus,manis_pentadactyla),trichechus_manatus_latirostris),tupaia_belangeri),procavia_capensis),loxodonta_africana),echinops_telfairi),dasypus_novemcinctus),choloepus_hoffmanni),notamacropus_eugenii),sarcophilus_harrisii),ornithorhynchus_anatinus),((((((((pteropus_vampyrus,myotis_lucifugus),(((((ictidomys_tridecemlineatus,heterocephalus_glaber),cavia_porcellus),cricetulus_griseus),dipodomys_ordii),(rattus_norvegicus,mus_musculus))),(oryctolagus_cuniculus,ochotona_princeps)),(ceratotherium_simum,equus_caballus)),((((balaenoptera_acutorostrata_scammoni,vicugna_pacos),sus_scrofa),tursiops_truncatus),((bison_bison_bison,ovis_aries),bos_taurus))),((((neomonachus_schauinslandi,felis_catus),ailuropoda_melanoleuca),canis_lupus_familiaris),(enhydra_lutris_nereis,mustela_putorius_furo))),((((carlito_syrichta,nomascus_leucogenys),otolemur_garnettii),microcebus_murinus),(((((homo_sapiens,pongo_abelii),gorilla_gorilla_gorilla),(pan_troglodytes,pan_paniscus)),((((rhinopithecus_roxellana,chlorocebus_sabaeus),nasalis_larvatus),papio_anubis),(macaca_mulatta,macaca_fascicularis))),(saimiri_boliviensis,callithrix_jacchus)))),(sorex_araneus,erinaceus_europaeus)))),(((aquila_chrysaetos_canadensis,melopsittacus_undulatus),apteryx_australis),((taeniopygia_guttata,geospiza_fortis),(meleagris_gallopavo,gallus_gallus)))),(nanorana_parkeri,xenopus_tropicalis)),((((takifugu_rubripes,oreochromis_niloticus),oryzias_latipes),gadus_morhua),danio_rerio))),(drosophila_melanogaster,anopheles_gambiae)))';
+}
+sub GetStaticCommonTree
+{
+    return '((urchin,sea_hare),(((((((american_alligator,painted_turtle),coelacanth),elephant_shark),lamprey),ciona),(((((garter_snake,lizard),((((((((((((malayan_flying_lemur,chinese_pangolin),manatee),tree_shrew),rock_hyrax),elephant),tenrec),armadillo),sloth),wallaby),tasmanian_devil),platypus),((((((((megabat,microbat),(((((ictidomys_tridecemlineatus,naked_mole-rat),guinea_pig),chinese_hamster),kangaroo_rat),(rat,mouse))),(rabbit,pika)),(white_rhinoceros,horse)),((((minke_whale,alpaca),pig),dolphin),((bison,sheep),cow))),((((hawaiian_monk_seal,cat),panda),dog),(southern_sea_otter,ferret))),((((carlito_syrichta,gibbon),bushbaby),mouse_lemur),(((((human,pongo_abelii),gorilla),(chimp,bonobo)),((((golden_snub-nosed_monkey,green_monkey),proboscis_monkey),baboon),(rhesus,crab-eating_macaque))),(squirrel_monkey,marmoset)))),(shrew,hedgehog)))),(((golden_eagle,budgerigar),brown_kiwi),((zebra_finch,medium_ground_finch),(turkey,chicken)))),(tibetan_frog,x._tropicalis)),((((fugu,nile_tilapia),medaka),atlantic_cod),zebrafish))),(d._melanogaster,a._gambiae)))';
 }
 
 
