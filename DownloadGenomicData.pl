@@ -738,7 +738,6 @@ sub RecursiveTreeCheck
 
 
 
-
 #################################################################
 #
 #  FUNCTION:  RecursiveTreeReduce
@@ -798,6 +797,7 @@ sub RecursiveTreeReduce
     foreach $subtree_str (@SubTreeStrs) {
 	my ($common_sub_str,$latin_sub_str)
 	    = RecursiveTreeReduce($subtree_str,\%CommonToLatin);
+	next if (!$common_sub_str);
 	if ($common_subtree_str) {
 	    $common_subtree_str = '('.$common_subtree_str.','.$common_sub_str.')';
 	    $latin_subtree_str = '('.$latin_subtree_str.','.$latin_sub_str.')';
