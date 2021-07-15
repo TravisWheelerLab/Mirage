@@ -46,6 +46,8 @@ sub AlignMiscSeqs;
 sub MergeAlignments;
 sub FinalizeIntraSpeciesMSA;
 sub EvaluateMissDir;
+sub PrintTimingInfo;
+sub FormatTimeString;
 
 
 # VERSION INFO
@@ -274,6 +276,11 @@ EvaluateMissDir($misses_dirname);
 
 # No more progress to be made!
 system("rm -rf \"\$progress_dirname\"");
+
+# If we've been collecting timing data, now's the time to let it loose
+if ($timed) {
+    PrintTimingInfo(\@QuilterTimeStats,\@MapsToMSAsTimeStats,\@Species,$num_species-1,$TotalRuntime);
+}
 
 # WE DID IT!
 ClearProgress();
@@ -1849,6 +1856,82 @@ sub EvaluateMissDir
     
 }
 
+
+
+
+
+########################################################################
+#
+#  Function: PrintTimingInfo
+#
+sub PrintTimingInfo
+{
+    my $q_ts_ref = shift;
+    my $mtm_ts_ref = shift;
+    my $species_ref = shift;
+    my $num_species = shift;
+    my $total_runtime = shift;
+
+    my @QuilterTimeStats = @{$q_ts_ref};
+    my @MapsToMSAsTimeStats = @{$mtm_ts_ref};
+    my @Species = @{$species_ref};
+
+    print "\n";
+    print "  Timing Data\n";
+    print "  -----------\n";
+    print "\n";
+
+    for (my $i=0; $i<$num_species; $i++) {
+
+	my $q_time = FormatTimeString($QuilterTimeStats[$i]);
+	my $mtm_time = FormatTimeString($MapsToMSAsTimeStats[$i]);
+
+	my $species = $Species[$i];
+	if ($species =~ /^([a-z])/) {
+	    my $first_char = uc($1);
+	    $species =~ s/^[a-z]/$first_char/;
+	}
+	
+	print " + $species\n";
+	print "   Quilter (Mapping) : $q_time\n";
+	print "   Mappings To MSAs  : $mtm_time\n";
+	print "\n";
+
+    }
+
+    $total_runtime = FormatTimeString($total_runtime);
+    print "\n Total Runtime: $total_runtime\n\n";
+    
+}
+
+
+
+
+
+########################################################################
+#
+#  Function: FormatTimeString
+#
+sub FormatTimeString
+{
+    my $seconds = shift;
+    $seconds = int($seconds);
+    
+    my $hours = int($seconds / 3600);
+    $seconds -= $hours * 3600;
+
+    my $minutes = int($seconds / 60);
+    $seconds -= $minutes * 60;
+
+    # We'll go in descending order because we want to make sure that if we're
+    # in a situation where there are hours we also capture the lesser increments,
+    # even if one or both are zero
+    my $string;
+    if    ($hours)   { return " $hours hrs  $minutes mins  $seconds s"; }
+    elsif ($minutes) { return             " $minutes mins  $seconds s"; }
+    else             { return                            " $seconds s"; }
+    
+}
 
 
 
