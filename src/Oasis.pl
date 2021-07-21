@@ -2320,10 +2320,10 @@ sub RecordGhostMSAs
 	    $sfetch_cmd = $sfetch_cmd.' '.$SpeciesToGenomes{$target_species}.' '.$chr;
 	    my $nucl_inf = OpenSystemCommand($sfetch_cmd);
 	    my $header_line = <$nucl_inf>;
-	    my $nucl_seq;
+	    my $nucl_seq = '';
 	    while (my $line = <$nucl_inf>) {
 		$line =~ s/\n|\r//g;
-		$nucl_seq = $nucl_seq.lc($line);
+		$nucl_seq = $nucl_seq.uc($line);
 	    }
 	    close($nucl_inf);
 
@@ -2372,46 +2372,196 @@ sub RecordGhostMSAs
 		my $amino_msa_ref = MultiAminoSeqAli(\@AminoMSA,\@SourceSeqChars);
 		@AminoMSA = @{$amino_msa_ref};
 	    }
+	    my $amino_msa_len = scalar(@AminoMSA);
 
-	    # The current alignment is grouped such that each column is an entry
-	    # in our array, so we'll convert it over to a more matrix-y thing.
+	    # What are the actual nucleotide bounds of our putative coding region?
+	    my $true_nucl_start = $search_start;
+	    my $true_nucl_end;
+	    if ($revcomp) {
+		$true_nucl_start -= $frame;
+		$true_nucl_end = $true_nucl_start+1 - (3 * length($best_frame_trans));
+	    } else {
+		$true_nucl_start += $frame;
+		$true_nucl_end = $true_nucl_start-1 + (3 * length($best_frame_trans));
+	    }
+
+	    
+	    # If we have translated sequence aligned to nothing, we'll scrape it off
+	    
+	    # 1. Checking the left side
+	    #
+	    my $start_col=0;
+	    while ($start_col<$amino_msa_len) {
+
+		my @Col = split(//,$AminoMSA[$start_col]);
+		my $trim_it = 0;
+		if ($Col[0] =~ /[A-Z]/) {
+		    $trim_it = 1;
+		    for (my $i=1; $i<=$num_source_species; $i++) {
+			if ($Col[$i] ne '-') {
+			    $trim_it = 0;
+			    last;
+			}
+		    }
+		}
+
+		last if (!$trim_it);
+
+		$start_col++;
+		if ($revcomp) { $true_nucl_start -= 3; }
+		else          { $true_nucl_start += 3; }
+
+	    }
+
+	    # If we didn't scrape anything off, we'll need to see if extending our
+	    # nucleotide pull outwards makes sense
+	    if ($start_col == 0) {
+		for (my $col_id=0; $col_id<$amino_msa_len; $col_id++) {
+		    if ($AminoMSA[$col_id] =~ /^\-/) {
+			$AminoMSA[$col_id] =~ s/^\-/ /;
+			if ($revcomp) { $true_nucl_start += 3; }
+			else          { $true_nucl_start -= 3; }
+		    } else {
+			last;
+		    }
+		}		
+	    }
+
+	    # 1. Checking the right side
+	    #
+	    my $end_col=$amino_msa_len-1;
+	    while ($end_col>=0) {
+
+		my @Col = split(//,$AminoMSA[$end_col]);
+		my $trim_it = 0;
+		if ($Col[0] =~ /[A-Z]/) {
+		    $trim_it = 1;
+		    for (my $i=1; $i<=$num_source_species; $i++) {
+			if ($Col[$i] ne '-') {
+			    $trim_it = 0;
+			    last;
+			}
+		    }
+		}
+
+		last if (!$trim_it);
+
+		$end_col--;
+		if ($revcomp) { $true_nucl_end += 3; }
+		else          { $true_nucl_end -= 3; }
+
+	    }
+
+	    # If we didn't scrape anything off, we'll need to see if extending our
+	    # nucleotide pull outwards makes sense
+	    if ($end_col == $amino_msa_len-1) {
+		for (my $col_id=$amino_msa_len-1; $col_id>=0; $col_id--) {
+		    if ($AminoMSA[$col_id] =~ /^\-/) {
+			$AminoMSA[$col_id] =~ s/^\-/ /;
+			if ($revcomp) { $true_nucl_end -= 3; }
+			else          { $true_nucl_end += 3; }
+		    } else {
+			last;
+		    }
+		}
+	    }
+
+
+	    # The last thing we're going to do is extend out 60 nucls on each side
+	    # of the alignment...
+	    if ($revcomp) {
+		$true_nucl_start += 60;
+		$true_nucl_end   -= 60;
+	    } else {
+		$true_nucl_start -= 60;
+		$true_nucl_end   += 60;
+	    }
+	    
+	    # Great!  Now that we have our final nucleotide region, let's grab
+	    # those nucleotides.
+	    $sfetch_cmd = $sfetch.' -range '.$true_nucl_start.'..'.$true_nucl_end;
+	    $sfetch_cmd = $sfetch_cmd.' '.$SpeciesToGenomes{$target_species}.' '.$chr;
+	    $nucl_inf = OpenSystemCommand($sfetch_cmd);
+	    $header_line = <$nucl_inf>;
+	    $nucl_seq = '';
+	    while (my $line = <$nucl_inf>) {
+		$line =~ s/\n|\r//g;
+		$nucl_seq = $nucl_seq.uc($line);
+	    }
+	    close($nucl_inf);
+	    @NuclSeq = split(//,$nucl_seq);
+
+
+	    # FINALLY TIME TO SKETCH OUR FINAL MSA
 	    my @MSA;
-	    my $msa_len = 0;
-
-	    # Add in the leading nucleotides
-	    while ($msa_len < $best_frame_num) {
+	    my $msa_len=0;
+	    
+	    # 1. The lead-in nucleotides
+	    my $nucl_seq_pos = 0;
+	    while ($nucl_seq_pos < 60) {
 		$MSA[0][$msa_len] = ' ';
-		$MSA[1][$msa_len] = lc($NuclSeq[$msa_len]);
+		$MSA[1][$msa_len] = lc($NuclSeq[$nucl_seq_pos]);
 		for (my $i=0; $i<$num_source_species; $i++) {
 		    $MSA[$i+2][$msa_len] = ' ';
 		}
+		$nucl_seq_pos++;
+		$msa_len++;
 	    }
-	    
-	    for (my $j=0; $j<scalar(@AminoMSA); $j++) {
 
-		my @Chars = split(//,$AminoMSA[$j]);
+	    # 2. The amino MSA
+	    for (my $col_id=$start_col; $col_id<=$end_col; $col_id++) {
 
-		# Translated target
+		my @Col = split(//,$AminoMSA[$col_id]);
+
+		# 2.a. The translated target amino sequence
 		$MSA[0][$msa_len]   = ' ';
-		$MSA[0][$msa_len+1] = $Chars[0];
+		$MSA[0][$msa_len+1] = $Col[0];
 		$MSA[0][$msa_len+2] = ' ';
 		
-		for (my $i=0; $i<$num_source_species; $i++) {
-		    $Chars[$i+1] = lc($Chars[$i+1]) if ($Chars[$i+1] ne $Chars[0]);
-		    $MSA[$i+2][$msa_len]   = ' ';
-		    $MSA[$i+2][$msa_len+1] = $Chars[$i+1]; # Skip 0 (the target)
-		    $MSA[$i+2][$msa_len+2] = ' ';
+		# 2.b. The target nucleotides
+		if ($Col[0] eq '-') {
+		    $MSA[1][$msa_len]   = '-';
+		    $MSA[1][$msa_len+1] = '-';
+		    $MSA[1][$msa_len+2] = '-';
+		} elsif ($Col[0] eq ' ') {
+		    $MSA[1][$msa_len]   = lc($NuclSeq[$nucl_seq_pos++]);
+		    $MSA[1][$msa_len+1] = lc($NuclSeq[$nucl_seq_pos++]);
+		    $MSA[1][$msa_len+2] = lc($NuclSeq[$nucl_seq_pos++]);
+		} else {
+		    $MSA[1][$msa_len]   = $NuclSeq[$nucl_seq_pos++];
+		    $MSA[1][$msa_len+1] = $NuclSeq[$nucl_seq_pos++];
+		    $MSA[1][$msa_len+2] = $NuclSeq[$nucl_seq_pos++];
 		}
 
+		# 3.b. The source amino sequence(s)
+		for (my $i=0; $i<$num_source_species; $i++) {
+		    $MSA[$i+2][$msa_len]   = ' ';
+		    $MSA[$i+2][$msa_len+1] = $Col[$i+1]; # Skip 0 (the target)
+		    $MSA[$i+2][$msa_len+2] = ' ';
+		    # If there's a mismatch, we'll lower-case-ify the source amino
+		    $MSA[$i+2][$msa_len+1] = lc($Col[$i+1]) if ($Col[0] ne $Col[$i+1]);
+		}
+
+		# PROGRESS!
+		$msa_len += 3;
+		
+	    }
+
+	    # 3. The lead-out nucleotides
+	    while ($nucl_seq_pos < scalar(@NuclSeq)) {
+		$MSA[0][$msa_len] = ' ';
+		$MSA[1][$msa_len] = lc($NuclSeq[$nucl_seq_pos]);
+		for (my $i=0; $i<$num_source_species; $i++) {
+		    $MSA[$i+2][$msa_len] = ' ';
+		}
+		$nucl_seq_pos++;
+		$msa_len++;		
 	    }
 
 
-	    # WE ARE SO CLOSE!
-
-
-	    # Our only remaining task is to 
+	    # THAT'S IT!
+	    # Now the only remaining work is the final formatting of the string!
 	    
-
 	}
 
 
@@ -2442,15 +2592,17 @@ sub MatchMismatchScore
     my $len2 = scalar(@Seq2);
 
     my @Matrix;
-    for (my $i=0; $i<=$len1; $i++) { $Matrix[$i][0] = 0; }
-    for (my $j=0; $j<=$len2; $j++) { $Matrix[0][$j] = 0; }
+    for (my $i=0; $i<=$len1; $i++) { $Matrix[$i][0] = 0-$i; }
+    for (my $j=0; $j<=$len2; $j++) { $Matrix[0][$j] = 0-$i; }
 
     for (my $i=1; $i<=$len1; $i++) {
 	for (my $j=1; $j<=$len2; $j++) {
 	    $Matrix[$i][$j]
-		= Max(Max($Matrix[$i-1][$j],$Matrix[$i][$j-1]),$Matrix[$i-1][$j-1]);
+		= Max(Max($Matrix[$i-1][$j],$Matrix[$i][$j-1])-1,$Matrix[$i-1][$j-1]);
 	    if ($Seq1[$i-1] eq $Seq2[$j-1]) {
 		$Matrix[$i][$j]++;
+	    } else {
+		$Matrix[$i][$j]--;
 	    }
 	}
     }
@@ -2524,52 +2676,119 @@ sub MultiAminoSeqAli
     my $len1 = scalar(@Seqs1);
     my $len2 = scalar(@Seqs2);
 
-    # We won't use affine gapping because (1.) the sequences should be remarkably
-    # similar to one another, and (2.) that would take more effort
-    my $mismatch_score = -2.0;
-    my @Matrix;
-    for (my $i=0; $i<=$len1; $i++) { $Matrix[$i][0] = $i*$mismatch_score; }
-    for (my $j=0; $j<=$len2; $j++) { $Matrix[0][$j] = $j*$mismatch_score; }
+    # Let's be good and proper and use affine gapping
+    my $gap_open = -5.0;
+    my $gap_end  = -1.0;
+    my $gap_ext  = -2.0;
+    my @Match;
+    my @HorizGap;
+    my @VertGap;
+    $Match[0][0]    = 0.0;
+    $HorizGap[1][0] = $gap_open;
+    $VertGap[0][1]  = $gap_open;
+    for (my $i=2; $i<=$len1; $i++) {
+	$Match[$i][0]    = -10000.0;
+	$HorizGap[$i][0] = $HorizGap[$i-1][0] + $gap_ext;
+	$VertGap[$i][0]  = -10000.0;
+    }
+    for (my $j=2; $j<=$len2; $j++) {
+	$Match[$i][0]    = -10000.0;
+	$HorizGap[$i][0] = -10000.0;
+	$VertGap[$i][0]  = $VertGap[0][$j-1] + $gap_ext;
+    }
 
     for (my $i=1; $i<=$len1; $i++) {
 	for (my $j=1; $j<=$len2; $j++) {
-	    $Matrix[$i][$j] = Max($Matrix[$i-1][$j],$Matrix[$i][$j-1])+$mismatch_score;
-	    $Matrix[$i][$j] = Max($Matrix[$i][$j],$Matrix[$i-1][$j-1]+GetB62Score($Seqs1[$i-1],$Seqs2[$j-1]));
+
+	    my $b62 = GetB62Score($Seqs1[$i-1],$Seqs[$j-1]);
+
+	    $Match[$i][$j] = Max(Max($HorizGap[$i-1][$j-1]+$gap_end+$b62,
+				     $VertGap[$i-1][$j-1]+$gap_end+$b62),
+				 $Match[$i-1][$j-1]+$b62);
+	    
+	    $HorizGap[$i][$j] = Max($HorizGap[$i-1][$j]+$gap_ext,
+				    $Match[$i-1][$j]+$gap_open);
+
+	    $VertGap[$i][$j] = Max($VertGap[$i][$j-1]+$gap_ext,
+				   $Match[$i][$j-1]+$gap_open);
+	    
 	}
     }
 
-    my $gap1 = '-';
-    while (length($gap1) < $len1) { $gap1 = $gap1.'-'; }
+    my $gapstr1 = '-';
+    while (length($gapstr1) < $len1) { $gapstr1 = $gapstr1.'-'; }
 
-    my $gap2 = '-';
-    while (length($gap2) < $len2) { $gap2 = $gap2.'-'; }
+    my $gapstr2 = '-';
+    while (length($gapstr2) < $len2) { $gapstr2 = $gapstr2.'-'; }
+
+    # During the traceback we'll need to know which state we're in
+    my $s;
+    if ($Match[$len1][$len2] > $HorizGap[$len1][$len2]) {
+	if ($Match[$len1][$len2] > $VertGap[$len1][$len2]) {
+	    $s='m';
+	} else {
+	    $s='v';
+	}
+    } elsif ($HorizGap[$len1][$len2] > $VertGAp[$len1][$len2]) {
+	$s='h';
+    } else {
+	$s='v';
+    }
 
     # Time to back-trace!
     my @Ali;
     my $i=$len1;
     my $j=$len2;
     while ($i && $j) {
-	my $b62 = GetB62Score($Seqs1[$i-1],$Seqs[$j-1]);
-	if ($Matrix[$i][$j] == $Matrix[$i-1][$j-1]+$b62) {
-	    push(@Ali,$Seqs[$i-1].$Seqs[$j-1]);
+
+	if ($s eq 'm') {
+	    
+	    push(@Ali,$Seqs1[$i-1].$Seqs[$j-1]);
+
+	    my $b62 = GetB62Score($Seqs1[$i-1],$Seqs[$j-1]);
+
+	    if ($Match[$i][$j] == $Match[$i-1][$j-1]+$b62) {
+		$s='m';
+	    } elsif ($Match[$i][$j] == $HorizGap[$i-1][$j-1]+$gap_end+$b62) {
+		$s='h';
+	    } else {
+		$s='v';
+	    }
+
 	    $i--;
 	    $j--;
-	} elsif ($Matrix[$i][$j] == $Matrix[$i-1][$j]+$mismatch_score) {
-	    push(@Ali,$Seqs1[$i-1].$gap2);
+
+	} elsif ($s eq 'h') {
+
+	    push(@Ali,$Seqs1[$i-1].$gapstr2);
+
+	    if ($HorizGap[$i][$j] == $Match[$i-1][$j]+$gap_open) {
+		$s='m';
+	    } # else $s='h'
+	    
 	    $i--;
-	} else {
-	    push(@Ali,$gap1.$Seqs2[$j-1]);
+
+	} else { # $s=='v'
+
+	    push(@Ali,$gapstr1.$Seqs2[$j-1]);
+
+	    if ($VertGap[$i][$j] == $Match[$i][$j-1]+$gap_open) {
+		$s='m';
+	    } # else $s='v'
+
 	    $j--;
+
 	}
+
     }
 
     while ($i) {
-	push(@Ali,$Seqs1[$i-1].$gap2);
+	push(@Ali,$Seqs1[$i-1].$gapstr2);
 	$i--;
     }
 
     while ($j) {
-	push(@Ali,$gap1.$Seqs2[$j-1]);
+	push(@Ali,$gapstr1.$Seqs2[$j-1]);
 	$j--;
     }
 
