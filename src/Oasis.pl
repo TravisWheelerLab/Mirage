@@ -23,10 +23,36 @@ sub FindGhostExons;
 sub FindAliQualityDrops;
 sub RecordGhostMSAs;
 sub MatchMismatchScore;
+sub GetB62Score;
+sub MultiAminoSeqAli;
 sub GetMapSummaryStats;
 sub CollapseAndCountOverlaps;
 
-
+my @Blosum62
+    = ( 4, -1, -2, -2,  0, -1, -1,  0, -2, -1, -1, -1, -1, -2, -1,  1,  0, -3, -2,  0,
+       -1,  5,  0, -2, -3,  1,  0, -2,  0, -3, -2,  2, -1, -3, -2, -1, -1, -3, -2, -3,
+       -2,  0,  6,  1, -3,  0,  0,  0,  1, -3, -3,  0, -2, -3, -2,  1,  0, -4, -2, -3,
+       -2, -2,  1,  6, -3,  0,  2, -1, -1, -3, -4, -1, -3, -3, -1,  0, -1, -4, -3, -3,
+	0, -3, -3, -3,  9, -3, -4, -3, -3, -1, -1, -3, -1, -2, -3, -1, -1, -2, -2, -1,
+       -1,  1,  0,  0, -3,  5,  2, -2,  0, -3, -2,  1,  0, -3, -1,  0, -1, -2, -1, -2,
+       -1,  0,  0,  2, -4,  2,  5, -2,  0, -3, -3,  1, -2, -3, -1,  0, -1, -3, -2, -2,
+	0, -2,  0, -1, -3, -2, -2,  6, -2, -4, -4, -2, -3, -3, -2,  0, -2, -2, -3, -3,
+       -2,  0,  1, -1, -3,  0,  0, -2,  8, -3, -3, -1, -2, -1, -2, -1, -2, -2,  2, -3,
+       -1, -3, -3, -3, -1, -3, -3, -4, -3,  4,  2, -3,  1,  0, -3, -2, -1, -3, -1,  3,
+       -1, -2, -3, -4, -1, -2, -3, -4, -3,  2,  4, -2,  2,  0, -3, -2, -1, -2, -1,  1,
+       -1,  2,  0, -1, -3,  1,  1, -2, -1, -3, -2,  5, -1, -3, -1,  0, -1, -3, -2, -2,
+       -1, -1, -2, -3, -1,  0, -2, -3, -2,  1,  2, -1,  5,  0, -2, -1, -1, -1, -1,  1,
+       -2, -3, -3, -3, -2, -3, -3, -3, -1,  0,  0, -3,  0,  6, -4, -2, -2,  1,  3, -1,
+       -1, -2, -2, -1, -3, -1, -1, -2, -2, -3, -3, -1, -2, -4,  7, -1, -1, -4, -3, -2,
+	1, -1,  1,  0, -1,  0,  0,  0, -1, -2, -2,  0, -1, -2, -1,  4,  1, -3, -2, -2,
+	0, -1,  0, -1, -1, -1, -1, -2, -2, -1, -1, -1, -1, -2, -1,  1,  5, -2, -2,  0,
+       -3, -3, -4, -4, -2, -2, -3, -2, -2, -3, -2, -3, -1,  1, -4, -3, -2, 11,  2, -3,
+       -2, -2, -2, -3, -2, -1, -2, -3,  2, -1, -1, -2, -1,  3, -3, -2, -2,  2,  7, -1,
+	0, -3, -3, -3, -1, -2, -2, -3, -3,  3,  1, -2,  1, -1, -2, -2,  0, -3, -1,  4);
+my %AminoIndex
+    = ('A', 0,'C', 1,'D', 2,'E', 3,'F', 4,'G', 5,'H', 6,'I', 7,'K', 8,'L', 9,
+       'M',10,'N',11,'P',12,'Q',13,'R',14,'S',15,'T',16,'V',17,'W',18,'Y',19);
+    
 
 
 ##############
@@ -2169,18 +2195,6 @@ sub RecordGhostMSAs
 
     close($inf);
 
-    # DEBUGGING
-    foreach my $target_species (keys %TargetSpeciesToHits) {
-	print "\n\n";
-	print " $target_species\n";
-	foreach my $hit (split(/\&/,$TargetSpeciesToHits{$target_species})) {
-	    print "\n -> $hit\n";
-	}
-	print "\n----------------------------------------------------\n\n";
-    }
-    die;
-    # DEBUGGING
-
     # Now we can run through our species actually building up some dang MSAs!
     foreach my $target_species (keys %TargetSpeciesToHits) {
 
@@ -2188,6 +2202,7 @@ sub RecordGhostMSAs
 
 	# We'll need to make sure that our hits are split into exon groups
 	my $num_exons = 0;
+	my @ExonTargetSpecies;
 	my @ExonChrs; # Just to be super sure!
 	my @ExonNuclStarts;
 	my @ExonNuclEnds;
@@ -2207,6 +2222,7 @@ sub RecordGhostMSAs
 	    $revcomp = 1 if ($hit_chr =~ /\[revcomp\]/);
 
 	    if (!$num_exons) {
+		push(@ExonTargetSpecies,$target_species);
 		push(@ExonChrs,$hit_chr);
 		push(@ExonNuclStarts,$hit_start);
 		push(@ExonNuclEnds,$hit_end);
@@ -2215,6 +2231,8 @@ sub RecordGhostMSAs
 		next;
 	    }
 
+	    # All overlapping hits (w.r.t. the target species' genome) are grouped
+	    # together as an "exon group"
 	    my $exon_group = -1;
 	    for (my $i=0; $i<$num_exons; $i++) {
 
@@ -2245,6 +2263,7 @@ sub RecordGhostMSAs
 	    }
 
 	    if ($exon_group == -1) {
+		push(@ExonTargetSpecies,$target_species);
 		push(@ExonChrs,$hit_chr);
 		push(@ExonNuclStarts,$hit_start);
 		push(@ExonNuclEnds,$hit_end);
@@ -2260,10 +2279,21 @@ sub RecordGhostMSAs
 	# Them's some exons!  Now we can go through each exon-group and generate
 	# an MSA representing the translated target sequence and each of the source
 	# species' amino acid sequences
-	my @ExonFrameStarts;
-	my @ExonFrameEnds;
-	my @ExonAminoSubStrs;
+	#
+	# Reminder: Each "exon" is a group of blat hits from "source" species to an
+	#   an overlapping region of the "target" genome
+	#
 	for (my $i=0; $i<$num_exons; $i++) {
+
+	    # Start off by getting access to the specific source species matches
+	    my @SourceSpecies;
+	    my @SourceSeqs;
+	    foreach my $hit (split(/\&/,$ExonHits[$i])) {
+		$hit =~ /^[^\|]+\|([^\:]+)\:([^\|]+)\|/;
+		push(@SourceSpecies,$1);
+		push(@SourceSeqs,$2);
+	    }
+	    my $num_source_species = scalar(@SourceSpecies);
 
 	    my $chr = $ExonChrs[$i];
 	    my $revcomp = 0;
@@ -2275,7 +2305,9 @@ sub RecordGhostMSAs
 	    my $search_start = $ExonNuclStarts[$i];
 	    my $search_end = $ExonNuclEnds[$i];
 
-	    my $extra_window;
+	    # We'll pull in just  a lil' bit of extra genomic sequence, for the
+	    # good of America.
+	    my $extra_window = 10;
 	    if ($revcomp) {
 		$search_start += $extra_window;
 		$search_end -= $extra_window;
@@ -2297,21 +2329,14 @@ sub RecordGhostMSAs
 
 	    my @NuclSeq = split(//,$nucl_seq);
 
-	    # We'll need to figure out which reading frame we're hanging out in.
-	    # To do this, we'll translate out all three and find the one that aligns
-	    # best to our first hit.
-	    # NOTE: I'm going to store a tonne of unnecessary bonus data, just in
-	    #  case it's ever more useful than I think it would be now.
-	    my $best_frame_num = -1;
-	    my $best_frame_str;
-	    my $best_trans_str;
-	    my $best_ali_score = 0;
-	    my $best_ali_sub_str;
-	    my $best_ali_nucl_start;
-	    my $best_ali_nucl_end;
+	    # Check which reading frame looks like it's the one we're supposed to be
+	    # working with...
+	    my $best_frame_num;
+	    my $best_frame_score = -1;
+	    my $best_frame_trans;
 	    for (my $frame=0; $frame<3; $frame++) {
 
-		# Pull in the reading frame
+		# Pull in this reading frame
 		my $frame_str = '';
 		my $trans_str = '';
 		for (my $i=$frame; $i+2<scalar(@NuclSeq); $i+=3) {
@@ -2324,48 +2349,71 @@ sub RecordGhostMSAs
 
 		}
 
-		# Perform a quick alignment to the source amino sequence
-		#
-		# We'll cut down the extended sequence to just those aminos that
-		# were actually aligning to our source
-		#
-		my ($ali_score,$target_ali_sub_str,$start_aa_offset,$end_aa_offset)
-		    = MatchMismatchScore($source_seq_str,$trans_str);
+		# Perform a quick alignment to each source amino sequence, summing the
+		# scores.
+		my $sum_score = 0;
+		foreach my $source_seq_str (@SourceSeqs) {
+		    $sum_score += MatchMismatchScore($source_seq_str,$trans_str);
+		}
 
-		if ($ali_score > $best_ali_score) {
-		    $best_trans_str = $trans_str;
-		    $best_frame_str = $frame_str;
+		if ($sum_score > $best_frame_score) {
+		    $best_frame_score = $sum_score;
 		    $best_frame_num = $frame;
-		    $best_ali_score = $ali_score;
-		    $best_ali_sub_str = $target_ali_sub_str;
-		    if ($revcomp) {
-			$best_ali_nucl_start
-			    = $search_start - $frame - (3 * $start_aa_offset);
-			$best_ali_nucl_end
-			    = $search_start - $frame - (3 * $end_aa_offset) - 2;
-		    } else {
-			$best_ali_nucl_start
-			    = $search_start + $frame + (3 * $start_aa_offset);
-			$best_ali_nucl_end
-			    = $search_start + $frame + (3 * $end_aa_offset) + 2;
-		    }
+		    $best_frame_trans = $trans_str;
+		}
+		
+	    }
+
+	    # Now that we have our best frame (and associated data) figured out,
+	    # time to actually get alignin'!
+	    my @AminoMSA = split(//,$best_frame_trans);
+	    foreach my $source_seq_str (@SourceSeqs) {
+		my @SourceSeqChars = split(//,$source_seq_str);
+		my $amino_msa_ref = MultiAminoSeqAli(\@AminoMSA,\@SourceSeqChars);
+		@AminoMSA = @{$amino_msa_ref};
+	    }
+
+	    # The current alignment is grouped such that each column is an entry
+	    # in our array, so we'll convert it over to a more matrix-y thing.
+	    my @MSA;
+	    my $msa_len = 0;
+
+	    # Add in the leading nucleotides
+	    while ($msa_len < $best_frame_num) {
+		$MSA[0][$msa_len] = ' ';
+		$MSA[1][$msa_len] = lc($NuclSeq[$msa_len]);
+		for (my $i=0; $i<$num_source_species; $i++) {
+		    $MSA[$i+2][$msa_len] = ' ';
+		}
+	    }
+	    
+	    for (my $j=0; $j<scalar(@AminoMSA); $j++) {
+
+		my @Chars = split(//,$AminoMSA[$j]);
+
+		# Translated target
+		$MSA[0][$msa_len]   = ' ';
+		$MSA[0][$msa_len+1] = $Chars[0];
+		$MSA[0][$msa_len+2] = ' ';
+		
+		for (my $i=0; $i<$num_source_species; $i++) {
+		    $Chars[$i+1] = lc($Chars[$i+1]) if ($Chars[$i+1] ne $Chars[0]);
+		    $MSA[$i+2][$msa_len]   = ' ';
+		    $MSA[$i+2][$msa_len+1] = $Chars[$i+1]; # Skip 0 (the target)
+		    $MSA[$i+2][$msa_len+2] = ' ';
 		}
 
 	    }
 
-	    # Alright! Now that we have our besties, let's record some data for
-	    # this exon!
-	    $ExonFrameStarts[$i] = $best_ali_nucl_start;
-	    $ExonFrameEnds[$i] = $best_ali_nucl_end;
-	    $ExonAminoSubStrs[$i] = $best_ali_sub_str;
 
-	}
+	    # WE ARE SO CLOSE!
 
-	# HOLY MOLY!  It's finally time to align our alignments!
-	my @MultiAli = split(//,);
-	foreach my $substr (@ExonAminoSubStrs) {
+
+	    # Our only remaining task is to 
 	    
+
 	}
+
 
     }
 
@@ -2407,67 +2455,135 @@ sub MatchMismatchScore
 	}
     }
 
-    # Now that we have our silly lil' alignment, we'll find where we first
-    # move left (as I visual the Matrix -- change the x coord) and trace
-    # through the length of the first sequence.
-    my $xpos = $len1;
-    my $ypos = $len2;
-    my $x_end;
-    my $y_end;
-    my $target_sub_str = '';
-    while ($xpos == $len1) {
-
-	my $look_for_score = $Matrix[$xpos][$ypos];
-	$look_for_score-- if ($Seq1[$xpos-1] eq $Seq2[$ypos-1]);
-	
-	if ($Matrix[$xpos-1][$ypos-1] == $look_for_score) {
-	    $x_end = $xpos;
-	    $y_end = $ypos;
-	    $target_sub_str = $Seq2[$ypos-1];
-	    $xpos--;
-	    $ypos--;
-	    last;
-	} elsif ($Matrix[$xpos-1][$ypos] == $look_for_score) {
-	    $x_end = $xpos;
-	    $y_end = $ypos;
-	    $xpos--;
-	    last;
-	} else {
-	    $ypos--;
-	}
-	
-    }
-    
-    my $x_start = $xpos;
-    my $y_start = $ypos;
-    while ($xpos) {
-	
-	$x_start = $xpos;
-	$y_start = $ypos;
-
-	my $look_for_score = $Matrix[$xpos][$ypos];
-	$look_for_score-- if ($Seq1[$xpos-1] eq $Seq2[$ypos-1]);
-
-	if ($Matrix[$xpos-1][$ypos-1] == $look_for_score) {
-	    $target_sub_str = $Seq2[$ypos-1].$target_sub_str;
-	    $xpos--;
-	    $ypos--;
-	} elsif ($Matrix[$xpos-1][$ypos] == $look_for_score) {
-	    $xpos--;
-	} else {
-	    $ypos--;
-	}
-
-    }
-
-    # Phew! The last thing we'll do is compute the score of the
-    # run through the source sequence.
-    my $ali_score = $Matrix[$x_end][$y_end] - $Matrix[$x_start][$y_start];
-
-    # Time to pass it all back up the chain!
-    return($ali_score,$target_sub_str,$y_start,$y_end);
+    return $Matrix[$len1][$len2];
     
 }
+
+
+
+
+
+
+###############################################################
+#
+#  Function:  GetB62Score
+#
+sub GetB62Score
+{
+    my $seqstr1 = shift;
+    my $seqstr2 = shift;
+
+    # If either of our sequences involves a stop codon, we're unhappy
+    return -100.0 if ($seqstr1.$seqstr2 =~ /X/);
+
+    my @Chars1 = split(//,$seqstr1);
+    my @Chars2 = split(//,$seqstr2);
+    my $len1 = scalar(@Chars1);
+    my $len2 = scalar(@Chars2);
+
+    my $score = 0.0;
+    my $score_mult = 1.0 / ($len1 * $len2);
+    for (my $i=0; $i<$len1; $i++) {
+
+	my $char1 = $Chars1[$i];
+	next if (!$AminoIndex{$char1});
+	$char1 = $AminoIndex[$char1] * 20;
+	
+	for (my $j=0; $j<$len2; $j++) {
+
+	    my $char2 = $Chars2[$j];
+	    next if (!$AminoIndex{$char2});
+	    $char2 = $AminoIndex{$char2};
+
+	    $score += $Blosum62[$char1+$char2] * $score_mult;
+
+	}
+    }
+
+    return $score;
+    
+}
+
+
+
+
+
+
+###############################################################
+#
+#  Function:  MultiAminoSeqAli
+#
+sub MultiAminoSeqAli
+{
+    my $seqs_1_ref = shift;
+    my $seqs_2_ref = shift;
+
+    my @Seqs1 = @{$seqs_1_ref};
+    my @Seqs2 = @{$seqs_2_ref};
+
+    my $len1 = scalar(@Seqs1);
+    my $len2 = scalar(@Seqs2);
+
+    # We won't use affine gapping because (1.) the sequences should be remarkably
+    # similar to one another, and (2.) that would take more effort
+    my $mismatch_score = -2.0;
+    my @Matrix;
+    for (my $i=0; $i<=$len1; $i++) { $Matrix[$i][0] = $i*$mismatch_score; }
+    for (my $j=0; $j<=$len2; $j++) { $Matrix[0][$j] = $j*$mismatch_score; }
+
+    for (my $i=1; $i<=$len1; $i++) {
+	for (my $j=1; $j<=$len2; $j++) {
+	    $Matrix[$i][$j] = Max($Matrix[$i-1][$j],$Matrix[$i][$j-1])+$mismatch_score;
+	    $Matrix[$i][$j] = Max($Matrix[$i][$j],$Matrix[$i-1][$j-1]+GetB62Score($Seqs1[$i-1],$Seqs2[$j-1]));
+	}
+    }
+
+    my $gap1 = '-';
+    while (length($gap1) < $len1) { $gap1 = $gap1.'-'; }
+
+    my $gap2 = '-';
+    while (length($gap2) < $len2) { $gap2 = $gap2.'-'; }
+
+    # Time to back-trace!
+    my @Ali;
+    my $i=$len1;
+    my $j=$len2;
+    while ($i && $j) {
+	my $b62 = GetB62Score($Seqs1[$i-1],$Seqs[$j-1]);
+	if ($Matrix[$i][$j] == $Matrix[$i-1][$j-1]+$b62) {
+	    push(@Ali,$Seqs[$i-1].$Seqs[$j-1]);
+	    $i--;
+	    $j--;
+	} elsif ($Matrix[$i][$j] == $Matrix[$i-1][$j]+$mismatch_score) {
+	    push(@Ali,$Seqs1[$i-1].$gap2);
+	    $i--;
+	} else {
+	    push(@Ali,$gap1.$Seqs2[$j-1]);
+	    $j--;
+	}
+    }
+
+    while ($i) {
+	push(@Ali,$Seqs1[$i-1].$gap2);
+	$i--;
+    }
+
+    while ($j) {
+	push(@Ali,$gap1.$Seqs2[$j-1]);
+	$j--;
+    }
+
+    # Uh-oh!  That alignment is BACKWARDS!!!
+    for (my $i=0; $i<scalar(@Ali)/2; $i++) {
+	my $tmp = $Ali[$i];
+	$Ali[$i] = $Ali[scalar(@Ali)-1-$i];
+	$Ali[scalar(@Ali)-1-$i] = $tmp;
+    }
+
+    return \@Ali;
+    
+}
+
 
 
 
