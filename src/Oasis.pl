@@ -285,7 +285,7 @@ for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
     push(@GhostlyGenes,$gene);
 
     # Time to build some gorgeous translated MSAs!
-    #RecordGhostMSAs($gene); # DEBUGGING
+    RecordGhostMSAs($gene);
     
 }
 
@@ -2378,10 +2378,10 @@ sub RecordGhostMSAs
 	    my $true_nucl_start = $search_start;
 	    my $true_nucl_end;
 	    if ($revcomp) {
-		$true_nucl_start -= $frame;
+		$true_nucl_start -= $best_frame_num;
 		$true_nucl_end = $true_nucl_start+1 - (3 * length($best_frame_trans));
 	    } else {
-		$true_nucl_start += $frame;
+		$true_nucl_start += $best_frame_num;
 		$true_nucl_end = $true_nucl_start-1 + (3 * length($best_frame_trans));
 	    }
 
@@ -2427,7 +2427,7 @@ sub RecordGhostMSAs
 		}		
 	    }
 
-	    # 1. Checking the right side
+	    # 2. Checking the right side
 	    #
 	    my $end_col=$amino_msa_len-1;
 	    while ($end_col>=0) {
@@ -2561,6 +2561,61 @@ sub RecordGhostMSAs
 
 	    # THAT'S IT!
 	    # Now the only remaining work is the final formatting of the string!
+	    my $longest_name_len = length($target_species);
+	    foreach my $species (@SourceSpecies) {
+		if (length($species) > $longest_name_len) {
+		    $longest_name_len = length($species);
+		}
+	    }
+	    $longest_name_len += 4; # Two spaces on either side
+
+	    my @FormattedNames;
+	    $FormattedNames[0] = '  '.$target_species.'  ';
+	    while (length($FormattedNames[0]) < $longest_name_len) {
+		$FormattedNames[0] = ' '.$FormattedNames[0];
+	    }
+
+	    $FormattedNames[1] = ' ';
+	    while (length($FormattedNames[1]) < $longest_name_len) {
+		$FormattedNames[1] = ' '.$FormattedNames[1];
+	    }
+
+	    for (my $i=0; $i<$num_source_species; $i++) {
+		$FormattedNames[$i+2] = '  '.$SourceSpecies[$i].'  ';
+		while (length($FormattedNames[$i+2]) < $longest_name_len) {
+		    $FormattedNames[$i+2] = ' '.$FormattedNames[$i+2];
+		}
+	    }
+
+	    # Buffer in the alignment string and let 'er rip!
+	    my $ali_str = "\n\n";
+	    my $chars_per_line = 60;
+	    my $msa_pos = 0;
+	    while ($msa_pos < $msa_len) {
+
+		my $next_stop = Min($msa_len,$msa_pos+$chars_per_line);
+
+		for (my $i=0; $i<$num_source_species+2; $i++) {
+
+		    $ali_str = $ali_str.$FormattedNames[$i];
+
+		    my $pos = $msa_pos;
+		    while ($pos < $next_stop) {
+			$ali_str = $ali_str.$MSA[$i][$pos++];
+		    }
+		    $ali_str = $ali_str."\n";
+
+		}
+
+		$ali_str = $ali_str."\n\n";
+
+		$msa_pos += 60;
+		
+	    }
+	    $ali_str = $ali_str."\n";
+
+	    # DEBUGGING
+	    print "$ali_str";
 	    
 	}
 
@@ -2593,7 +2648,7 @@ sub MatchMismatchScore
 
     my @Matrix;
     for (my $i=0; $i<=$len1; $i++) { $Matrix[$i][0] = 0-$i; }
-    for (my $j=0; $j<=$len2; $j++) { $Matrix[0][$j] = 0-$i; }
+    for (my $j=0; $j<=$len2; $j++) { $Matrix[0][$j] = 0-$j; }
 
     for (my $i=1; $i<=$len1; $i++) {
 	for (my $j=1; $j<=$len2; $j++) {
@@ -2639,7 +2694,7 @@ sub GetB62Score
 
 	my $char1 = $Chars1[$i];
 	next if (!$AminoIndex{$char1});
-	$char1 = $AminoIndex[$char1] * 20;
+	$char1 = $AminoIndex{$char1} * 20;
 	
 	for (my $j=0; $j<$len2; $j++) {
 
@@ -2692,15 +2747,15 @@ sub MultiAminoSeqAli
 	$VertGap[$i][0]  = -10000.0;
     }
     for (my $j=2; $j<=$len2; $j++) {
-	$Match[$i][0]    = -10000.0;
-	$HorizGap[$i][0] = -10000.0;
-	$VertGap[$i][0]  = $VertGap[0][$j-1] + $gap_ext;
+	$Match[0][$j]    = -10000.0;
+	$HorizGap[0][$j] = -10000.0;
+	$VertGap[0][$j]  = $VertGap[0][$j-1] + $gap_ext;
     }
 
     for (my $i=1; $i<=$len1; $i++) {
 	for (my $j=1; $j<=$len2; $j++) {
 
-	    my $b62 = GetB62Score($Seqs1[$i-1],$Seqs[$j-1]);
+	    my $b62 = GetB62Score($Seqs1[$i-1],$Seqs2[$j-1]);
 
 	    $Match[$i][$j] = Max(Max($HorizGap[$i-1][$j-1]+$gap_end+$b62,
 				     $VertGap[$i-1][$j-1]+$gap_end+$b62),
@@ -2729,7 +2784,7 @@ sub MultiAminoSeqAli
 	} else {
 	    $s='v';
 	}
-    } elsif ($HorizGap[$len1][$len2] > $VertGAp[$len1][$len2]) {
+    } elsif ($HorizGap[$len1][$len2] > $VertGap[$len1][$len2]) {
 	$s='h';
     } else {
 	$s='v';
@@ -2743,9 +2798,9 @@ sub MultiAminoSeqAli
 
 	if ($s eq 'm') {
 	    
-	    push(@Ali,$Seqs1[$i-1].$Seqs[$j-1]);
+	    push(@Ali,$Seqs1[$i-1].$Seqs2[$j-1]);
 
-	    my $b62 = GetB62Score($Seqs1[$i-1],$Seqs[$j-1]);
+	    my $b62 = GetB62Score($Seqs1[$i-1],$Seqs2[$j-1]);
 
 	    if ($Match[$i][$j] == $Match[$i-1][$j-1]+$b62) {
 		$s='m';
