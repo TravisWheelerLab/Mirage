@@ -2364,16 +2364,23 @@ sub RecordGhostMSAs
 		
 	    }
 
+	    
 	    # Now that we have our best frame (and associated data) figured out,
 	    # time to actually get alignin'!
-	    my @AminoMSA = split(//,$best_frame_trans);
-	    foreach my $source_seq_str (@SourceSeqs) {
-		my @SourceSeqChars = split(//,$source_seq_str);
+	    my @AminoMSA = split(//,$SourceSeqs[0]);
+	    for (my $source_id=1; $source_id<$num_source_species; $source_id++) {
+		my @SourceSeqChars = split(//,$SourceSeqs[$source_id]);
 		my $amino_msa_ref = MultiAminoSeqAli(\@AminoMSA,\@SourceSeqChars);
 		@AminoMSA = @{$amino_msa_ref};
 	    }
+	    # We align the target sequence last so that it's (perhaps) more of an
+	    # approximation of aligning to an "exon family profile"
+	    my @TargetTrans = split(//,$best_frame_trans);
+	    my $amino_msa_ref = MultiAminoSeqAli(\@TargetTrans,\@AminoMSA);
+	    @AminoMSA = @{$amino_msa_ref};
 	    my $amino_msa_len = scalar(@AminoMSA);
 
+	    
 	    # What are the actual nucleotide bounds of our putative coding region?
 	    my $true_nucl_start = $search_start;
 	    my $true_nucl_end;
