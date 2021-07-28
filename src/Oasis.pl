@@ -54,7 +54,6 @@ my %AminoIndex
        'M',10,'N',11,'P',12,'Q',13,'R',14,'S',15,'T',16,'V',17,'W',18,'Y',19);
     
 
-
 ##############
 #            #
 #   SCRIPT   #
@@ -2195,6 +2194,9 @@ sub RecordGhostMSAs
 
     close($inf);
 
+    # Make an output directory for our alignment visualizations
+    my $gene_ali_dir = CreateDirectory($genedir.'alignments');
+    
     # Now we can run through our species actually building up some dang MSAs!
     foreach my $target_species (keys %TargetSpeciesToHits) {
 
@@ -2283,6 +2285,8 @@ sub RecordGhostMSAs
 	# Reminder: Each "exon" is a group of blat hits from "source" species to an
 	#   an overlapping region of the "target" genome
 	#
+	# We'll write out a file with our MSA visualizations for each species
+	my $outf = OpenOutputFile($gene_ali_dir.$target_species.'.MSAs.out');
 	for (my $i=0; $i<$num_exons; $i++) {
 
 	    # Start off by getting access to the specific source species matches
@@ -2473,6 +2477,9 @@ sub RecordGhostMSAs
 		}
 	    }
 
+	    # Before we extend out, record the true start of the translated sequence
+	    my $translation_start = $true_nucl_start;
+	    my $translation_end   = $true_nucl_end;
 
 	    # The last thing we're going to do is extend out 60 nucls on each side
 	    # of the alignment...
@@ -2621,16 +2628,23 @@ sub RecordGhostMSAs
 	    }
 	    $ali_str = $ali_str."\n";
 
-	    # DEBUGGING
-	    print "$ali_str";
+	    # Before we spit out our alignment string, we'll also make a string with
+	    # hit metadata.
+	    my $meta_str = "\n  Target: $target_species $chr";
+	    $meta_str = $meta_str.'[revcomp]' if ($revcomp);
+	    $meta_str = $meta_str.":$translation_start..$translation_end\n";
+	    
+	    print $outf "\n\n-----------------------------------------------\n" if ($i);
+	    print $outf "$meta_str";
+	    print $outf "$ali_str";
 	    
 	}
 
+	# We're officially done with this target species!
+	close($outf);
 
     }
 
-    
-    
 }
 
 
@@ -2688,7 +2702,9 @@ sub GetB62Score
     my $seqstr2 = shift;
 
     # If either of our sequences involves a stop codon, we're unhappy
-    return -100.0 if ($seqstr1.$seqstr2 =~ /X/);
+    if ($seqstr1 =~ /X/ || $seqstr2 =~ /X/) {
+	return -100.0;
+    }
 
     my @Chars1 = split(//,$seqstr1);
     my @Chars2 = split(//,$seqstr2);
@@ -2739,21 +2755,21 @@ sub MultiAminoSeqAli
     my $len2 = scalar(@Seqs2);
 
     # Let's be good and proper and use affine gapping
-    my $gap_open = -5.0;
+    my $gap_open = -2.0;
     my $gap_end  = -1.0;
-    my $gap_ext  = -2.0;
+    my $gap_ext  = -1.0;
     my @Match;
     my @HorizGap;
     my @VertGap;
     $Match[0][0]    = 0.0;
-    $HorizGap[1][0] = $gap_open;
-    $VertGap[0][1]  = $gap_open;
-    for (my $i=2; $i<=$len1; $i++) {
+    $HorizGap[0][0] = $gap_open;
+    $VertGap[0][0]  = $gap_open;
+    for (my $i=1; $i<=$len1; $i++) {
 	$Match[$i][0]    = -10000.0;
 	$HorizGap[$i][0] = $HorizGap[$i-1][0] + $gap_ext;
 	$VertGap[$i][0]  = -10000.0;
     }
-    for (my $j=2; $j<=$len2; $j++) {
+    for (my $j=1; $j<=$len2; $j++) {
 	$Match[0][$j]    = -10000.0;
 	$HorizGap[0][$j] = -10000.0;
 	$VertGap[0][$j]  = $VertGap[0][$j-1] + $gap_ext;
@@ -2778,10 +2794,10 @@ sub MultiAminoSeqAli
     }
 
     my $gapstr1 = '-';
-    while (length($gapstr1) < $len1) { $gapstr1 = $gapstr1.'-'; }
+    while (length($gapstr1) < length($Seqs1[0])) { $gapstr1 = $gapstr1.'-'; }
 
     my $gapstr2 = '-';
-    while (length($gapstr2) < $len2) { $gapstr2 = $gapstr2.'-'; }
+    while (length($gapstr2) < length($Seqs2[0])) { $gapstr2 = $gapstr2.'-'; }
 
     # During the traceback we'll need to know which state we're in
     my $s;
