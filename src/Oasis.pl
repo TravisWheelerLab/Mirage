@@ -13,6 +13,7 @@ use BureaucracyMirage;
 use DisplayProgress;
 
 # Subroutines
+sub PrintUsage;
 sub ParseArgs;
 sub ParseGTF;
 sub GetMappedSeqMSA;
@@ -62,7 +63,7 @@ my %AminoIndex
 
 
 
-if (@ARGV < 2) { die "\n  USAGE:  ./Oasis.pl [Mirage-Results] [Species-Guide]\n\n"; }
+if (@ARGV < 2) { PrintUsage(); }
 
 
 
@@ -383,6 +384,24 @@ print "\n";
 #                 #
 ###################
 
+
+
+
+
+
+###############################################################
+#
+#  Function: PrintUsage
+#
+sub PrintUsage
+{
+    print "\n";
+    print "  USAGE :  ./Oasis.pl {OPT.s} [Mirage-Results] [Species-Guide]\n";
+    print "\n";
+    print "  OPT.s :  -cpus=[int]\n";
+    print "           -outdirname=[string]\n";
+    die "\n";
+}
 
 
 
