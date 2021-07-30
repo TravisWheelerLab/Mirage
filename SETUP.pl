@@ -30,9 +30,11 @@ if (-e 'mirage2') { system("rm \"mirage2\""); }
 my $hsiDir   = 'inc/hsi';
 my $spalnDir = 'inc/spaln2.3.3';
 my $blatDir  = 'inc/blat';
+my $tbnDir   = 'inc/tblastn';
 my $hsiTar   = $hsiDir.'.tgz';
 my $spalnTar = $spalnDir.'.tgz';
 my $blatTar  = $blatDir.'.tgz';
+my $tbnTar   = $tbnDir.'.tgz';
 
 
 # Where we are RIGHT NOW
@@ -106,12 +108,20 @@ chdir($startDir);
 if (-e $blatTar) {
     if (system("tar -xzf $blatTar -C inc/")) { die "\n  Failed to expand '$blatTar'\n\n"; }    
 }
+
+
+# Unpack tblastn
+if (-e $tbnTar) {
+    if (system("tar -xzf $tbnTar -C inc/")) { die "\n  Failed to expand '$tbnTar'\n\n"; }
+}
+
     
 # If everything went well, we can go ahead an clear out the
 # spaln and easel tarballs
 system("rm $hsiTar")   if (-e $hsiTar);
 system("rm $spalnTar") if (-e $spalnTar);
 system("rm $blatTar")  if (-e $blatTar);
+system("rm $tbnTar")   if (-e $tbnTar);
 
 # Create a symbolic link to the mirage-running shell script
 my $MirageLink = "ln -s src/run_mirage2.sh mirage2";

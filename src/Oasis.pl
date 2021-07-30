@@ -76,14 +76,14 @@ my $sindex = $location.'../inc/hsi/sindex';
 my $sfetch = $location.'../inc/hsi/sfetch';
 my $sstat  = $location.'../inc/hsi/sstat';
 
-# Another friend we'll need is blat... but which one?!
-my $blat = $location.'../inc/blat/';
+# Another friend we'll need is tblastn... but which one?!
+my $tblastn = $location.'../inc/tblastn/';
 my $UnameCmd = OpenSystemCommand('uname -a |');
 my $uname = <$UnameCmd>;
 close($UnameCmd);
-if    (uc($uname) =~ /^LINUX /)  { $blat = $blat.'blat.linux.x86_64';  }
-elsif (uc($uname) =~ /^DARWIN /) { $blat = $blat.'blat.macOSX.x86_64'; }
-else                             { $blat = $blat.'blat.macOSX.i386';   }
+if    (uc($uname) =~ /^LINUX /)  { $tblastn = $tblastn.'tblastn.linux.x86_64';  }
+elsif (uc($uname) =~ /^DARWIN /) { $tblastn = $tblastn.'tblastn.macOSX.x86_64'; }
+else                             { die "\n  Failure: tblastn unsupported\n\n";  }
 
 
 # TODO: Make these options available as commandline arguments
@@ -104,9 +104,7 @@ my $all_species_dirname = ConfirmDirectory($input_dirname.'Species-MSAs');
 # An astute observer will notice that these aren't the same settings as Quilter
 # uses, which is because this isn't frickin' Quilter, geez.
 # It's rad that our standardized filenames let us play like this!
-$blat = $blat.' -tileSize=5 -minIdentity=90 -maxIntron=0';
-$blat = $blat.' -t=dnax -q=prot -out=blast8 1>/dev/null 2>&1';
-
+$tblastn = $tblastn.' -outfmt 6 ';
 
 # Start off the real work by parsing the species guide, which will give
 # us genome locations and chromosome lengths.
@@ -214,11 +212,12 @@ my $end_gene_id = (1+$threadID) * $thread_portion;
 $end_gene_id = scalar(@GeneList) if ($threadID == $num_cpus-1);
 
 # Name temporary filenames that we'll want to use (and, while we're at it,
-# fill in all of the wild 'n' wacky blat arguments we'll be using).
+# fill in all of the wild 'n' wacky tblastn arguments we'll be using).
 my $nucl_seq_fname = $outgenesdir.'nucl.tmp'.$threadID.'.fa';
 my $prot_seq_fname = $outgenesdir.'prot.tmp'.$threadID.'.fa';
-my $blat_out_fname = $outgenesdir.'blat.tmp'.$threadID.'.out';
-$blat = $blat.' '.$nucl_seq_fname.' '.$prot_seq_fname.' '.$blat_out_fname;
+my $tbn_out_fname  = $outgenesdir.'tbn.tmp'.$threadID.'.out';
+$tblastn = $tblastn.' -subject '.$nucl_seq_fname.' -query '.$prot_seq_fname;
+$tblastn = $tblastn.' -out '.$tbn_out_fname;
 
 
 # TIME FOR THE MAIN EVENT!
@@ -314,11 +313,11 @@ for ($threadID=0; $threadID<$num_cpus; $threadID++) {
     # Clear out all these files we don't need
     $nucl_seq_fname = $outgenesdir.'nucl.tmp'.$threadID.'.fa';
     $prot_seq_fname = $outgenesdir.'prot.tmp'.$threadID.'.fa';
-    $blat_out_fname = $outgenesdir.'blat.tmp'.$threadID.'.out';
+    $tbn_out_fname  = $outgenesdir.'tbn.tmp'.$threadID.'.out';
 
     if (-e $nucl_seq_fname) { system("rm $nucl_seq_fname"); }
     if (-e $prot_seq_fname) { system("rm $prot_seq_fname"); }
-    if (-e $blat_out_fname) { system("rm $blat_out_fname"); }
+    if (-e $tbn_out_fname)  { system("rm $tbn_out_fname");  }
 
     # How'd ya do, helper?
     if ($threadID) {
@@ -1114,7 +1113,7 @@ sub FindGhostExons
     # have amino acids in it, but clearly only as an artifact of computation.
     #
     # Similarly, we have a minimum number of aminos for a sequence to be worth
-    # Blat-ing.
+    # tblastn-ing.
     my $min_use_aminos = 6;
     my $max_nonuse_aminos = 3;
     my $min_search_aminos = 10;
@@ -1298,7 +1297,7 @@ sub FindGhostExons
 	    # NASTY! NASTY! NASTY!
 
 	    # Alrighty then, time to take each of our runs and pull out the data
-	    # that we'll need to perform our Blat searches.
+	    # that we'll need to perform our tblastn searches.
 	    for (my $run_id=0; $run_id<$num_nasty_runs; $run_id++) {
 
 		my $start_exon = $NastyRunStarts[$run_id];
@@ -1533,8 +1532,7 @@ sub FindGhostExons
     # I tried so hard, and got so far, but in the end it still mattered just a lil' bit
     return (0,0) if ($num_ghost_exons == 0);
     
-    # NOICE!  Time to get ready for some good 'n' nasty blattery!
-    # (blattery will get you everywhere)
+    # NOICE!  Time to get ready for some good 'n' nasty tblastn-ery!
 
     # We'll tally up the number of successes
     my $ghosts_busted = 0;
@@ -1589,7 +1587,7 @@ sub FindGhostExons
 	RunSystemCommand($sfetch_cmd);
 
 	# Because of the wonders of filename standardization, we can do this!
-	RunSystemCommand($blat);
+	RunSystemCommand($tblastn);
 
 	# Grab the list of coordinates that have already been used for mapping this
 	# sequence's analog (not the right word, maybe, but you know what I mean).
@@ -1601,9 +1599,9 @@ sub FindGhostExons
 	my @HitNuclStarts;
 	my @HitNuclEnds;
 	my @HitEVals;
-	my $num_blat_hits = 0;
-	my $blatf = OpenInputFile($blat_out_fname);
-	while (my $line = <$blatf>) {
+	my $num_tbn_hits = 0;
+	my $tbnf = OpenInputFile($tbn_out_fname);
+	while (my $line = <$tbnf>) {
 	    if ($line) {
 		
 		my @HitData = split(/\s+/,$line);
@@ -1673,11 +1671,11 @@ sub FindGhostExons
 		push(@HitNuclStarts,$nucl_start);
 		push(@HitNuclEnds,$nucl_end);
 		push(@HitEVals,$e_val);
-		$num_blat_hits++;
+		$num_tbn_hits++;
 
 	    }
 	}
-	close($blatf);
+	close($tbnf);
 
 	# For outputting, let's get the textual representation of direction
 	# into the chromosome name (after recording the chromosome length of
@@ -1703,8 +1701,8 @@ sub FindGhostExons
 	$target_info = $target_info."    Source Species : $source_species\n";
 	
 	# Is it an especially elusive ghost we're chasing?
-	if ($num_blat_hits == 0) {
-	    print $outf "[ ] Search failure (no BLAT hits)\n";
+	if ($num_tbn_hits == 0) {
+	    print $outf "[ ] Search failure (no tblastn hits)\n";
 	    print $outf "    $target_info";
 	    print $outf "    Search Sequence: $SearchSeqs[$q]\n\n";
 	    next;
@@ -1717,7 +1715,7 @@ sub FindGhostExons
 	# NOTE: We're assuming that our hits are consistent with one another,
 	#   but we may want to double-check that in the future...
 	my @MappedSeq = split(//,lc($SearchSeqs[$q]));
-	for (my $hit=0; $hit<$num_blat_hits; $hit++) {
+	for (my $hit=0; $hit<$num_tbn_hits; $hit++) {
 	    for (my $pos=$HitAminoStarts[$hit]-1; $pos<$HitAminoEnds[$hit]; $pos++) {
 		$MappedSeq[$pos] = uc($MappedSeq[$pos]);
 	    }
@@ -1730,8 +1728,8 @@ sub FindGhostExons
 	# Sing it to high heaven!
 	print $outf "[+] Search success!\n";
 	print $outf "    $target_info";
-	print $outf "    Search Sequence: $mapped_seq\n";
-	print $outf "    Num BLAT Hits  : $num_blat_hits\n";
+	print $outf "    Search Sequence : $mapped_seq\n";
+	print $outf "    Num tblastn Hits: $num_tbn_hits\n";
 
 	# I'm going to take this 'underlining' out for now, and let the
 	# upper / lower case distinction speak for itself.
@@ -1743,7 +1741,7 @@ sub FindGhostExons
 	#}
 	#print $outf "\n";
 
-	for (my $hit=0; $hit<$num_blat_hits; $hit++) {
+	for (my $hit=0; $hit<$num_tbn_hits; $hit++) {
 
 	    print $outf "    + Aminos $HitAminoStarts[$hit]..$HitAminoEnds[$hit] ";
 	    print $outf "mapped to $target_species $chr:$HitNuclStarts[$hit]..$HitNuclEnds[$hit] ";
@@ -2161,14 +2159,14 @@ sub RecordGhostMSAs
 	$line =~ /\: (\S+)/;
 	my $source_seq = uc($1);
 
-	$line = <$inf>; # How many separate BLAT hits did we get?
+	$line = <$inf>; # How many separate tblastn hits did we get?
 	$line =~ /\: (\d+)/;
-	my $num_blat_hits = $1;
+	my $num_tbn_hits = $1;
 
 	my $wide_start = 0;
 	my $wide_end = 0;
 	my $novel_exon = 1;
-	while ($num_blat_hits) {
+	while ($num_tbn_hits) {
 
 	    $line = <$inf>;
 	    $line =~ /\:(\d+)\.\.(\d+)/;
@@ -2194,7 +2192,7 @@ sub RecordGhostMSAs
 	    $line = <$inf>;
 	    $novel_exon = 0 if ($line =~ /\- Overlaps/);
 
-	    $num_blat_hits--;
+	    $num_tbn_hits--;
 	    
 	}
 
@@ -2301,7 +2299,7 @@ sub RecordGhostMSAs
 	# an MSA representing the translated target sequence and each of the source
 	# species' amino acid sequences
 	#
-	# Reminder: Each "exon" is a group of blat hits from "source" species to an
+	# Reminder: Each "exon" is a group of tblastn hits from "source" species to an
 	#   an overlapping region of the "target" genome
 	#
 	# We'll write out a file with our MSA visualizations for each species
@@ -2969,7 +2967,7 @@ sub GetMapSummaryStats
 		my $search_seq_len = $num_mapped_chars + $num_unmapped_chars;
 		my $pct_seq_mapped = int(1000.0 * $num_mapped_chars / $search_seq_len) / 10.0;
 		
-		# How many BLAT hits? (this plays into the final part of our hash val)
+		# tblastn hit count? (this plays into the final part of our hash val)
 		$line = <$inf>;
 		$line =~ /\: (\d+)/;
 		my $num_hits = $1;
@@ -3126,8 +3124,8 @@ sub GetMapSummaryStats
 	$num_annotated_exons = $TargetSpeciesToAnnotated{$species};
 
 	print $outf "Species: $species\n";
-	print $outf "Total BLAT-suggested Exons: $num_suggested_exons\n";
-	print $outf "Number GTF-annotated Exons: $num_annotated_exons\n";
+	print $outf "Total tblastn-suggested Exons: $num_suggested_exons\n";
+	print $outf "Number of GTF-annotated Exons: $num_annotated_exons\n";
 	print $outf "\n";
 
 	print $outf "Gene  # Suggested  # Annotated\n";
