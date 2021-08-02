@@ -367,7 +367,7 @@ print "  $total_ghost_exons absent exon homolog";
 print "s" if ($total_ghost_exons != 1);
 print " observed in proteoform set,\n";
 if ($total_ghosts_busted == 1) {
-    print "1 ($bust_rate\%) of which has likely coding sequence in its genome\n";
+    print "  1 ($bust_rate\%) of which has likely coding sequence in its genome\n";
 } else {
     print "  $total_ghosts_busted ($bust_rate\%) of which have likely coding sequence in their genomes\n";
 }
