@@ -363,8 +363,14 @@ GetMapSummaryStats(\@GhostlyGenes);
 # WOOOOOOO, WE FOUND AT LEAST ONE THING TO POSSIBLY NOT CROSS-MAP!
 my $bust_rate = int(1000.0*$total_ghosts_busted/$total_ghost_exons)/10.0;
 print "\n";
-print "  $total_ghost_exons possible unannotated exons detected,\n";
-print "  $total_ghosts_busted of which have some sequence-level support ($bust_rate\%)\n";
+print "  $total_ghost_exons absent exon homolog";
+print "s" if ($total_ghost_exons != 1);
+print " observed in proteoform set,\n";
+if ($total_ghosts_busted == 1) {
+    print "1 ($bust_rate\%) of which has likely coding sequence in its genome\n";
+} else {
+    print "  $total_ghosts_busted ($bust_rate\%) of which have likely coding sequence in their genomes\n";
+}
 print "\n";
 print "  Results in '$outdirname' (Summary info in file 'Search-Summary.out')\n";
 print "\n";
@@ -2303,7 +2309,8 @@ sub RecordGhostMSAs
 	#   an overlapping region of the "target" genome
 	#
 	# We'll write out a file with our MSA visualizations for each species
-	my $outf = OpenOutputFile($gene_ali_dir.$target_species.'.MSAs.out');
+	my $outfname = $gene_ali_dir.$target_species.'.MSAs.out';
+	my $outf = OpenOutputFile($outfname);
 	for (my $i=0; $i<$num_exons; $i++) {
 
 	    # Start off by getting access to the specific source species matches
@@ -2385,6 +2392,16 @@ sub RecordGhostMSAs
 		
 	    }
 
+	    # I'm not sure why this is possible, but it seems that we have a
+	    # handful of edge cases where we're slurping bits of non-ghost amino
+	    # sequence into our searches, which leaves us searching for something
+	    # we've already found in a place adjacent to (but not including)
+	    # where we found it.
+	    #
+	    # That's a long-winded way of saying that sometimes our searches yield
+	    # 0 good outputs, so we need to be able to catch cases where our best
+	    # score is -1
+	    next if ($best_frame_score == -1);
 	    
 	    # Now that we have our best frame (and associated data) figured out,
 	    # time to actually get alignin'!
@@ -2659,6 +2676,9 @@ sub RecordGhostMSAs
 
 	# We're officially done with this target species!
 	close($outf);
+
+	# Do a check to see if we actually reported any hits...
+	if (!(-x $outfname)) { RunSystemCommand("rm \"$outfname\""); }
 
     }
 
