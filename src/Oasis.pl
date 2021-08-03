@@ -2678,7 +2678,7 @@ sub RecordGhostMSAs
 	close($outf);
 
 	# Do a check to see if we actually reported any hits...
-	if (!(-x $outfname)) { RunSystemCommand("rm \"$outfname\""); }
+	if (!(-s $outfname)) { RunSystemCommand("rm \"$outfname\""); }
 
     }
 
