@@ -217,7 +217,7 @@ my $nucl_seq_fname = $outgenesdir.'nucl.tmp'.$threadID.'.fa';
 my $prot_seq_fname = $outgenesdir.'prot.tmp'.$threadID.'.fa';
 my $tbn_out_fname  = $outgenesdir.'tbn.tmp'.$threadID.'.out';
 $tblastn = $tblastn.' -subject '.$nucl_seq_fname.' -query '.$prot_seq_fname;
-$tblastn = $tblastn.' -out '.$tbn_out_fname;
+$tblastn = $tblastn.' -out '.$tbn_out_fname.' 1>/dev/null 2>&1';
 
 
 # TIME FOR THE MAIN EVENT!
