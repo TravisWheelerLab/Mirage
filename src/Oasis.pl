@@ -2265,8 +2265,8 @@ sub RecordGhostMSAs
 
 		if ($revcomp) {
 
-		    if (($hit_start > $ExonNuclStarts[$i] && $hit_end < $ExonNuclStarts[$i])
-			|| ($hit_end < $ExonNuclEnds[$i] && $hit_start > $ExonNuclEnds[$i])) {
+		    if (($hit_start >= $ExonNuclStarts[$i] && $hit_end <= $ExonNuclStarts[$i])
+			|| ($hit_end <= $ExonNuclEnds[$i] && $hit_start >= $ExonNuclEnds[$i])) {
 			$exon_group = $i;
 			$ExonNuclStarts[$i] = Max($hit_start,$ExonNuclStarts[$i]);
 			$ExonNuclEnds[$i] = Min($hit_end,$ExonNuclEnds[$i]);
@@ -2275,8 +2275,8 @@ sub RecordGhostMSAs
 
 		} else {
 		    
-		    if (($hit_start < $ExonNuclStarts[$i] && $hit_end > $ExonNuclStarts[$i])
-			|| ($hit_end > $ExonNuclEnds[$i] && $hit_start < $ExonNuclEnds[$i])) {
+		    if (($hit_start <= $ExonNuclStarts[$i] && $hit_end >= $ExonNuclStarts[$i])
+			|| ($hit_end >= $ExonNuclEnds[$i] && $hit_start <= $ExonNuclEnds[$i])) {
 			$exon_group = $i;
 			$ExonNuclStarts[$i] = Min($hit_start,$ExonNuclStarts[$i]);
 			$ExonNuclEnds[$i] = Max($hit_end,$ExonNuclEnds[$i]);
