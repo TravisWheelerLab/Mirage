@@ -24,6 +24,7 @@ sub FindGhostExons;
 sub FindAliQualityDrops;
 sub RecordGhostMSAs;
 sub MatchMismatchScore;
+sub LocalMatchMismatchAli;
 sub GetB62Score;
 sub MultiAminoSeqAli;
 sub GetMapSummaryStats;
@@ -2583,11 +2584,21 @@ sub RecordGhostMSAs
 
 		# 3.b. The source amino sequence(s)
 		for (my $i=0; $i<$num_source_species; $i++) {
+
 		    $MSA[$i+2][$msa_len]   = ' ';
-		    $MSA[$i+2][$msa_len+1] = $Col[$i+1]; # Skip 0 (the target)
+
+		    # Approach 1: Uppercase for matches, lowercase for mismatches
+		    #$MSA[$i+2][$msa_len+1] = $Col[$i+1]; # Skip 0 (the target)
+		    #$MSA[$i+2][$msa_len+1] = lc($Col[$i+1]) if ($Col[0] ne $Col[$i+1]);
+
+		    # Approach 2: Periods for matches, lowercase for mismatches
+		    $MSA[$i+2][$msa_len+1] = lc($Col[$i+1]);
+		    if ($MSA[$i+2][$msa_len+1] =~ /[a-z]/ && $MSA[$i+2][$msa_len+1] eq lc($Col[0])) {
+			$MSA[$i+2][$msa_len+1] = '.';
+		    }
+
 		    $MSA[$i+2][$msa_len+2] = ' ';
-		    # If there's a mismatch, we'll lower-case-ify the source amino
-		    $MSA[$i+2][$msa_len+1] = lc($Col[$i+1]) if ($Col[0] ne $Col[$i+1]);
+
 		}
 
 		# PROGRESS!
@@ -2722,6 +2733,214 @@ sub MatchMismatchScore
 
     return $Matrix[$len1][$len2];
     
+}
+
+
+
+
+
+###############################################################
+#
+#  Function:  LocalMatchMismatchAli
+#
+sub LocalMatchMismatchAli
+{
+    my $str1 = shift;
+    my $str2 = shift;
+
+    my @Seq1 = split(//,uc($str1));
+    my $len1 = scalar(@Seq1);
+
+    my @Seq2 = split(//,uc($str2));
+    my $len2 = scalar(@Seq2);
+
+    my @Matrix;
+    for (my $i=0; $i<=$len1; $i++) { $Matrix[$i][0] = 0; }
+    for (my $j=0; $j<=$len2; $j++) { $Matrix[0][$j] = 0; }
+
+    my $mismatch = -1;
+    my $match = 1;
+    my $gap = -1;
+    
+    # First off, we'll find the highest scoring coordinate under a
+    # local alignment scheme
+    my $max_i;
+    my $max_j;
+    my $max_score = 0;
+    for (my $i=1; $i<=$len1; $i++) {
+	for (my $j=1; $j<=$len2; $j++) {
+
+	    my $cell_score = $mismatch;
+	    $cell_score = $match if ($Seq1[$i] eq $Seq2[$j]);
+	    $cell_score += $Matrix[$i-1][$j-1];
+	    
+	    $Matrix[$i][$j] = Max(Max($Matrix[$i-1][$j],$Matrix[$i][$j-1])+$gap,
+				  $cell_score);
+	    $Matrix[$i][$j] = 0 if ($Matrix[$i][$j] < 0);
+
+	    if ($max_score < $Matrix[$i][$j]) {
+		$max_score = $Matrix[$i][$j];
+		$max_i = $i;
+		$max_j = $j;
+	    }
+	    
+	}
+    }
+
+    # Next, we'll re-compute the top-left and bottom-right quadrants
+    # of the matrix so that we have a global path that leads to our
+    # highest-scoring region
+
+    # Top-left
+    for (my $i=1; $i<=$max_i; $i++) {
+	for (my $j=1; $j<=$max_j; $j++) {
+
+	    my $cell_score = $mismatch;
+	    $cell_score = $match if ($Seq1[$i] eq $Seq2[$j]);
+	    $cell_score += $Matrix[$i-1][$j-1];
+	
+	    $Matrix[$i][$j] = Max(Max($Matrix[$i-1][$j],$Matrix[$i][$i-1])+$gap,
+				  $cell_score);
+	    
+	}
+    }
+    my $score_save = $Matrix[$i][$j]; # This cell gets overwritten, so hold on
+
+    # Bottom-right
+    for (my $i=$max_i; $i<=$len1; $i++) { $Matrix[$i][$max_j] = ($i-$max_i) * $gap; }
+    for (my $j=$max_j; $j<=$len2; $j++) { $Matrix[$max_i][$j] = ($j-$max_j) * $gap; }
+
+    for (my $i=$max_i+1; $i<=$len1; $i++) {
+	for (my $j=$max_j+1; $j<=$len2; $j++) {
+	    
+	    my $cell_score = $mismatch;
+	    $cell_score = $match if ($Seq1[$i] eq $Seq2[$j]);
+	    $cell_score += $Matrix[$i-1][$j-1];
+
+	    $Matrix[$i][$j] = Max(Max($Matrix[$i-1][$j],$Matrix[$i][$j-1])+$gap,
+				  $cell_score);
+	    
+	}
+    }
+
+    # Traceback!
+    my @ITrace;
+    my @JTrace;
+    push(@ITrace,$len1);
+    push(@JTrace,$len2);
+
+    my $i=$len1;
+    my $j=$len2;
+    while ($i>$max_i && $j>$max_j) {
+
+	my $cell_score = $mismatch;
+	$cell_score = $match if ($Seq1[$i] eq $Seq2[$j]);
+	$cell_score += $Matrix[$i-1][$j-1];
+	
+	if ($Matrix[$i][$j] == $cell_score ) {
+	    $i--;
+	    $j--;
+	} elsif ($Matrix[$i][$j] == $Matrix[$i-1][$j]+$gap) {
+	    $i--;
+	} else {
+	    $j--;
+	}
+
+	push(@ITrace,$i);
+	push(@JTrace,$j);
+
+    }
+
+    while ($i>$max_i) {
+	$i--;
+	push(@ITrace,$i);
+	push(@JTrace,$j);
+    }
+
+    while ($j>$max_j) {
+	$j--;
+	push(@ITrace,$i);
+	push(@JTrace,$j);
+    }
+
+    # Halfway(-ish) there!  Time to trace our way back through the top-left quad
+    $Matrix[$i][$j] = $score_save;
+
+    while ($i && $j) {
+
+	my $cell_score = $mismatch;
+	$cell_score = $match if ($Seq1[$i] eq $Seq2[$j]);
+	$cell_score += $Matrix[$i-1][$j-1];
+	
+	if ($Matrix[$i][$j] == $cell_score ) {
+	    $i--;
+	    $j--;
+	} elsif ($Matrix[$i][$j] == $Matrix[$i-1][$j]+$gap) {
+	    $i--;
+	} else {
+	    $j--;
+	}
+
+	push(@ITrace,$i);
+	push(@JTrace,$j);
+
+    }
+
+    while ($i) {
+	$i--;
+	push(@ITrace,$i);
+	push(@JTrace,$j);
+    }
+
+    while ($j) {
+	$j--;
+	push(@ITrace,$i);
+	push(@JTrace,$j);
+    }
+
+    # Awesome!  Before we make any more SWEET progress, note that our traceback
+    # is backwards, so we need to flip it around
+    my $trace_len = scalar(@ITrace);
+    for (my $pos=0; $pos<$trace_len/2; $pos++) {
+
+	my $flip_pos = $trace_len-1 - $pos;
+
+	my $tmp = $ITrace[$pos];
+	$ITrace[$pos] = $ITrace[$flip_pos];
+	$ITrace[$flip_pos] = $tmp;
+
+	$tmp = $JTrace[$pos];
+	$JTrace[$pos] = $JTrace[$flip_pos];
+	$JTrace[$flip_pos] = $tmp;
+
+    }
+
+    # Do a simple "score contribution" for each cell
+    my @TraceScore;
+    $TraceScore[0] = 0;
+    my $key_pos; # Where do we pass through [max_i][max_j]?
+    for (my $pos=1; $pos<$trace_len; $pos++) {
+
+	# Knock this check out first
+	if ($ITrace[$pos] == $max_i && $JTrace[$pos] == $max_j) {
+	    $key_pos = $pos;
+	}
+	
+	if ($ITrace[$pos] == $ITrace[$pos-1]+1 && $JTrace[$pos] == $JTrace[$pos-1]+1) {
+	    if () {
+		$TraceScore[$pos] = $match;
+	    } else {
+		$TraceScore[$pos] = $mismatch;
+	    }
+	} else {
+	    $TraceScore[$pos] = $gap;
+	}
+    }
+
+    # FINALLY!  Note that we're returning the original max local score,
+    # which may not be representative of where we've trimmed the alignment
+    return ($max_score);
+
 }
 
 
