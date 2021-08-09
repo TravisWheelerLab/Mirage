@@ -2361,8 +2361,10 @@ sub RecordGhostMSAs
 	    # Check which reading frame looks like it's the one we're supposed to be
 	    # working with...
 	    my $best_frame_num;
-	    my $best_frame_score = -1;
+	    my $best_frame_score = 0;
 	    my $best_frame_trans;
+	    my @BestFrameStarts;
+	    my @BestFrameEnds;
 	    for (my $frame=0; $frame<3; $frame++) {
 
 		# Pull in this reading frame
@@ -2378,13 +2380,23 @@ sub RecordGhostMSAs
 
 		}
 
-		# Perform a quick alignment to each source amino sequence, summing the
-		# scores.
-		my $sum_score = 0;
-		foreach my $source_seq_str (@SourceSeqs) {
-		    $sum_score += MatchMismatchScore($source_seq_str,$trans_str);
-		}
+		# OUTDATED: Just get score from match / mismatch scoring
+		## Perform a quick alignment to each source amino sequence, summing the
+		## scores.
+		#my $sum_score = 0;
+		#foreach my $source_seq_str (@SourceSeqs) {
+		#$sum_score += MatchMismatchScore($source_seq_str,$trans_str);
+		#}
 
+		# NEW APPROACH: Get the best local score along with start / end
+		#   coordinates, relative to the search amino sequence.
+		my $sum_score = 0;
+		for (my $source_id=0; $source_id<scalar(@SourceSeqs); $source_id++) {
+		    my ($lmm_score,$lmm_t_start,$lmm_t_end,$lmm_s_start,$lmm_s_end) =
+			LocalMatchMismatchAli($trans_str,$SourceSeqs[$source_id]);
+		    $BestFrameStarts[$frame][$source_id] = $lmm_s_start;
+		    $BestFrameEnds[$frame][$source_id] = $lmm_s_end;
+		}
 		if ($sum_score > $best_frame_score) {
 		    $best_frame_score = $sum_score;
 		    $best_frame_num = $frame;
@@ -2401,17 +2413,35 @@ sub RecordGhostMSAs
 	    #
 	    # That's a long-winded way of saying that sometimes our searches yield
 	    # 0 good outputs, so we need to be able to catch cases where our best
-	    # score is -1
-	    next if ($best_frame_score == -1);
+	    # score is bad
+	    next if ($best_frame_score <= 0);
+
 	    
 	    # Now that we have our best frame (and associated data) figured out,
 	    # time to actually get alignin'!
-	    my @AminoMSA = split(//,$SourceSeqs[0]);
+	    
+	    # Starting off by priming with the first source sequence
+	    my @SourceSeqChars = split(//,$SourceSeqs[0]);
+	    my @AminoMSA;
+	    for (my $char_id=$BestFrameStarts[$best_frame_num][0];
+		 $char_id<=$BestFrameEnds[$best_frame_num][0];
+		 $char_id++) {
+		push(@AminoMSA,$SourceSeqChars[$char_id]);
+	    }
+	    
+	    # And now for the rest of the crew...
 	    for (my $source_id=1; $source_id<$num_source_species; $source_id++) {
-		my @SourceSeqChars = split(//,$SourceSeqs[$source_id]);
-		my $amino_msa_ref = MultiAminoSeqAli(\@AminoMSA,\@SourceSeqChars);
+		@SourceSeqChars = split(//,$SourceSeqs[$source_id]);
+		my @SourceAliChars;
+		for (my $char_id=$BestFrameStarts[$best_frame_num][$source_id];
+		     $char_id<=$BestFrameEnds[$best_frame_num][$source_id];
+		     $char_id++) {
+		    push(@SourceAliChars,$SourceSeqChars[$char_id]);
+		}
+		my $amino_msa_ref = MultiAminoSeqAli(\@AminoMSA,\@SourceAliChars);
 		@AminoMSA = @{$amino_msa_ref};
 	    }
+	    
 	    # We align the target sequence last so that it's (perhaps) more of an
 	    # approximation of aligning to an "exon family profile"
 	    my @TargetTrans = split(//,$best_frame_trans);
@@ -2771,7 +2801,7 @@ sub LocalMatchMismatchAli
 	for (my $j=1; $j<=$len2; $j++) {
 
 	    my $cell_score = $mismatch;
-	    $cell_score = $match if ($Seq1[$i] eq $Seq2[$j]);
+	    $cell_score = $match if ($Seq1[$i-1] eq $Seq2[$j-1]);
 	    $cell_score += $Matrix[$i-1][$j-1];
 	    
 	    $Matrix[$i][$j] = Max(Max($Matrix[$i-1][$j],$Matrix[$i][$j-1])+$gap,
@@ -2787,6 +2817,12 @@ sub LocalMatchMismatchAli
 	}
     }
 
+    # If the max score indicates that we weren't able to get a reasonably exon-y
+    # alignment going, jump off
+    if ($max_score < $match * 5) {
+	return(-1,0,0,0,0);
+    }
+
     # Next, we'll re-compute the top-left and bottom-right quadrants
     # of the matrix so that we have a global path that leads to our
     # highest-scoring region
@@ -2796,7 +2832,7 @@ sub LocalMatchMismatchAli
 	for (my $j=1; $j<=$max_j; $j++) {
 
 	    my $cell_score = $mismatch;
-	    $cell_score = $match if ($Seq1[$i] eq $Seq2[$j]);
+	    $cell_score = $match if ($Seq1[$i-1] eq $Seq2[$j-1]);
 	    $cell_score += $Matrix[$i-1][$j-1];
 	
 	    $Matrix[$i][$j] = Max(Max($Matrix[$i-1][$j],$Matrix[$i][$i-1])+$gap,
@@ -2804,7 +2840,7 @@ sub LocalMatchMismatchAli
 	    
 	}
     }
-    my $score_save = $Matrix[$i][$j]; # This cell gets overwritten, so hold on
+    my $score_save = $Matrix[$max_i][$max_j]; # This cell gets overwritten
 
     # Bottom-right
     for (my $i=$max_i; $i<=$len1; $i++) { $Matrix[$i][$max_j] = ($i-$max_i) * $gap; }
@@ -2814,7 +2850,7 @@ sub LocalMatchMismatchAli
 	for (my $j=$max_j+1; $j<=$len2; $j++) {
 	    
 	    my $cell_score = $mismatch;
-	    $cell_score = $match if ($Seq1[$i] eq $Seq2[$j]);
+	    $cell_score = $match if ($Seq1[$i-1] eq $Seq2[$j-1]);
 	    $cell_score += $Matrix[$i-1][$j-1];
 
 	    $Matrix[$i][$j] = Max(Max($Matrix[$i-1][$j],$Matrix[$i][$j-1])+$gap,
@@ -2834,7 +2870,7 @@ sub LocalMatchMismatchAli
     while ($i>$max_i && $j>$max_j) {
 
 	my $cell_score = $mismatch;
-	$cell_score = $match if ($Seq1[$i] eq $Seq2[$j]);
+	$cell_score = $match if ($Seq1[$i-1] eq $Seq2[$j-1]);
 	$cell_score += $Matrix[$i-1][$j-1];
 	
 	if ($Matrix[$i][$j] == $cell_score ) {
@@ -2869,7 +2905,7 @@ sub LocalMatchMismatchAli
     while ($i && $j) {
 
 	my $cell_score = $mismatch;
-	$cell_score = $match if ($Seq1[$i] eq $Seq2[$j]);
+	$cell_score = $match if ($Seq1[$i-1] eq $Seq2[$j-1]);
 	$cell_score += $Matrix[$i-1][$j-1];
 	
 	if ($Matrix[$i][$j] == $cell_score ) {
@@ -2915,7 +2951,7 @@ sub LocalMatchMismatchAli
 
     }
 
-    # Do a simple "score contribution" for each cell
+    # Determine the "score contribution" for each cell
     my @TraceScore;
     $TraceScore[0] = 0;
     my $key_pos; # Where do we pass through [max_i][max_j]?
@@ -2925,9 +2961,10 @@ sub LocalMatchMismatchAli
 	if ($ITrace[$pos] == $max_i && $JTrace[$pos] == $max_j) {
 	    $key_pos = $pos;
 	}
-	
+
+	# What was this cell's contribution to the score of the maximum path?
 	if ($ITrace[$pos] == $ITrace[$pos-1]+1 && $JTrace[$pos] == $JTrace[$pos-1]+1) {
-	    if () {
+	    if ($Seq1[$ITrace[$pos]-1] eq $Seq2[$JTrace[$pos]-1]) {
 		$TraceScore[$pos] = $match;
 	    } else {
 		$TraceScore[$pos] = $mismatch;
@@ -2937,9 +2974,65 @@ sub LocalMatchMismatchAli
 	}
     }
 
+    # We'll set our condition for killing the alignment as being a window of 5
+    # aminos where 4 of the positions are gaps or mismatches.
+    my $window_size = 5;
+    my $min_matches = 2;
+    my $kill_trigger # Scores below this terminate our walk
+	= ($window_size-$min_matches)*Max($gap,$mismatch) + $min_matches*$match;
+
+    # Scan left
+    my $left_end_pos = $key_pos - $window_size/2;
+    if ($left_end_pos > 0 && $left_end_pos + $window_size < $trace_len) {
+
+	my $window_score = 0;
+	for (my $pos=0; $pos<$window_size; $pos++) {
+	    $window_score += $TraceScore[$left_end_pos+$pos];
+	}
+
+	while ($window_score >= $kill_trigger && $left_end_pos) {
+	    $left_end_pos--;
+	    $window_score -= $TraceScore[$left_end_pos+$window_size];
+	    $window_score += $TraceScore[$left_end_pos];
+	}
+
+    } else {
+	$left_end_pos = 0;
+    }
+
+    # Scan right
+    my $right_end_pos = $key_pos + $window_size/2;
+    if ($right_end_pos < $trace_len-1 && $right_end_pos - $window_size >= 0) {
+
+	my $window_score = 0;
+	for (my $pos=0; $pos<$window_size; $pos++) {
+	    $window_score += $TraceScore[$right_end_pos-$pos];
+	}
+
+	while ($window_score >= $kill_trigger && $right_end_pos < $trace_len-1) {
+	    $right_end_pos++;
+	    $window_score -= $TraceScore[$right_end_pos-$window_size];
+	    $window_score += $TraceScore[$right_end_pos];
+	}
+	
+    } else {
+	$right_end_pos = $trace_len-1;
+    }
+
+    # Eat inwards until we hit a match position
+    while ($TraceScore[$left_end_pos] != $match) {
+	$left_end_pos++;
+    }
+    while ($TraceScore[$right_end_pos] != $match) {
+	$right_end_pos--;
+    }
+
     # FINALLY!  Note that we're returning the original max local score,
-    # which may not be representative of where we've trimmed the alignment
-    return ($max_score);
+    # which may not be representative of where we've trimmed the alignment.
+    # NOTE that we need to reduce by 1 because our matrix corresponds to
+    #   1-indexed sequences.
+    return ($max_score,$ITrace[$left_end_pos]-1,$ITrace[$right_end_pos]-1,
+	    $JTrace[$left_end_pos]-1,$JTrace[$right_end_pos]-1);
 
 }
 
