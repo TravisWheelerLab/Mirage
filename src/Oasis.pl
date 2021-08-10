@@ -2837,7 +2837,7 @@ sub LocalMatchMismatchAli
 	    $cell_score = $match if ($Seq1[$i-1] eq $Seq2[$j-1]);
 	    $cell_score += $Matrix[$i-1][$j-1];
 	
-	    $Matrix[$i][$j] = Max(Max($Matrix[$i-1][$j],$Matrix[$i][$i-1])+$gap,
+	    $Matrix[$i][$j] = Max(Max($Matrix[$i-1][$j],$Matrix[$i][$j-1])+$gap,
 				  $cell_score);
 	    
 	}
