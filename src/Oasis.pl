@@ -2394,9 +2394,11 @@ sub RecordGhostMSAs
 		for (my $source_id=0; $source_id<scalar(@SourceSeqs); $source_id++) {
 		    my ($lmm_score,$lmm_t_start,$lmm_t_end,$lmm_s_start,$lmm_s_end) =
 			LocalMatchMismatchAli($trans_str,$SourceSeqs[$source_id]);
+		    $sum_score += $lmm_score;
 		    $BestFrameStarts[$frame][$source_id] = $lmm_s_start;
 		    $BestFrameEnds[$frame][$source_id] = $lmm_s_end;
 		}
+		
 		if ($sum_score > $best_frame_score) {
 		    $best_frame_score = $sum_score;
 		    $best_frame_num = $frame;
