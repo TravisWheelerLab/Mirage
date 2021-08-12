@@ -2150,6 +2150,8 @@ sub RecordGhostMSAs
 	next if ($line !~ /Search success/);
 
 	$line = <$inf>; # MSA position info.
+	$line =~ /(Exons? \S+)/;
+	my $source_exons = $1;
 	
 	$line = <$inf>; # Full target search region
 	$line =~ /\: (\S+) \(([^\:]+)\:/;
@@ -2205,7 +2207,7 @@ sub RecordGhostMSAs
 
 	# Time to record this bad boi!
 	my $hash_val = $target_chr.':'.$wide_start.'..'.$wide_end;
-	$hash_val = $hash_val.'|'.$source_species.':'.$source_seq;
+	$hash_val = $hash_val.'|'.$source_species.':'.$source_seq.':'.$source_exons;
 	$hash_val = $hash_val.'|'.$novel_exon;
 
 	if ($TargetSpeciesToHits{$target_species}) {
@@ -2317,10 +2319,12 @@ sub RecordGhostMSAs
 	    # Start off by getting access to the specific source species matches
 	    my @SourceSpecies;
 	    my @SourceSeqs;
+	    my @SourceExons;
 	    foreach my $hit (split(/\&/,$ExonHits[$i])) {
-		$hit =~ /^[^\|]+\|([^\:]+)\:([^\|]+)\|/;
+		$hit =~ /^[^\|]+\|([^\:]+)\:([^\:]+)\:([^\|]+)\|/;
 		push(@SourceSpecies,$1);
 		push(@SourceSeqs,$2);
+		push(@SourceExons,lc($3));
 	    }
 	    my $num_source_species = scalar(@SourceSpecies);
 
@@ -2590,6 +2594,14 @@ sub RecordGhostMSAs
 	    }
 
 	    # 2. The amino MSA
+	    #    (Where we absolutely want to record %ID-able info)
+	    my @SourceMatches;
+	    my @SourceMismatches;
+	    for (my $i=0; $i<$num_source_species; $i++) {
+		$SourceMatches[$i] = 0;
+		$SourceMismatches[$i] = 0;
+	    }
+		 
 	    for (my $col_id=$start_col; $col_id<=$end_col; $col_id++) {
 
 		my @Col = split(//,$AminoMSA[$col_id]);
@@ -2624,9 +2636,12 @@ sub RecordGhostMSAs
 		    #$MSA[$i+2][$msa_len+1] = lc($Col[$i+1]) if ($Col[0] ne $Col[$i+1]);
 
 		    # Approach 2: Periods for matches, lowercase for mismatches
-		    $MSA[$i+2][$msa_len+1] = lc($Col[$i+1]);
 		    if ($MSA[$i+2][$msa_len+1] =~ /[a-z]/ && $MSA[$i+2][$msa_len+1] eq lc($Col[0])) {
 			$MSA[$i+2][$msa_len+1] = '.';
+			$SourceMatches[$i]++;
+		    } else {
+			$MSA[$i+2][$msa_len+1] = lc($Col[$i+1]);
+			$SourceMismatches[$i]++;
 		    }
 
 		    $MSA[$i+2][$msa_len+2] = ' ';
@@ -2707,10 +2722,22 @@ sub RecordGhostMSAs
 
 	    # Before we spit out our alignment string, we'll also make a string with
 	    # hit metadata.
-	    my $meta_str = "\n  Target: $target_species $chr";
+
+	    # Metadata item 1: Target sequence info.
+	    my $meta_str = "\n";
+	    $meta_str = $meta_str."  Target : $target_species $chr";
 	    $meta_str = $meta_str.'[revcomp]' if ($revcomp);
 	    $meta_str = $meta_str.":$translation_start..$translation_end\n";
-	    
+
+	    # Metadata item 2: Source sequence info.
+	    $meta_str = $meta_str."  Source";
+	    $meta_str = $meta_str.'s' if ($num_source_species > 1);
+	    $meta_str = $meta_str.": $SourceSpecies[0] $SourceExons[0]\n";
+	    for (my $i=1; $i<$num_source_species; $i++) {
+		$meta_str = $meta_str."         : $SourceSpecies[1] $SourceExons[1]\n";
+	    }
+
+	    # Print the alignment!!!
 	    print $outf "\n\n-----------------------------------------------\n" if ($i);
 	    print $outf "$meta_str";
 	    print $outf "$ali_str";
