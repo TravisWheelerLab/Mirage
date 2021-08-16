@@ -275,7 +275,7 @@ if (!$misc_seqs) {
 EvaluateMissDir($misses_dirname);
 
 # No more progress to be made!
-system("rm -rf \"\$progress_dirname\"");
+system("rm -rf \"$progress_dirname\"");
 
 # If we've been collecting timing data, now's the time to let it loose
 if ($timed) {
