@@ -2636,7 +2636,7 @@ sub RecordGhostMSAs
 		    #$MSA[$i+2][$msa_len+1] = lc($Col[$i+1]) if ($Col[0] ne $Col[$i+1]);
 
 		    # Approach 2: Periods for matches, lowercase for mismatches
-		    if ($MSA[$i+2][$msa_len+1] =~ /[a-z]/ && $MSA[$i+2][$msa_len+1] eq lc($Col[0])) {
+		    if ($Col[$i+1] =~ /[A-Z]/ && $Col[$i+1] eq $Col[0]) {
 			$MSA[$i+2][$msa_len+1] = '.';
 			$SourceMatches[$i]++;
 		    } else {
@@ -2731,7 +2731,8 @@ sub RecordGhostMSAs
 
 	    # Metadata item 2: Source sequence info.
 	    $meta_str = $meta_str."  Source";
-	    $meta_str = $meta_str.'s' if ($num_source_species > 1);
+	    if ($num_source_species > 1) { $meta_str = $meta_str.'s'; }
+	    else                         { $meta_str = $meta_str.' '; }
 	    $meta_str = $meta_str.": $SourceSpecies[0] $SourceExons[0]\n";
 	    for (my $i=1; $i<$num_source_species; $i++) {
 		$meta_str = $meta_str."         : $SourceSpecies[1] $SourceExons[1]\n";
