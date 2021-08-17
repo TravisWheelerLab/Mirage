@@ -115,7 +115,6 @@ for (my $i=0; $i<$num_seqs; $i++) {
 	print $outf "\n" if (($j+1) % 60 == 0);
     }
     print $outf "\n" if ($msa_len % 60);
-    print $outf "\n";
 }
 close($outf);
 
