@@ -1,4 +1,4 @@
-C_FLAGS := -O2 -lm
+C_FLAGS := -O2
 PREFIX := /usr/local
 WORK_DIR := dist
 
@@ -18,13 +18,13 @@ clean:
 
 ${WORK_DIR}/FastMap2: src/FastMap2.c src/BasicBio.c
 	mkdir -p ${WORK_DIR}
-	${CC} ${C_FLAGS} -o $@ $^
+	${CC} ${C_FLAGS} -o $@ $^ -lm
 
 ${WORK_DIR}/ExonWeaver: src/ExonWeaver.c src/BasicBio.c
 	mkdir -p ${WORK_DIR}
-	${CC} ${C_FLAGS} -o $@ $^
+	${CC} ${C_FLAGS} -o $@ $^ -lm
 
 ${WORK_DIR}/MultiSeqNW: src/MultiSeqNW.c
 	mkdir -p ${WORK_DIR}
-	${CC} ${C_FLAGS} -o $@ $^
+	${CC} ${C_FLAGS} -o $@ $^ -lm
 
