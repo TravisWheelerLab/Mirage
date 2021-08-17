@@ -950,7 +950,7 @@ sub RecordSplicedMSA
 	    print $outf "\n" if (($j+1) % 60 == 0);
 	}
 	print $outf "\n" if ($msa_len % 60);
-	print $outf "\n";
+	#print $outf "\n";
 	
     }
     close($outf);
@@ -3515,15 +3515,50 @@ sub GetMapSummaryStats
 	print $outf "Number of GTF-annotated Exons: $num_annotated_exons\n";
 	print $outf "\n";
 
-	print $outf "Gene  # Suggested  # Annotated\n";
-	print $outf "----  -----------  -----------\n";
+	# To properly format our output, we're going to need to know the
+	# longest gene name...
+	my $longest_gene_name = 4; # 'Gene'
+	foreach my $hit (@FullHitList) {
+
+	    my @HitData = split(/\|/);
+	    next if ($HitData[0] ne $species);
+
+	    if (length($HitData[0]) > $longest_gene_name) {
+		$longest_gene_name = length($HitData[0]);
+	    }
+
+	}
+
+	my $fmted_header_1 = 'Gene';
+	my $fmted_header_2 = '----';
+	while (length($fmted_header_1) < $longest_gene_name) {
+	    $fmted_header_1 = $fmted_header_1.' ';
+	    $fmted_header_2 = $fmted_header_2.'-';
+	}
+	print $outf "$fmted_header_1  # Suggested  # Annotated\n";
+	print $outf "$fmted_header_2  -----------  -----------\n";
 
 	foreach my $hit (@FullHitList) {
 
 	    my @HitData = split(/\|/,$hit);
 	    next if ($HitData[0] ne $species);
 
-	    print $outf "$HitData[1]  $HitData[2]  $HitData[3]\n";
+	    my $field_1 = $HitData[1];
+	    while (length($field_1) < $longest_gene_name) {
+		$field_1 = $field_1.' ';
+	    }
+
+	    my $field_2 = $HitData[2];
+	    while (length($field_2) < length('# Suggested')) {
+		$field_2 = ' '.$field_2;
+	    }
+
+	    my $field_3 = $HitData[3];
+	    while (length($field_3) < length('# Annotated')) {
+		$field_3 = ' '.$field_3;
+	    }
+
+	    print $outf "$field_1  $field_2  $field_3\n";
 	    
 	}
 
