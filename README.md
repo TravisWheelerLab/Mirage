@@ -1,22 +1,18 @@
 # Mirage
-Multiple-sequence IsofoRm Alignment tool Guided by Exon boundaries
 
-We use a "git flow" workflow. We have two active branches:
- * **master** will be the stable Mirage release branch. 
- * **develop** is the Mirage development branch
+Multiple-sequence IsofoRm Alignment tool Guided by Exon boundaries.
 
+## Build
 
-To clone your own copy of Mirage source code repository for the first time:
+Building Mirage requires a modern C compiler. Use the `CC` environment variable
+to control the compiler used. Set the `WORK_DIR` environment variable to control
+where the binaries end up, the default is `dist`.
 
-```bash
-   $ git clone https://github.com/TravisWheelerLab/Mirage
-   $ cd Mirage
-   $ git checkout develop
-```
+Then, building is as simple as running `make`.
 
-To contribute to Mirage development, you want to be on the
-**develop** branch, which is where we are currently integrating
-feature branches. For more information, see the
-[Mirage wiki](https://github.com/TravisWheelerLab/Mirage/wiki).
+## Installation
 
+Once the build is complete, run `make install` to copy binaries. Use the
+`PREFIX` environment variable to control the install location. The default
+location is `/usr/local`.
 
