@@ -2723,6 +2723,29 @@ sub RecordGhostMSAs
 	    # Before we spit out our alignment string, we'll also make a string with
 	    # hit metadata.
 
+	    my @SourcePctsID;
+	    my @SourceRatios;
+	    for (my $i=0; $i<$num_source_species; $i++) {
+
+		my $ratio = $SourceMatches[$i]+$SourceMismatches[$i];
+		my $pct_id = int(1000.0 * $SourceMatches[$i] / $ratio);
+		$ratio = '('.$SourceMatches[$i].'/'.$ratio.')';
+
+		# Formatting: Will we need to add a '.0'
+		if ($pct_id % 10 == 0) {
+		    $pct_id = $pct_id / 10.0;
+		    $pct_id = $pct_id.'.0%';
+		} else {
+		    $pct_id = $pct_id / 10.0;
+		    $pct_id = $pct_id.'%';
+		}
+		$pct_id = $pct_id.' alignment identity';
+
+		push(@SourcePctsID,$pct_id);
+		push(@SourceRatios,$ratio);
+		
+	    }
+
 	    # Metadata item 1: Target sequence info.
 	    my $meta_str = "\n";
 	    $meta_str = $meta_str."  Target : $target_species $chr";
@@ -2734,8 +2757,10 @@ sub RecordGhostMSAs
 	    if ($num_source_species > 1) { $meta_str = $meta_str.'s'; }
 	    else                         { $meta_str = $meta_str.' '; }
 	    $meta_str = $meta_str.": $SourceSpecies[0] $SourceExons[0]\n";
+	    $meta_str = $meta_str."         : $SourcePctsID[0] $SourceRatios[0]\n";
 	    for (my $i=1; $i<$num_source_species; $i++) {
-		$meta_str = $meta_str."         : $SourceSpecies[1] $SourceExons[1]\n";
+		$meta_str = $meta_str."         : $SourceSpecies[$i] $SourceExons[$i]\n";
+		$meta_str = $meta_str."         : $SourcePctsID[$i] $SourceRatios[$i]\n";
 	    }
 
 	    # Print the alignment!!!
