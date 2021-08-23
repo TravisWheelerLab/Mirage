@@ -12,6 +12,10 @@ install: build
 	cp ${WORK_DIR}/ExonWeaver ${PREFIX}/bin/
 	cp ${WORK_DIR}/MultiSeqNW ${PREFIX}/bin/
 
+.PHONY: check
+check: build
+	@echo "No checks yet"
+
 .PHONY: clean
 clean:
 	rm -rf ${WORK_DIR}

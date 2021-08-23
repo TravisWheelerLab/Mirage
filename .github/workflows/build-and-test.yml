@@ -1,0 +1,14 @@
+name: Build and Test
+
+on: [push, pull_request]
+
+jobs:
+  check:
+    runs-on: ubuntu-18.04
+    container:
+      image: traviswheelerlab/mirage_build
+      volumes:
+        - ${{ github.workspace }}:/code
+    steps:
+      - uses: actions/checkout@v1
+      - run: make check
