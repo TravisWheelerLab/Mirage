@@ -950,7 +950,7 @@ sub RecordSplicedMSA
 	    print $outf "\n" if (($j+1) % 60 == 0);
 	}
 	print $outf "\n" if ($msa_len % 60);
-	print $outf "\n";
+	#print $outf "\n";
 	
     }
     close($outf);
@@ -2150,6 +2150,8 @@ sub RecordGhostMSAs
 	next if ($line !~ /Search success/);
 
 	$line = <$inf>; # MSA position info.
+	$line =~ /(Exons? \S+)/;
+	my $source_exons = $1;
 	
 	$line = <$inf>; # Full target search region
 	$line =~ /\: (\S+) \(([^\:]+)\:/;
@@ -2205,7 +2207,7 @@ sub RecordGhostMSAs
 
 	# Time to record this bad boi!
 	my $hash_val = $target_chr.':'.$wide_start.'..'.$wide_end;
-	$hash_val = $hash_val.'|'.$source_species.':'.$source_seq;
+	$hash_val = $hash_val.'|'.$source_species.':'.$source_seq.':'.$source_exons;
 	$hash_val = $hash_val.'|'.$novel_exon;
 
 	if ($TargetSpeciesToHits{$target_species}) {
@@ -2317,10 +2319,12 @@ sub RecordGhostMSAs
 	    # Start off by getting access to the specific source species matches
 	    my @SourceSpecies;
 	    my @SourceSeqs;
+	    my @SourceExons;
 	    foreach my $hit (split(/\&/,$ExonHits[$i])) {
-		$hit =~ /^[^\|]+\|([^\:]+)\:([^\|]+)\|/;
+		$hit =~ /^[^\|]+\|([^\:]+)\:([^\:]+)\:([^\|]+)\|/;
 		push(@SourceSpecies,$1);
 		push(@SourceSeqs,$2);
+		push(@SourceExons,lc($3));
 	    }
 	    my $num_source_species = scalar(@SourceSpecies);
 
@@ -2394,9 +2398,11 @@ sub RecordGhostMSAs
 		for (my $source_id=0; $source_id<scalar(@SourceSeqs); $source_id++) {
 		    my ($lmm_score,$lmm_t_start,$lmm_t_end,$lmm_s_start,$lmm_s_end) =
 			LocalMatchMismatchAli($trans_str,$SourceSeqs[$source_id]);
+		    $sum_score += $lmm_score;
 		    $BestFrameStarts[$frame][$source_id] = $lmm_s_start;
 		    $BestFrameEnds[$frame][$source_id] = $lmm_s_end;
 		}
+		
 		if ($sum_score > $best_frame_score) {
 		    $best_frame_score = $sum_score;
 		    $best_frame_num = $frame;
@@ -2588,6 +2594,14 @@ sub RecordGhostMSAs
 	    }
 
 	    # 2. The amino MSA
+	    #    (Where we absolutely want to record %ID-able info)
+	    my @SourceMatches;
+	    my @SourceMismatches;
+	    for (my $i=0; $i<$num_source_species; $i++) {
+		$SourceMatches[$i] = 0;
+		$SourceMismatches[$i] = 0;
+	    }
+		 
 	    for (my $col_id=$start_col; $col_id<=$end_col; $col_id++) {
 
 		my @Col = split(//,$AminoMSA[$col_id]);
@@ -2622,9 +2636,12 @@ sub RecordGhostMSAs
 		    #$MSA[$i+2][$msa_len+1] = lc($Col[$i+1]) if ($Col[0] ne $Col[$i+1]);
 
 		    # Approach 2: Periods for matches, lowercase for mismatches
-		    $MSA[$i+2][$msa_len+1] = lc($Col[$i+1]);
-		    if ($MSA[$i+2][$msa_len+1] =~ /[a-z]/ && $MSA[$i+2][$msa_len+1] eq lc($Col[0])) {
+		    if ($Col[$i+1] =~ /[A-Z]/ && $Col[$i+1] eq $Col[0]) {
 			$MSA[$i+2][$msa_len+1] = '.';
+			$SourceMatches[$i]++;
+		    } else {
+			$MSA[$i+2][$msa_len+1] = lc($Col[$i+1]);
+			$SourceMismatches[$i]++;
 		    }
 
 		    $MSA[$i+2][$msa_len+2] = ' ';
@@ -2705,10 +2722,48 @@ sub RecordGhostMSAs
 
 	    # Before we spit out our alignment string, we'll also make a string with
 	    # hit metadata.
-	    my $meta_str = "\n  Target: $target_species $chr";
+
+	    my @SourcePctsID;
+	    my @SourceRatios;
+	    for (my $i=0; $i<$num_source_species; $i++) {
+
+		my $ratio = $SourceMatches[$i]+$SourceMismatches[$i];
+		my $pct_id = int(1000.0 * $SourceMatches[$i] / $ratio);
+		$ratio = '('.$SourceMatches[$i].'/'.$ratio.')';
+
+		# Formatting: Will we need to add a '.0'
+		if ($pct_id % 10 == 0) {
+		    $pct_id = $pct_id / 10.0;
+		    $pct_id = $pct_id.'.0%';
+		} else {
+		    $pct_id = $pct_id / 10.0;
+		    $pct_id = $pct_id.'%';
+		}
+		$pct_id = $pct_id.' alignment identity';
+
+		push(@SourcePctsID,$pct_id);
+		push(@SourceRatios,$ratio);
+		
+	    }
+
+	    # Metadata item 1: Target sequence info.
+	    my $meta_str = "\n";
+	    $meta_str = $meta_str."  Target : $target_species $chr";
 	    $meta_str = $meta_str.'[revcomp]' if ($revcomp);
 	    $meta_str = $meta_str.":$translation_start..$translation_end\n";
-	    
+
+	    # Metadata item 2: Source sequence info.
+	    $meta_str = $meta_str."  Source";
+	    if ($num_source_species > 1) { $meta_str = $meta_str.'s'; }
+	    else                         { $meta_str = $meta_str.' '; }
+	    $meta_str = $meta_str.": $SourceSpecies[0] $SourceExons[0]\n";
+	    $meta_str = $meta_str."         : $SourcePctsID[0] $SourceRatios[0]\n";
+	    for (my $i=1; $i<$num_source_species; $i++) {
+		$meta_str = $meta_str."         : $SourceSpecies[$i] $SourceExons[$i]\n";
+		$meta_str = $meta_str."         : $SourcePctsID[$i] $SourceRatios[$i]\n";
+	    }
+
+	    # Print the alignment!!!
 	    print $outf "\n\n-----------------------------------------------\n" if ($i);
 	    print $outf "$meta_str";
 	    print $outf "$ali_str";
@@ -2835,7 +2890,7 @@ sub LocalMatchMismatchAli
 	    $cell_score = $match if ($Seq1[$i-1] eq $Seq2[$j-1]);
 	    $cell_score += $Matrix[$i-1][$j-1];
 	
-	    $Matrix[$i][$j] = Max(Max($Matrix[$i-1][$j],$Matrix[$i][$i-1])+$gap,
+	    $Matrix[$i][$j] = Max(Max($Matrix[$i-1][$j],$Matrix[$i][$j-1])+$gap,
 				  $cell_score);
 	    
 	}
@@ -3460,15 +3515,50 @@ sub GetMapSummaryStats
 	print $outf "Number of GTF-annotated Exons: $num_annotated_exons\n";
 	print $outf "\n";
 
-	print $outf "Gene  # Suggested  # Annotated\n";
-	print $outf "----  -----------  -----------\n";
+	# To properly format our output, we're going to need to know the
+	# longest gene name...
+	my $longest_gene_name = 4; # 'Gene'
+	foreach my $hit (@FullHitList) {
+
+	    my @HitData = split(/\|/);
+	    next if ($HitData[0] ne $species);
+
+	    if (length($HitData[0]) > $longest_gene_name) {
+		$longest_gene_name = length($HitData[0]);
+	    }
+
+	}
+
+	my $fmted_header_1 = 'Gene';
+	my $fmted_header_2 = '----';
+	while (length($fmted_header_1) < $longest_gene_name) {
+	    $fmted_header_1 = $fmted_header_1.' ';
+	    $fmted_header_2 = $fmted_header_2.'-';
+	}
+	print $outf "$fmted_header_1  # Suggested  # Annotated\n";
+	print $outf "$fmted_header_2  -----------  -----------\n";
 
 	foreach my $hit (@FullHitList) {
 
 	    my @HitData = split(/\|/,$hit);
 	    next if ($HitData[0] ne $species);
 
-	    print $outf "$HitData[1]  $HitData[2]  $HitData[3]\n";
+	    my $field_1 = $HitData[1];
+	    while (length($field_1) < $longest_gene_name) {
+		$field_1 = $field_1.' ';
+	    }
+
+	    my $field_2 = $HitData[2];
+	    while (length($field_2) < length('# Suggested')) {
+		$field_2 = ' '.$field_2;
+	    }
+
+	    my $field_3 = $HitData[3];
+	    while (length($field_3) < length('# Annotated')) {
+		$field_3 = ' '.$field_3;
+	    }
+
+	    print $outf "$field_1  $field_2  $field_3\n";
 	    
 	}
 
