@@ -1,16 +1,22 @@
 C_FLAGS := -O2
-PREFIX := /usr/local
-WORK_DIR := dist
+
+BUILD_DIR := build
+DIST_DIR := dist
+SRC_DIR := src
 
 .PHONY: build
-build: ${WORK_DIR}/FastMap2 ${WORK_DIR}/ExonWeaver ${WORK_DIR}/MultiSeqNW
+build: ${BUILD_DIR}/FastMap2 ${BUILD_DIR}/ExonWeaver ${BUILD_DIR}/MultiSeqNW
 
-.PHONY: install
-install: build
-	mkdir -p ${PREFIX}/bin
-	cp ${WORK_DIR}/FastMap2 ${PREFIX}/bin/
-	cp ${WORK_DIR}/ExonWeaver ${PREFIX}/bin/
-	cp ${WORK_DIR}/MultiSeqNW ${PREFIX}/bin/
+.PHONY: dist
+dist: build
+	mkdir -p dist/
+	cp ${BUILD_DIR}/FastMap2 ${DIST_DIR}/
+	cp ${BUILD_DIR}/ExonWeaver ${DIST_DIR}/
+	cp ${BUILD_DIR}/MultiSeqNW ${DIST_DIR}/
+	cp ${SRC_DIR}/*.pl ${DIST_DIR}/
+	cp ${SRC_DIR}/*.pm ${DIST_DIR}/
+	cp LICENSE ${DIST_DIR}/
+	cp README.md ${DIST_DIR}/
 
 .PHONY: check
 check: build
@@ -18,17 +24,18 @@ check: build
 
 .PHONY: clean
 clean:
-	rm -rf ${WORK_DIR}
+	rm -rf ${BUILD_DIR}
+	rm -rf ${DIST_DIR}
 
-${WORK_DIR}/FastMap2: src/FastMap2.c src/BasicBio.c
-	mkdir -p ${WORK_DIR}
+${BUILD_DIR}/FastMap2: ${SRC_DIR}/FastMap2.c ${SRC_DIR}/BasicBio.c
+	mkdir -p ${BUILD_DIR}
 	${CC} ${C_FLAGS} -o $@ $^ -lm
 
-${WORK_DIR}/ExonWeaver: src/ExonWeaver.c src/BasicBio.c
-	mkdir -p ${WORK_DIR}
+${BUILD_DIR}/ExonWeaver: ${SRC_DIR}/ExonWeaver.c ${SRC_DIR}/BasicBio.c
+	mkdir -p ${BUILD_DIR}
 	${CC} ${C_FLAGS} -o $@ $^ -lm
 
-${WORK_DIR}/MultiSeqNW: src/MultiSeqNW.c
-	mkdir -p ${WORK_DIR}
+${BUILD_DIR}/MultiSeqNW: ${SRC_DIR}/MultiSeqNW.c
+	mkdir -p ${BUILD_DIR}
 	${CC} ${C_FLAGS} -o $@ $^ -lm
 
