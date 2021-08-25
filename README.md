@@ -2,6 +2,23 @@
 
 Multiple-sequence IsofoRm Alignment tool Guided by Exon boundaries.
 
+## Dependencies
+
+Mirage has no build dependencies beyond the C standard library, but it does have
+several runtime dependencies. These are described below. Executables should
+exist somewhere in the user's `PATH`.
+
+**blat** - <http://www.kentinformatics.com/index.html>
+
+**hsi** - <https://github.com/TravisWheelerLab/hsi>
+
+**spaln2** - <http://www.genome.ist.i.kyoto-u.ac.jp/~aln_user/spaln/>
+
+**tblastn** - <https://blast.ncbi.nlm.nih.gov/Blast.cgi>
+
+Appropriate versions of these are included in the `dependencies` directory of
+the repository. The `SETUP.pl` script will build and install them.
+
 ## Build
 
 Building Mirage requires a modern C compiler. Use the `CC` environment variable
