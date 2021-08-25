@@ -27,10 +27,10 @@ if (-e 'mirage2') { system("rm \"mirage2\""); }
 
 
 # The name of the spaln folder (at the top for ease of adjustment)
-my $hsiDir   = 'inc/hsi';
-my $spalnDir = 'inc/spaln2.3.3';
-my $blatDir  = 'inc/blat';
-my $tbnDir   = 'inc/tblastn';
+my $hsiDir   = 'dependencies/hsi-1.0.0';
+my $spalnDir = 'dependencies/spaln2.3.3';
+my $blatDir  = 'dependencies/blat';
+my $tbnDir   = 'dependencies/tblastn';
 my $hsiTar   = $hsiDir.'.tgz';
 my $spalnTar = $spalnDir.'.tgz';
 my $blatTar  = $blatDir.'.tgz';
@@ -44,7 +44,6 @@ $startDir =~ s/\/$//;
 
 # Check that all files are where we need them
 my @srcFiles;
-push(@srcFiles,'src/makefile');
 push(@srcFiles,'src/BasicBio.c');
 push(@srcFiles,'src/BasicBio.h');
 push(@srcFiles,'src/BureaucracyMirage.pm');
