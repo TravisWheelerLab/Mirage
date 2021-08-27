@@ -3,7 +3,7 @@ name: Build and Test
 on: [push, pull_request]
 
 jobs:
-  check:
+  build:
     runs-on: ubuntu-18.04
     container:
       image: traviswheelerlab/mirage_build
@@ -11,4 +11,4 @@ jobs:
         - ${{ github.workspace }}:/code
     steps:
       - uses: actions/checkout@v1
-      - run: make check
+      - run: cmake . && make
