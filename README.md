@@ -5,8 +5,9 @@ Multiple-sequence IsofoRm Alignment tool Guided by Exon boundaries.
 ## Dependencies
 
 Mirage has no build dependencies beyond the C standard library, but it does have
-several runtime dependencies. These are described below. Executables should
-exist somewhere in the user's `PATH`.
+several runtime dependencies. These are listed below. The build process will
+include suitable versions of each in the build output, so there is no need to
+install them manually.
 
 **blat** - <http://www.kentinformatics.com/index.html>
 
@@ -16,20 +17,21 @@ exist somewhere in the user's `PATH`.
 
 **tblastn** - <https://blast.ncbi.nlm.nih.gov/Blast.cgi>
 
-Appropriate versions of these are included in the `dependencies` directory of
-the repository. The `SETUP.pl` script will build and install them.
-
 ## Build
 
-Building Mirage requires a modern C compiler. Use the `CC` environment variable
-to control the compiler used. Set the `WORK_DIR` environment variable to control
-where the binaries end up, the default is `dist`.
+We use CMake to build Mirage. The following commands will place everything
+needed to run Mirage in the `build/` directory.
 
-Then, building is as simple as running `make`.
+```
+cmake .
+make
+```
 
 ## Installation
 
-Once the build is complete, run `make install` to copy binaries. Use the
-`PREFIX` environment variable to control the install location. The default
-location is `/usr/local`.
+ The software can be "installed" simply by adding the `build/` directory to the
+ `PATH`. Optionally, it can be relocated first (for example, to `/opt/`).
 
+## Usage
+
+TODO
