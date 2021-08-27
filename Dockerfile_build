@@ -1,6 +1,7 @@
 FROM debian:bullseye-slim
 
 RUN apt-get update && apt-get install -y \
+        cmake \
         gcc \
         make && \
     apt-get clean && \
