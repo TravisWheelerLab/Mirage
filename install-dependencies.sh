@@ -40,9 +40,7 @@ fi
 if [ ! -d build/${HSI_NAME} ];
 then
     tar -xf $HSI_TAR -C $DEPS_DIR
-    pushd $HSI_DIR
-    cmake . && make
-    popd
+    cd $HSI_DIR && cmake . && make && cd -
     mv $HSI_DIR build/${HSI_BASE}
 else
     echo "Skipping hsi"
@@ -52,9 +50,7 @@ fi
 if [ ! -d build/${SPALN_NAME} ];
 then
     tar -xf $SPALN_TAR -C dependencies/
-    pushd $SPALN_DIR
-    ./configure && make
-    popd
+    cd $SPALN_DIR/src && ./configure && make && cd -
     mv $SPALN_DIR build/${SPALN_BASE}
 else
     echo "Skipping spaln"
