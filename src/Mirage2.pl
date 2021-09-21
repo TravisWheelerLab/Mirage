@@ -75,9 +75,10 @@ $location =~ s/Mirage2\.pl$//;
 
 
 # We're going to need these friends
-my $sindex = $location.'../inc/hsi/sindex';
-my $sfetch = $location.'../inc/hsi/sfetch';
-my $sstat  = $location.'../inc/hsi/sstat';
+my $hsi_dirname = $location.'../dependencies/hsi-1.0.0/';
+my $sindex = $hsi_dirname.'sindex';
+my $sfetch = $hsi_dirname.'sfetch';
+my $sstat  = $hsi_dirname.'sstat';
 
 
 # Where we'll be storing timing information
@@ -437,12 +438,12 @@ sub CheckInstall
     push(@RequiredFiles,$location.'MultiSeqNW.h');
     push(@RequiredFiles,$location.'FinalMSA.pl');
     push(@RequiredFiles,$location.'makefile');
-    push(@RequiredFiles,$location.'../inc/hsi/sfetch');
-    push(@RequiredFiles,$location.'../inc/hsi/sstat');
-    push(@RequiredFiles,$location.'../inc/spaln2.3.3/src/spaln');
-    push(@RequiredFiles,$location.'../inc/blat/blat.linux.x86_64');
-    push(@RequiredFiles,$location.'../inc/blat/blat.macOSX.x86_64');
-    push(@RequiredFiles,$location.'../inc/blat/blat.macOSX.i386');
+    push(@RequiredFiles,$location.'../dependencies/hsi-1.0.0/sfetch');
+    push(@RequiredFiles,$location.'../dependencies/hsi-1.0.0/sstat');
+    push(@RequiredFiles,$location.'../dependencies/spaln2.3.3/src/spaln');
+    push(@RequiredFiles,$location.'../dependencies/blat/blat.linux.x86_64');
+    push(@RequiredFiles,$location.'../dependencies/blat/blat.macOSX.x86_64');
+    push(@RequiredFiles,$location.'../dependencies/blat/blat.macOSX.i386');
 
     foreach my $file (@RequiredFiles) {
 	if (!(-e $file)) { die "\n  Failure: Could not locate required file '$file'\n\n"; }

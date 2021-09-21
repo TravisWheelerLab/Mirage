@@ -74,8 +74,8 @@ my $gtfname = $ARGV[2];
 # As long as everything's going as expected, figure out where we are
 my $srcdir = $0;
 $srcdir =~ s/Quilter2.pl$//;
-my $sfetch = $srcdir.'../inc/hsi/sfetch';
-my $spaln  = $srcdir.'../inc/spaln2.3.3/src/spaln';
+my $sfetch = $srcdir.'../dependencies/hsi-1.0.0/sfetch';
+my $spaln  = $srcdir.'../dependencies/spaln2.3.3/src/spaln';
 
 # Spaln requires certain environment variables to be set, so why don'tcha set 'em?
 $spaln =~ /^(.*)spaln$/;
@@ -2641,9 +2641,9 @@ sub RunBlatOnFileSet
     my $UnameCmd = OpenSystemCommand('uname -a |');
     my $uname = <$UnameCmd>;
     close($UnameCmd);
-    if    (uc($uname) =~ /^LINUX /)  { $BLAT = $srcdir.'../inc/blat/blat.linux.x86_64';  }
-    elsif (uc($uname) =~ /^DARWIN /) { $BLAT = $srcdir.'../inc/blat/blat.macOSX.x86_64'; }
-    else                             { $BLAT = $srcdir.'../inc/blat/blat.macOSX.i386';   }
+    if    (uc($uname) =~ /^LINUX /)  { $BLAT = $srcdir.'../dependencies/blat/blat.linux.x86_64';  }
+    elsif (uc($uname) =~ /^DARWIN /) { $BLAT = $srcdir.'../dependencies/blat/blat.macOSX.x86_64'; }
+    else                             { $BLAT = $srcdir.'../dependencies/blat/blat.macOSX.i386';   }
 
     # I think that now is the time for honesty... We're running BLAT!
     DispProgQuilter('blatrunning');
