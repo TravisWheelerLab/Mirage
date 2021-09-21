@@ -27,10 +27,10 @@ if (-e 'mirage2') { system("rm \"mirage2\""); }
 
 
 # The name of the spaln folder (at the top for ease of adjustment)
-my $hsiDir   = 'dependencies/hsi-1.0.0';
-my $spalnDir = 'dependencies/spaln2.3.3';
-my $blatDir  = 'dependencies/blat';
-my $tbnDir   = 'dependencies/tblastn';
+my $hsiDir   = 'inc/hsi-1.0.0';
+my $spalnDir = 'inc/spaln2.3.3';
+my $blatDir  = 'inc/blat';
+my $tbnDir   = 'inc/tblastn';
 my $hsiTar   = $hsiDir.'.tgz';
 my $spalnTar = $spalnDir.'.tgz';
 my $blatTar  = $blatDir.'.tgz';
@@ -44,6 +44,7 @@ $startDir =~ s/\/$//;
 
 # Check that all files are where we need them
 my @srcFiles;
+push(@srcFiles,'src/makefile');
 push(@srcFiles,'src/BasicBio.c');
 push(@srcFiles,'src/BasicBio.h');
 push(@srcFiles,'src/BureaucracyMirage.pm');
@@ -82,7 +83,8 @@ if (-e $hsiTar) {
     # Make and make install
     chdir($hsiDir) || die "\n  Failed to enter directory '$hsiDir'\n\n";
     print "\n  Compiling hsi tools\n\n";
-    if (system("make")) { die "\n  Failed to compile hsi library\n\n"; }
+    if (system("cmake .")) { die "\n  Failed to cmake hsi library\n\n"; }
+    if (system("make")) { die "\n  Failed to make hsi library\n\n"; }
 
 }    
 
@@ -127,12 +129,14 @@ my $MirageLink = "ln -s src/run_mirage2.sh mirage2";
 if (system($MirageLink)) { die "\n  Failed to create symbolic link to src/run_mirage2.sh\n\n"; }
 
 # Create a symbolic link for running bazaar
-my $BazaarLink = "ln -s src/run_bazaar.sh bazaar";
-if (system($BazaarLink)) { die "\n  Failed to create symbolic link to src/run_bazaar.sh\n\n"; }
+# -- Bazaar certainly doesn't need public scrutiny at this stage!
+#my $BazaarLink = "ln -s src/run_bazaar.sh bazaar";
+#if (system($BazaarLink)) { die "\n  Failed to create symbolic link to src/run_bazaar.sh\n\n"; }
 
 # Create a symbolic link for running oasis
-my $OasisLink = "ln -s src/run_oasis.sh oasis";
-if (system($OasisLink)) { die "\n  Failed to create symbolic link to src/run_oasis.sh\n\n"; }
+# -- For present purposes, we'll keep Oasis a sort-of-secret
+#my $OasisLink = "ln -s src/run_oasis.sh oasis";
+#if (system($OasisLink)) { die "\n  Failed to create symbolic link to src/run_oasis.sh\n\n"; }
 
 # Happy mirage-ing!
 print "\n  Setup completed successfully!\n\n";
