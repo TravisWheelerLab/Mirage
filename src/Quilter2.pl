@@ -74,7 +74,7 @@ my $gtfname = $ARGV[2];
 # As long as everything's going as expected, figure out where we are
 my $srcdir = $0;
 $srcdir =~ s/Quilter2.pl$//;
-my $sfetch = $srcdir.'../dependencies/hsi-1.0.0/sfetch';
+my $sfetch = $srcdir.'../dependencies/hsi-1.0.0/build/sfetch';
 my $spaln  = $srcdir.'../dependencies/spaln2.3.3/src/spaln';
 
 # Spaln requires certain environment variables to be set, so why don'tcha set 'em?

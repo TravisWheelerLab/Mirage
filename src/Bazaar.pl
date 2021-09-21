@@ -32,7 +32,7 @@ if (@ARGV != 2) { die "\n  USAGE:  ./Bazaar.pl [Mirage-Results] [Species-Guide]\
 
 # What's life without your best friend (sfetch)?
 my $sfetch = $0;
-$sfetch =~ s/Bazaar\.pl/\.\.\/dependencies\/hsi\-1\.0\.0\/sfetch/;
+$sfetch =~ s/Bazaar\.pl/\.\.\/dependencies\/hsi\-1\.0\.0\/build\/sfetch/;
 if (!(-e $sfetch)) {
     die "\n  ERROR:  Failed to location sfetch (expected to be at '$sfetch')\n\n";
 }

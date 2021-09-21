@@ -75,7 +75,7 @@ $location =~ s/Mirage2\.pl$//;
 
 
 # We're going to need these friends
-my $hsi_dirname = $location.'../dependencies/hsi-1.0.0/';
+my $hsi_dirname = $location.'../dependencies/hsi-1.0.0/build/';
 my $sindex = $hsi_dirname.'sindex';
 my $sfetch = $hsi_dirname.'sfetch';
 my $sstat  = $hsi_dirname.'sstat';
