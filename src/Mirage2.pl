@@ -471,9 +471,9 @@ sub CheckSourceFiles
     push(@RequiredFiles,$location.'Quilter2.pl');
     push(@RequiredFiles,$location.'MapsToMSAs.pl');
     push(@RequiredFiles,$location.'FinalMSA.pl');
-    push(@RequiredFiles,$location.'FastMap2');
-    push(@RequiredFiles,$location.'ExonWeaver');
-    push(@RequiredFiles,$location.'MultiSeqNW');
+    push(@RequiredFiles,$location.'../build/FastMap2');
+    push(@RequiredFiles,$location.'../build/ExonWeaver');
+    push(@RequiredFiles,$location.'../build/MultiSeqNW');
 
     foreach my $srcfile (@RequiredFiles) {
 	if (!(-e $srcfile)) {
@@ -1531,7 +1531,7 @@ sub AlignUnmappedSeqs
 
 	# Now we can just chug right on through, aligning seqs the ol'-fashioned way!
 	while ($i<$num_unaligned) {
-	    RunSystemCommand($location."MultiSeqNW \"$UnalignedSeqFiles[$i]\" 1 \"$msa_fname\" $num_aligned -igBase 0 > \"$tmp_outfname\"");
+	    RunSystemCommand($location."../build/MultiSeqNW \"$UnalignedSeqFiles[$i]\" 1 \"$msa_fname\" $num_aligned -igBase 0 > \"$tmp_outfname\"");
 	    RunSystemCommand("mv \"$tmp_outfname\" \"$msa_fname\"");
 	    RunSystemCommand("rm \"$UnalignedSeqFiles[$i]\"");
 	    $num_aligned++;
@@ -1733,7 +1733,7 @@ sub MergeAlignments
 	    close($grep);
 
 	    # Gotta git down with that Needleman-Wunsch
-	    my $nwcmd = $location."MultiSeqNW \"$species1\" $numseqs1 ";
+	    my $nwcmd = $location."../build/MultiSeqNW \"$species1\" $numseqs1 ";
 	    $nwcmd = $nwcmd."\"$species2\" $numseqs2 > \"$MergeFiles[$merge]\"";
 	    RunSystemCommand($nwcmd);
 
