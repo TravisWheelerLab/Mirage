@@ -27,10 +27,10 @@ if (-e 'mirage2') { system("rm \"mirage2\""); }
 
 
 # The name of the spaln folder (at the top for ease of adjustment)
-my $hsiDir   = 'inc/hsi-1.0.0';
-my $spalnDir = 'inc/spaln2.3.3';
-my $blatDir  = 'inc/blat';
-my $tbnDir   = 'inc/tblastn';
+my $hsiDir   = 'dependencies/hsi-1.0.0';
+my $spalnDir = 'dependencies/spaln2.3.3';
+my $blatDir  = 'dependencies/blat';
+my $tbnDir   = 'dependencies/tblastn';
 my $hsiTar   = $hsiDir.'.tgz';
 my $spalnTar = $spalnDir.'.tgz';
 my $blatTar  = $blatDir.'.tgz';
@@ -77,7 +77,7 @@ if (system("make")) { die "\n  Failed to compile C source files\n\n"; }
 chdir($startDir);
 if (-e $hsiTar) {
 
-    if (system("tar -xzf $hsiTar -C inc/")) { die "\n  Failed to expand '$hsiTar'\n\n"; }
+    if (system("tar -xzf $hsiTar -C dependencies/")) { die "\n  Failed to expand '$hsiTar'\n\n"; }
 
     # Make and make install
     chdir($hsiDir) || die "\n  Failed to enter directory '$hsiDir'\n\n";
@@ -85,14 +85,14 @@ if (-e $hsiTar) {
     if (system("cmake .")) { die "\n  Failed to cmake hsi library\n\n"; }
     if (system("make")) { die "\n  Failed to make hsi library\n\n"; }
 
-}    
+}
 
 
 # Unpack Spaln, if necessary
 chdir($startDir);
 if (-e $spalnTar) {
 
-    if (system("tar -xzf $spalnTar -C inc/")) { die "\n  Failed to expand file '$spalnTar'\n\n"; }
+    if (system("tar -xzf $spalnTar -C dependencies/")) { die "\n  Failed to expand file '$spalnTar'\n\n"; }
 
     # Configure and make SPALN
     chdir("$startDir/$spalnDir/src") || die "\n  Failed to enter directory '$spalnDir/src'\n\n";
@@ -106,13 +106,13 @@ if (-e $spalnTar) {
 # Unpack BLAT
 chdir($startDir);
 if (-e $blatTar) {
-    if (system("tar -xzf $blatTar -C inc/")) { die "\n  Failed to expand '$blatTar'\n\n"; }    
+    if (system("tar -xzf $blatTar -C dependencies/")) { die "\n  Failed to expand '$blatTar'\n\n"; }    
 }
 
 
 # Unpack tblastn
 if (-e $tbnTar) {
-    if (system("tar -xzf $tbnTar -C inc/")) { die "\n  Failed to expand '$tbnTar'\n\n"; }
+    if (system("tar -xzf $tbnTar -C dependencies/")) { die "\n  Failed to expand '$tbnTar'\n\n"; }
 }
 
     
