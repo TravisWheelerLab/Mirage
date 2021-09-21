@@ -44,7 +44,7 @@ $startDir =~ s/\/$//;
 
 # Check that all files are where we need them
 my @srcFiles;
-push(@srcFiles,'src/makefile');
+push(@srcFiles,'Makefile');
 push(@srcFiles,'src/BasicBio.c');
 push(@srcFiles,'src/BasicBio.h');
 push(@srcFiles,'src/BureaucracyMirage.pm');
@@ -66,7 +66,6 @@ foreach my $file (@srcFiles) {
 
 # Run the mirage makefile
 print "\n  Compiling mirage files\n\n";
-chdir("src") || die "\n  Failed to enter directory 'src'\n\n";
 if (system("make")) { die "\n  Failed to compile C source files\n\n"; }
 
 
