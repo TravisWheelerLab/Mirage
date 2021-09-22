@@ -75,9 +75,10 @@ $location =~ s/Mirage2\.pl$//;
 
 
 # We're going to need these friends
-my $sindex = $location.'../inc/hsi/sindex';
-my $sfetch = $location.'../inc/hsi/sfetch';
-my $sstat  = $location.'../inc/hsi/sstat';
+my $hsi_dirname = $location.'../dependencies/hsi-1.0.0/build/';
+my $sindex = $hsi_dirname.'sindex';
+my $sfetch = $hsi_dirname.'sfetch';
+my $sstat  = $hsi_dirname.'sstat';
 
 
 # Where we'll be storing timing information
@@ -437,12 +438,12 @@ sub CheckInstall
     push(@RequiredFiles,$location.'MultiSeqNW.h');
     push(@RequiredFiles,$location.'FinalMSA.pl');
     push(@RequiredFiles,$location.'makefile');
-    push(@RequiredFiles,$location.'../inc/hsi/sfetch');
-    push(@RequiredFiles,$location.'../inc/hsi/sstat');
-    push(@RequiredFiles,$location.'../inc/spaln2.3.3/src/spaln');
-    push(@RequiredFiles,$location.'../inc/blat/blat.linux.x86_64');
-    push(@RequiredFiles,$location.'../inc/blat/blat.macOSX.x86_64');
-    push(@RequiredFiles,$location.'../inc/blat/blat.macOSX.i386');
+    push(@RequiredFiles,$location.'../dependencies/hsi-1.0.0/sfetch');
+    push(@RequiredFiles,$location.'../dependencies/hsi-1.0.0/sstat');
+    push(@RequiredFiles,$location.'../dependencies/spaln2.3.3/src/spaln');
+    push(@RequiredFiles,$location.'../dependencies/blat/blat.linux.x86_64');
+    push(@RequiredFiles,$location.'../dependencies/blat/blat.macOSX.x86_64');
+    push(@RequiredFiles,$location.'../dependencies/blat/blat.macOSX.i386');
 
     foreach my $file (@RequiredFiles) {
 	if (!(-e $file)) { die "\n  Failure: Could not locate required file '$file'\n\n"; }
@@ -470,9 +471,9 @@ sub CheckSourceFiles
     push(@RequiredFiles,$location.'Quilter2.pl');
     push(@RequiredFiles,$location.'MapsToMSAs.pl');
     push(@RequiredFiles,$location.'FinalMSA.pl');
-    push(@RequiredFiles,$location.'FastMap2');
-    push(@RequiredFiles,$location.'ExonWeaver');
-    push(@RequiredFiles,$location.'MultiSeqNW');
+    push(@RequiredFiles,$location.'../build/FastMap2');
+    push(@RequiredFiles,$location.'../build/ExonWeaver');
+    push(@RequiredFiles,$location.'../build/MultiSeqNW');
 
     foreach my $srcfile (@RequiredFiles) {
 	if (!(-e $srcfile)) {
@@ -1530,7 +1531,7 @@ sub AlignUnmappedSeqs
 
 	# Now we can just chug right on through, aligning seqs the ol'-fashioned way!
 	while ($i<$num_unaligned) {
-	    RunSystemCommand($location."MultiSeqNW \"$UnalignedSeqFiles[$i]\" 1 \"$msa_fname\" $num_aligned -igBase 0 > \"$tmp_outfname\"");
+	    RunSystemCommand($location."../build/MultiSeqNW \"$UnalignedSeqFiles[$i]\" 1 \"$msa_fname\" $num_aligned -igBase 0 > \"$tmp_outfname\"");
 	    RunSystemCommand("mv \"$tmp_outfname\" \"$msa_fname\"");
 	    RunSystemCommand("rm \"$UnalignedSeqFiles[$i]\"");
 	    $num_aligned++;
@@ -1573,16 +1574,37 @@ sub AlignMiscSeqs
 
 	$fname = $dirname.$fname;
 	if ($fname =~ /\/([^\/]+)\.fa/) {
+
 	    my $gene = $1;
+
+	    # We'll count the number of sequences, and if it's absurd (say, >30k)
+	    # we don't generate an alignment (because it would take A BIT)
+	    my $num_seqs = 0;
+	    my $max_seqs = 30000;
+
 	    my $grep = OpenSystemCommand("grep '>' \"$fname\"");
 	    while (my $line = <$grep>) {
 		if ($line =~ /\>(\d+)/) {
+
 		    my $seq_id = $1+1; # Be careful with '0'!
+
+		    # Too many unmapped sequences?
+		    $num_seqs++;
+		    if ($num_seqs > $max_seqs) {
+			print "\n";
+			print "  NOTE: Gene family '$gene' has a very large number of unmapped sequences (>30k).\n";
+			print "        Final alignment will only incorporate mapped sequences for this family.\n";
+			print "\n";
+			$SeqsByGene{$gene} = 0;
+			last;
+		    }
+		    
 		    if ($SeqsByGene{$gene}) {
 			$SeqsByGene{$gene} = $SeqsByGene{$gene}.','.$seq_id;
 		    } else {
 			$SeqsByGene{$gene} = $seq_id;
 		    }
+
 		}
 	    }
 	    close($grep);
@@ -1732,7 +1754,7 @@ sub MergeAlignments
 	    close($grep);
 
 	    # Gotta git down with that Needleman-Wunsch
-	    my $nwcmd = $location."MultiSeqNW \"$species1\" $numseqs1 ";
+	    my $nwcmd = $location."../build/MultiSeqNW \"$species1\" $numseqs1 ";
 	    $nwcmd = $nwcmd."\"$species2\" $numseqs2 > \"$MergeFiles[$merge]\"";
 	    RunSystemCommand($nwcmd);
 

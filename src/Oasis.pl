@@ -73,12 +73,12 @@ my $location = $0;
 $location =~ s/Oasis\.pl$//;
 
 # We're going to need these friends
-my $sindex = $location.'../inc/hsi/sindex';
-my $sfetch = $location.'../inc/hsi/sfetch';
-my $sstat  = $location.'../inc/hsi/sstat';
+my $sindex = $location.'../dependencies/hsi-1.0.0/build/sindex';
+my $sfetch = $location.'../dependencies/hsi-1.0.0/build/sfetch';
+my $sstat  = $location.'../dependencies/hsi-1.0.0/build/sstat';
 
 # Another friend we'll need is tblastn... but which one?!
-my $tblastn = $location.'../inc/tblastn/';
+my $tblastn = $location.'../dependencies/tblastn/';
 my $UnameCmd = OpenSystemCommand('uname -a |');
 my $uname = <$UnameCmd>;
 close($UnameCmd);
