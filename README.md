@@ -2,6 +2,12 @@
 
 Multiple-sequence IsofoRm Alignment tool Guided by Exon boundaries.
 
+## About
+
+Mirage produces multiple sequence alignments of proteoforms by mapping sequences
+back to their constitutive exons on the genome and then reducing those mappings
+to alignments that preserve the proteoforms' exonic structures.
+
 ## Dependencies
 
 Mirage has no build dependencies beyond the C standard library, but it does have
