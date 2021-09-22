@@ -1574,16 +1574,37 @@ sub AlignMiscSeqs
 
 	$fname = $dirname.$fname;
 	if ($fname =~ /\/([^\/]+)\.fa/) {
+
 	    my $gene = $1;
+
+	    # We'll count the number of sequences, and if it's absurd (say, >30k)
+	    # we don't generate an alignment (because it would take A BIT)
+	    my $num_seqs = 0;
+	    my $max_seqs = 30000;
+
 	    my $grep = OpenSystemCommand("grep '>' \"$fname\"");
 	    while (my $line = <$grep>) {
 		if ($line =~ /\>(\d+)/) {
+
 		    my $seq_id = $1+1; # Be careful with '0'!
+
+		    # Too many unmapped sequences?
+		    $num_seqs++;
+		    if ($num_seqs > $max_seqs) {
+			print "\n";
+			print "  NOTE: Gene family '$gene' has a very large number of unmapped sequences (>30k).\n";
+			print "        Final alignment will only incorporate mapped sequences for this family.\n";
+			print "\n";
+			$SeqsByGene{$gene} = 0;
+			last;
+		    }
+		    
 		    if ($SeqsByGene{$gene}) {
 			$SeqsByGene{$gene} = $SeqsByGene{$gene}.','.$seq_id;
 		    } else {
 			$SeqsByGene{$gene} = $seq_id;
 		    }
+
 		}
 	    }
 	    close($grep);

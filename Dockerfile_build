@@ -1,10 +1,31 @@
+FROM debian:bullseye-slim as cmake
+
+ARG cmake_version=3.21.2
+ARG cmake_arch=x86_64
+ARG cmake_name=cmake-${cmake_version}-linux-${cmake_arch}
+
+RUN apt-get update && apt-get install -y \
+        wget && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN wget https://github.com/Kitware/CMake/releases/download/v${cmake_version}/${cmake_name}.tar.gz
+RUN tar xf ${cmake_name}.tar.gz
+RUN mv ${cmake_name} cmake
+
 FROM debian:bullseye-slim
 
 RUN apt-get update && apt-get install -y \
+        g++ \
         gcc \
         make && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+COPY --from=cmake /cmake /opt/
+
+ENV PATH=${PATH}:/opt/bin
+
 VOLUME /code
 WORKDIR /code
+
