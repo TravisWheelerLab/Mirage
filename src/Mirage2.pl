@@ -75,7 +75,7 @@ $location =~ s/Mirage2\.pl$//;
 
 
 # We're going to need these friends
-my $hsi_dirname = $location.'../dependencies/hsi-1.0.0/build/';
+my $hsi_dirname = $location.'hsi/build/';
 my $sindex = $hsi_dirname.'sindex';
 my $sfetch = $hsi_dirname.'sfetch';
 my $sstat  = $hsi_dirname.'sstat';
@@ -432,18 +432,18 @@ sub CheckInstall
 
     my @RequiredFiles;
     push(@RequiredFiles,$location.'Quilter2.pl');
-    push(@RequiredFiles,$location.'FastMap2.c');
+    push(@RequiredFiles,$location.'ExonWeaver');
+    push(@RequiredFiles,$location.'FastMap2');
     push(@RequiredFiles,$location.'MapsToMSAs.pl');
-    push(@RequiredFiles,$location.'MultiSeqNW.c');
-    push(@RequiredFiles,$location.'MultiSeqNW.h');
+    push(@RequiredFiles,$location.'MultiSeqNW');
     push(@RequiredFiles,$location.'FinalMSA.pl');
-    push(@RequiredFiles,$location.'makefile');
-    push(@RequiredFiles,$location.'../dependencies/hsi-1.0.0/sfetch');
-    push(@RequiredFiles,$location.'../dependencies/hsi-1.0.0/sstat');
-    push(@RequiredFiles,$location.'../dependencies/spaln2.3.3/src/spaln');
-    push(@RequiredFiles,$location.'../dependencies/blat/blat.linux.x86_64');
-    push(@RequiredFiles,$location.'../dependencies/blat/blat.macOSX.x86_64');
-    push(@RequiredFiles,$location.'../dependencies/blat/blat.macOSX.i386');
+    push(@RequiredFiles,$location.'hsi/build/sindex');
+    push(@RequiredFiles,$location.'hsi/build/sfetch');
+    push(@RequiredFiles,$location.'hsi/build/sstat');
+    push(@RequiredFiles,$location.'spaln/src/spaln');
+    push(@RequiredFiles,$location.'blat/blat.linux.x86_64');
+    push(@RequiredFiles,$location.'blat/blat.macOSX.x86_64');
+    push(@RequiredFiles,$location.'blat/blat.macOSX.i386');
 
     foreach my $file (@RequiredFiles) {
 	if (!(-e $file)) { die "\n  Failure: Could not locate required file '$file'\n\n"; }
@@ -471,9 +471,9 @@ sub CheckSourceFiles
     push(@RequiredFiles,$location.'Quilter2.pl');
     push(@RequiredFiles,$location.'MapsToMSAs.pl');
     push(@RequiredFiles,$location.'FinalMSA.pl');
-    push(@RequiredFiles,$location.'../build/FastMap2');
-    push(@RequiredFiles,$location.'../build/ExonWeaver');
-    push(@RequiredFiles,$location.'../build/MultiSeqNW');
+    push(@RequiredFiles,$location.'FastMap2');
+    push(@RequiredFiles,$location.'ExonWeaver');
+    push(@RequiredFiles,$location.'MultiSeqNW');
 
     foreach my $srcfile (@RequiredFiles) {
 	if (!(-e $srcfile)) {
