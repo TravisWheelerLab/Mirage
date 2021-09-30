@@ -51,26 +51,23 @@ add_custom_target(
 add_custom_target(
         build-shell ALL
 	COMMAND cp
-		${CMAKE_SOURCE_DIR}/src/*.sh
-		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/
-	COMMAND ln
-		-s ${CMAKE_SOURCE_DIR}/src/run_mirage2.sh
-		${CMAKE_SOURCE_DIR}/mirage2
-	COMMAND ln
-		-s ${CMAKE_SOURCE_DIR}/src/run_mirage2.sh
+		${CMAKE_SOURCE_DIR}/src/run_mirage2.sh
 		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/mirage2
 	COMMAND ln
-		-s ${CMAKE_SOURCE_DIR}/src/run_oasis.sh
-		${CMAKE_SOURCE_DIR}/oasis
-	COMMAND ln
-		-s ${CMAKE_SOURCE_DIR}/src/run_oasis.sh
+		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/mirage2
+		${CMAKE_SOURCE_DIR}/mirage2
+	COMMAND cp
+		${CMAKE_SOURCE_DIR}/src/run_oasis.sh
 		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/oasis
 	COMMAND ln
-		-s ${CMAKE_SOURCE_DIR}/src/run_bazaar.sh
-		${CMAKE_SOURCE_DIR}/bazaar
-	COMMAND ln
-		-s ${CMAKE_SOURCE_DIR}/src/run_bazaar.sh
+		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/oasis
+		${CMAKE_SOURCE_DIR}/oasis
+	COMMAND cp
+		${CMAKE_SOURCE_DIR}/src/run_bazaar.sh
 		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/bazaar
+	COMMAND ln
+		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/bazaar
+		${CMAKE_SOURCE_DIR}/bazaar
 )
 
 add_custom_target(
