@@ -18,8 +18,8 @@ SPALN_BASE=spaln
 BLAT_BASE=blat
 TBLASTN_BASE=tblastn
 
-DEPS_DIR=../dependencies
-BUILD_DIR=../build
+DEPS_DIR=dependencies
+BUILD_DIR=build
 
 HSI_DIR=${DEPS_DIR}/${HSI_NAME}
 SPALN_DIR=${DEPS_DIR}/${SPALN_NAME}

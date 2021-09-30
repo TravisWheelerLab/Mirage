@@ -50,30 +50,24 @@ add_custom_target(
 
 add_custom_target(
         build-shell ALL
-        COMMAND cp
-                ${CMAKE_SOURCE_DIR}/src/*.sh
-                ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/
+	COMMAND cp
+		${CMAKE_SOURCE_DIR}/src/*.sh
+		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/
+	COMMAND ln
+		-s ${CMAKE_SOURCE_DIR}/src/run_mirage2.sh
+		${CMAKE_SOURCE_DIR}/mirage2
+	COMMAND ln
+		-s ${CMAKE_SOURCE_DIR}/src/run_oasis.sh
+		${CMAKE_SOURCE_DIR}/oasis
+	COMMAND ln
+		-s ${CMAKE_SOURCE_DIR}/src/run_bazaar.sh
+		${CMAKE_SOURCE_DIR}/bazaar
 )
 
 add_custom_target(
         build-dependencies ALL
         COMMAND ${CMAKE_SOURCE_DIR}/src/install-dependencies.sh
         VERBATIM
-)
-
-# We'll want to create symlinks to the core tools
-
-add_custom_target(
-	gen-symlinks ALL
-	COMMAND ln
-		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/run_mirage2.sh
-		${CMAKE_SOURCE_DIR}/mirage2
-	COMMAND ln
-		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/run_oasis.sh
-		${CMAKE_SOURCE_DIR}/oasis
-	COMMAND ln
-		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/run_bazaar.sh
-		${CMAKE_SOURCE_DIR}/bazaar
 )
 
 # Docker targets so that we don't have to type out the tag every time.
