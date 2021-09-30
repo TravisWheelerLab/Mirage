@@ -1,11 +1,11 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.12)
 project(
         Mirage
         VERSION 1.0.0
         HOMEPAGE_URL https://github.com/TravisWheelerLab/Mirage
 )
 
-set(CMAKE_C_STANDARD 17)
+set(CMAKE_C_STANDARD 11)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY build)
 
 add_executable(
