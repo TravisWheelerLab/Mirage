@@ -57,7 +57,7 @@ add_custom_target(
 
 add_custom_target(
         build-dependencies ALL
-        COMMAND ./install-dependencies.sh
+        COMMAND ${CMAKE_SOURCE_DIR}/src/install-dependencies.sh
         VERBATIM
 )
 
