@@ -57,11 +57,20 @@ add_custom_target(
 		-s ${CMAKE_SOURCE_DIR}/src/run_mirage2.sh
 		${CMAKE_SOURCE_DIR}/mirage2
 	COMMAND ln
+		-s ${CMAKE_SOURCE_DIR}/src/run_mirage2.sh
+		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/mirage2
+	COMMAND ln
 		-s ${CMAKE_SOURCE_DIR}/src/run_oasis.sh
 		${CMAKE_SOURCE_DIR}/oasis
 	COMMAND ln
+		-s ${CMAKE_SOURCE_DIR}/src/run_oasis.sh
+		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/oasis
+	COMMAND ln
 		-s ${CMAKE_SOURCE_DIR}/src/run_bazaar.sh
 		${CMAKE_SOURCE_DIR}/bazaar
+	COMMAND ln
+		-s ${CMAKE_SOURCE_DIR}/src/run_bazaar.sh
+		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/bazaar
 )
 
 add_custom_target(
