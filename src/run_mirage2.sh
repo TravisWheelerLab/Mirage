@@ -15,5 +15,5 @@ realpath_ours()
 }
 
 path_only=$(dirname $(realpath_ours "$0"))
-MIRAGECMD="$path_only/src/Mirage2.pl $@"
+MIRAGECMD="$path_only/build/Mirage2.pl $@"
 $MIRAGECMD

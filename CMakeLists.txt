@@ -61,6 +61,21 @@ add_custom_target(
         VERBATIM
 )
 
+# We'll want to create symlinks to the core tools
+
+add_custom_target(
+	gen-symlinks ALL
+	COMMAND ln
+		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/run_mirage2.sh
+		${CMAKE_SOURCE_DIR}/mirage2
+	COMMAND ln
+		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/run_oasis.sh
+		${CMAKE_SOURCE_DIR}/oasis
+	COMMAND ln
+		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/run_bazaar.sh
+		${CMAKE_SOURCE_DIR}/bazaar
+)
+
 # Docker targets so that we don't have to type out the tag every time.
 
 add_custom_target(

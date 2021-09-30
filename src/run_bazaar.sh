@@ -15,5 +15,5 @@ realpath_ours()
 }
 
 path_only=$(dirname $(realpath_ours "$0"))
-BAZAARCMD="$path_only/src/Bazaar.pl $@"
+BAZAARCMD="$path_only/build/Bazaar.pl $@"
 $BAZAARCMD

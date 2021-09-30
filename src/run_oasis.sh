@@ -15,5 +15,5 @@ realpath_ours()
 }
 
 path_only=$(dirname $(realpath_ours "$0"))
-OASISCMD="$path_only/src/Oasis.pl $@"
+OASISCMD="$path_only/build/Oasis.pl $@"
 $OASISCMD
