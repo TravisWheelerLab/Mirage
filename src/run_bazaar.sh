@@ -15,5 +15,16 @@ realpath_ours()
 }
 
 path_only=$(dirname $(realpath_ours "$0"))
-BAZAARCMD="$path_only/build/Bazaar.pl $@"
-$BAZAARCMD
+
+if [ -e "$path_only/build/Bazaar.pl" ];
+then
+    BAZAARCMD="$path_only/build/Bazaar.pl $@"
+    $BAZAARCMD
+elif [ -e "$path_only/Bazaar.pl" ];
+then
+     BAZAARCMD="$path_only/Bazaar.pl $@"
+     $BAZAARCMD
+else
+    echo "\n  Failed to locate Bazaar.pl\n\n"
+fi
+

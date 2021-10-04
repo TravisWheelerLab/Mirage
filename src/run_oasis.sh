@@ -15,5 +15,16 @@ realpath_ours()
 }
 
 path_only=$(dirname $(realpath_ours "$0"))
-OASISCMD="$path_only/build/Oasis.pl $@"
-$OASISCMD
+
+if [ -e "$path_only/build/Oasis.pl" ];
+then
+    OASISCMD="$path_only/build/Oasis.pl $@"
+    $OASISCMD
+elif [ -e "$path_only/Oasis.pl" ];
+then
+     OASISCMD="$path_only/Oasis.pl $@"
+     $OASISCMD
+else
+    echo "\n  Failed to locate Oasis.pl\n\n"
+fi
+
