@@ -1937,6 +1937,9 @@ sub PrintTimingInfo
 sub FormatTimeString
 {
     my $seconds = shift;
+
+    return " 0 s " if (!$seconds);
+    
     $seconds = int($seconds);
     
     my $hours = int($seconds / 3600);
