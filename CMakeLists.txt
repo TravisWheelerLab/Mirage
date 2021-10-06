@@ -57,11 +57,11 @@ add_custom_target(
 		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/mirage2
 		${CMAKE_SOURCE_DIR}/mirage2
 	COMMAND cp
-		${CMAKE_SOURCE_DIR}/src/run_oasis.sh
-		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/oasis
+		${CMAKE_SOURCE_DIR}/src/run_diviner.sh
+		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/diviner
 	COMMAND ln
-		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/oasis
-		${CMAKE_SOURCE_DIR}/oasis
+		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/diviner
+		${CMAKE_SOURCE_DIR}/diviner
 	COMMAND cp
 		${CMAKE_SOURCE_DIR}/src/run_bazaar.sh
 		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/bazaar

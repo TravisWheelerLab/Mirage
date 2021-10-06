@@ -16,15 +16,15 @@ realpath_ours()
 
 path_only=$(dirname $(realpath_ours "$0"))
 
-if [ -e "$path_only/build/Oasis.pl" ];
+if [ -e "$path_only/build/Diviner.pl" ];
 then
-    OASISCMD="$path_only/build/Oasis.pl $@"
-    $OASISCMD
-elif [ -e "$path_only/Oasis.pl" ];
+    DIVINERCMD="$path_only/build/Diviner.pl $@"
+    $DIVINERCMD
+elif [ -e "$path_only/Diviner.pl" ];
 then
-     OASISCMD="$path_only/Oasis.pl $@"
-     $OASISCMD
+     DIVINERCMD="$path_only/Diviner.pl $@"
+     $DIVINERCMD
 else
-    echo "\n  Failed to locate Oasis.pl\n\n"
+    echo "\n  Failed to locate Diviner.pl\n\n"
 fi
 

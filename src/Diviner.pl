@@ -7,7 +7,7 @@ use Getopt::Long;
 use Time::HiRes;
 
 # I AM UNAVOIDABLE
-sub GetThisDir { my $lib = $0; $lib =~ s/\/Oasis.pl$//; return $lib; }
+sub GetThisDir { my $lib = $0; $lib =~ s/\/Diviner.pl$//; return $lib; }
 use lib GetThisDir();
 use BureaucracyMirage;
 use DisplayProgress;
@@ -70,7 +70,7 @@ if (@ARGV < 2) { PrintUsage(); }
 
 # Figure out what the location of the Mirage src directory is
 my $location = $0;
-$location =~ s/Oasis\.pl$//;
+$location =~ s/Diviner\.pl$//;
 
 # We're going to need these friends
 my $sindex = $location.'hsi/build/sindex';
@@ -402,7 +402,7 @@ print "\n";
 sub PrintUsage
 {
     print "\n";
-    print "  USAGE :  ./Oasis.pl {OPT.s} [Mirage-Results] [Species-Guide]\n";
+    print "  USAGE :  ./Diviner.pl {OPT.s} [Mirage-Results] [Species-Guide]\n";
     print "\n";
     print "  OPT.s :  -cpus=[int]\n";
     print "           -outdirname=[string]\n";
@@ -422,7 +422,7 @@ sub ParseArgs
 
     my %Options = (
 	cpus => 1,
-        outdirname => 'Oasis-Results',
+        outdirname => 'Diviner-Results',
         savemsas => 0,
 	alicutoff => 0.4,
         );
