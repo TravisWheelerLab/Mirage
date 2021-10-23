@@ -3401,7 +3401,10 @@ sub RecordFrameConflict
     print $outf "\n";
 
     print $outf "MSA Frame ($best_frame_num) : $FrameTranslations[$best_frame_num]\n";
-
+    foreach my $source_id (@MatchedSourceIDs) {
+	print $outf "               + $SourceSpecies[$source_id]\n";
+    }
+    
     my %PrefFramesToSpecies;
     my %SpeciesToIDs;
     for (my $i=0; $i<scalar(@UnmatchedFramePrefs); $i++) {
