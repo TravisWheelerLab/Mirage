@@ -2759,7 +2759,7 @@ sub RecordGhostMSAs
 
 		my $next_stop = Min($msa_len,$msa_pos+$chars_per_line);
 
-		for (my $i=0; $i<$num_source_species+2; $i++) {
+		for (my $i=0; $i<$num_matched+2; $i++) {
 
 		    $ali_str = $ali_str.$FormattedNames[$i];
 
@@ -3393,7 +3393,7 @@ sub RecordFrameConflict
     print $outf "Nucleotides    : ";
     my @Nucls = split(//,$nucl_seq);
     for (my $i=0; $i<scalar(@Nucls); $i++) {
-	print "$Nucls[$i]";
+	print $outf "$Nucls[$i]";
 	if ($i+1 < scalar(@Nucls) && ($i+1) % 60 == 0) {
 	    print $outf "\n                 ";
 	}
