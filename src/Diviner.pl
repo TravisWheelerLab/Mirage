@@ -3391,14 +3391,14 @@ sub RecordFrameConflict
     open(my $outf,'>>',$fname) || die "\n  ERROR: Failed to open output file '$fname'\n\n";
 
     if ($file_exists) {
-	print $outf "\n===========================================================\n\n";
+	print $outf "===========================================================\n\n\n";
     }
     
     if ($revcomp) {
 	$chr = $chr.'[revcomp]';
     }
 
-    print $outf "Target Species : $target_species";
+    print $outf "Target Species : $target_species\n";
     print $outf "Search Range   : $chr:$search_start..$search_end\n";
     print $outf "Nucleotides    : ";
     my @Nucls = split(//,$nucl_seq);
@@ -3442,6 +3442,7 @@ sub RecordFrameConflict
 
 	next if ($frame == $best_frame_num);
 
+	print $outf "    Frame  $frame   : ";
 	my @Seq = split(//,$FrameTranslations[$frame]);
 	for (my $i=0; $i<scalar(@Seq); $i++) {
 	    print $outf "$Seq[$i]";
