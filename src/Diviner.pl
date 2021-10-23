@@ -2400,12 +2400,16 @@ sub RecordGhostMSAs
 		#   coordinates, relative to the search amino sequence.
 		my $sum_score = 0;
 		for (my $source_id=0; $source_id<scalar(@SourceSeqs); $source_id++) {
+
 		    my ($lmm_score,$lmm_t_start,$lmm_t_end,$lmm_s_start,$lmm_s_end) =
 			LocalMatchMismatchAli($trans_str,$SourceSeqs[$source_id]);
+
 		    $sum_score += $lmm_score;
+
 		    $BestFrameStarts[$frame][$source_id] = $lmm_s_start;
 		    $BestFrameEnds[$frame][$source_id] = $lmm_s_end;
 		    $FrameScores[$frame][$source_id] = $lmm_score;
+
 		}
 
 		if ($sum_score > $best_frame_score) {
@@ -2465,7 +2469,12 @@ sub RecordGhostMSAs
 	    # Oh, dear, it looks like we need to annouce a disagreement on the
 	    # proper frame...
 	    if ($num_unmatched) {
-		# TO DO
+		RecordFrameConflict($gene_ali_dir.'frame-disagreements.out',
+				    $target_species,$chr,$revcomp,$search_start,
+				    $search_end,$nucl_seq,$best_frame_num,
+				    \@FrameTranslations,\@MatchedSourceIDs,
+				    \@UnmatchedSourceIDs,\@UnmatchedFramePrefs,
+				    \@SourceSpecies,\@SourceSeqs);
 	    }
 
 	    # Now that we have our best frame (and associated data) figured out,
@@ -3218,8 +3227,8 @@ sub MultiAminoSeqAli
     my @HorizGap;
     my @VertGap;
     $Match[0][0]    = 0.0;
-    $HorizGap[0][0] = $gap_open;
-    $VertGap[0][0]  = $gap_open;
+    $HorizGap[0][0] = 0.0; #originally $gap_open;
+    $VertGap[0][0]  = 0.0; #originally $gap_open;
     for (my $i=1; $i<=$len1; $i++) {
 	$Match[$i][0]    = -10000.0;
 	$HorizGap[$i][0] = $HorizGap[$i-1][0] + $gap_ext;
@@ -3337,6 +3346,97 @@ sub MultiAminoSeqAli
     
 }
 
+
+
+
+
+
+
+###############################################################
+#
+#  Function:  RecordFrameConflict
+#
+sub RecordFrameConflict
+{
+    my $fname = shift;
+    
+    my $target_species = shift;
+    my $chr = shift;
+    my $revcomp = shift;
+    my $search_start = shift;
+    my $search_end = shift;
+    my $nucl_seq = shift;
+    my $best_frame_num = shift;
+    my $frame_trans_ref = shift;
+    
+    my @FrameTranslations = @{$frame_trans_ref};
+
+    my $matched_ids_ref = shift;
+    my $unmatched_ids_ref = shift;
+    my $unmatched_frames_ref = shift;
+    my $source_species_ref = shift;
+    my $source_seqs_ref = shift;
+
+    my @MatchedSourceIDs = @{$matched_ids_ref};
+    my @UnmatchedSourceIDs = @{$unmatched_ids_ref};
+    my @UnmatchedFramePrefs = @{$unmatched_frames_ref};
+    my @SourceSpecies = @{$source_species_ref};
+    my @SourceSeqs = @{$source_seqs_ref};
+
+    open(my $outf,'>>',$fname) || die "\n  ERROR: Failed to open output file '$fname'\n\n";
+
+    if ($revcomp) {
+	$chr = $chr.'[revcomp]';
+    }
+
+    print $outf "Target Search  : $target_species $chr:$search_start..$search_end\n";
+    print $outf "Nucleotides    : ";
+    my @Nucls = split(//,$nucl_seq);
+    for (my $i=0; $i<scalar(@Nucls); $i++) {
+	print "$Nucls[$i]";
+	if ($i+1 < scalar(@Nucls) && ($i+1) % 60 == 0) {
+	    print $outf "\n                 ";
+	}
+    }
+    print $outf "\n";
+
+    print $outf "MSA Frame ($best_frame_num) : $FrameTranslations[$best_frame_num]\n";
+
+    my %PrefFramesToSpecies;
+    my %SpeciesToIDs;
+    for (my $i=0; $i<scalar(@UnmatchedFramePrefs); $i++) {
+	my $pref_frame = $UnmatchedFramePrefs[$i];
+	my $source_species = $SourceSpecies[$UnmatchedSourceIDs[$i]];
+	$SpeciesToIDs{$source_species} = $i+1;
+	if ($PrefFramesToSpecies{$pref_frame}) {
+	    $PrefFramesToSpecies{$pref_frame} = $PrefFramesToSpecies{$pref_frame}.','.$source_species;
+	} else {
+	    $PrefFramesToSpecies{$pref_frame} = $source_species;
+	}
+    }
+
+    for (my $i=0; $i<3; $i++) {
+
+	next if ($i==$best_frame_num);
+	print $outf "    Frame  $i  : $FrameTranslations[$i]\n";
+
+	if (!$PrefFramesToSpecies{$i}) {
+	    print $outf "                - Not preferred by any source species\n";
+	    next;
+	}
+
+	foreach my $source_species (split(/\,/,$PrefFramesToSpecies{$i})) {
+	    my $source_id = $SpeciesToIDs{$source_species}-1;
+	    print $outf "                + $source_species\n";
+	    print $outf "                  $SourceSeqs[$source_id]\n";
+	}
+	
+    }
+    
+    print $outf "\n\n";
+    close($outf);
+    
+}
 
 
 
