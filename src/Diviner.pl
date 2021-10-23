@@ -2369,6 +2369,8 @@ sub RecordGhostMSAs
 	    my $best_frame_trans;
 	    my @BestFrameStarts;
 	    my @BestFrameEnds;
+	    my @FrameScores;
+	    my @FrameTranslations;
 	    for (my $frame=0; $frame<3; $frame++) {
 
 		# Pull in this reading frame
@@ -2383,6 +2385,8 @@ sub RecordGhostMSAs
 		    $trans_str = $trans_str.$trans_aa;
 
 		}
+
+		push(@FrameTranslations,$trans_str);
 
 		# OUTDATED: Just get score from match / mismatch scoring
 		## Perform a quick alignment to each source amino sequence, summing the
@@ -2401,8 +2405,9 @@ sub RecordGhostMSAs
 		    $sum_score += $lmm_score;
 		    $BestFrameStarts[$frame][$source_id] = $lmm_s_start;
 		    $BestFrameEnds[$frame][$source_id] = $lmm_s_end;
+		    $FrameScores[$frame][$source_id] = $lmm_score;
 		}
-		
+
 		if ($sum_score > $best_frame_score) {
 		    $best_frame_score = $sum_score;
 		    $best_frame_num = $frame;
@@ -2422,21 +2427,63 @@ sub RecordGhostMSAs
 	    # score is bad
 	    next if ($best_frame_score <= 0);
 
-	    
+	    # In case any of the sources didn't prefer the 'best' frame, we'll
+	    # want to (1.) kick them off the team, and (2.) report that there
+	    # might be something funky going on
+	    my @MatchedSourceIDs;
+	    my @UnmatchedSourceIDs;
+	    my @UnmatchedFramePrefs;
+	    for (my $source_id=0; $source_id<$num_source_species; $source_id++) {
+
+		if ($FrameScores[$best_frame_num][$source_id] > 0) {
+
+		    push(@MatchedSourceIDs,$source_id);
+
+		} else {
+
+		    # Which frame is better for this source amino sequence?
+		    my $preferred_frame = 0;
+		    if ($FrameScores[1] > $FrameScores[0]) {
+			if ($FrameScores[1] > $FrameScores[2]) {
+			    $preferred_frame = 1;
+			} else {
+			    $preferred_frame = 2;
+			}
+		    } elsif ($FrameScores[2] > $FrameScores[0]) {
+			$preferred_frame = 2;
+		    }
+
+		    push(@UnmatchedSourceIDs,$source_id);
+		    push(@UnmatchedFramePrefs,$preferred_frame);
+
+		}
+	    }
+
+	    my $num_matched = scalar(@MatchedSourceIDs);
+	    my $num_unmatched = scalar(@UnmatchedSourceIDs);
+
+	    # Oh, dear, it looks like we need to annouce a disagreement on the
+	    # proper frame...
+	    if ($num_unmatched) {
+		# TO DO
+	    }
+
 	    # Now that we have our best frame (and associated data) figured out,
 	    # time to actually get alignin'!
-	    
+
 	    # Starting off by priming with the first source sequence
-	    my @SourceSeqChars = split(//,$SourceSeqs[0]);
+	    my $source_id = $MatchedSourceIDs[0];
+	    my @SourceSeqChars = split(//,$SourceSeqs[$source_id]);
 	    my @AminoMSA;
-	    for (my $char_id=$BestFrameStarts[$best_frame_num][0];
-		 $char_id<=$BestFrameEnds[$best_frame_num][0];
+	    for (my $char_id=$BestFrameStarts[$best_frame_num][$source_id];
+		 $char_id<=$BestFrameEnds[$best_frame_num][$source_id];
 		 $char_id++) {
 		push(@AminoMSA,$SourceSeqChars[$char_id]);
 	    }
 	    
 	    # And now for the rest of the crew...
-	    for (my $source_id=1; $source_id<$num_source_species; $source_id++) {
+	    for (my $meta_id=1; $meta_id<$num_matched; $meta_id++) {
+		$source_id = $MatchedSourceIDs[$meta_id];
 		@SourceSeqChars = split(//,$SourceSeqs[$source_id]);
 		my @SourceAliChars;
 		for (my $char_id=$BestFrameStarts[$best_frame_num][$source_id];
@@ -2451,6 +2498,7 @@ sub RecordGhostMSAs
 	    # We align the target sequence last so that it's (perhaps) more of an
 	    # approximation of aligning to an "exon family profile"
 	    my @TargetTrans = split(//,$best_frame_trans);
+
 	    my $amino_msa_ref = MultiAminoSeqAli(\@TargetTrans,\@AminoMSA);
 	    @AminoMSA = @{$amino_msa_ref};
 	    my $amino_msa_len = scalar(@AminoMSA);
@@ -2467,7 +2515,6 @@ sub RecordGhostMSAs
 		$true_nucl_end = $true_nucl_start-1 + (3 * length($best_frame_trans));
 	    }
 
-	    
 	    # If we have translated sequence aligned to nothing, we'll scrape it off
 	    
 	    # 1. Checking the left side
@@ -2479,7 +2526,7 @@ sub RecordGhostMSAs
 		my $trim_it = 0;
 		if ($Col[0] =~ /[A-Z]/) {
 		    $trim_it = 1;
-		    for (my $i=1; $i<=$num_source_species; $i++) {
+		    for (my $i=1; $i<=$num_matched; $i++) {
 			if ($Col[$i] ne '-') {
 			    $trim_it = 0;
 			    last;
@@ -2518,7 +2565,7 @@ sub RecordGhostMSAs
 		my $trim_it = 0;
 		if ($Col[0] =~ /[A-Z]/) {
 		    $trim_it = 1;
-		    for (my $i=1; $i<=$num_source_species; $i++) {
+		    for (my $i=1; $i<=$num_matched; $i++) {
 			if ($Col[$i] ne '-') {
 			    $trim_it = 0;
 			    last;
@@ -2571,6 +2618,7 @@ sub RecordGhostMSAs
 	    $nucl_seq = '';
 	    while (my $line = <$nucl_inf>) {
 		$line =~ s/\n|\r//g;
+		next if (!$line);
 		$nucl_seq = $nucl_seq.uc($line);
 	    }
 	    close($nucl_inf);
@@ -2586,7 +2634,7 @@ sub RecordGhostMSAs
 	    while ($nucl_seq_pos < 60) {
 		$MSA[0][$msa_len] = ' ';
 		$MSA[1][$msa_len] = lc($NuclSeq[$nucl_seq_pos]);
-		for (my $i=0; $i<$num_source_species; $i++) {
+		for (my $i=0; $i<$num_matched; $i++) {
 		    $MSA[$i+2][$msa_len] = ' ';
 		}
 		$nucl_seq_pos++;
@@ -2597,7 +2645,7 @@ sub RecordGhostMSAs
 	    #    (Where we absolutely want to record %ID-able info)
 	    my @SourceMatches;
 	    my @SourceMismatches;
-	    for (my $i=0; $i<$num_source_species; $i++) {
+	    for (my $i=0; $i<$num_matched; $i++) {
 		$SourceMatches[$i] = 0;
 		$SourceMismatches[$i] = 0;
 	    }
@@ -2627,7 +2675,7 @@ sub RecordGhostMSAs
 		}
 
 		# 3.b. The source amino sequence(s)
-		for (my $i=0; $i<$num_source_species; $i++) {
+		for (my $i=0; $i<$num_matched; $i++) {
 
 		    $MSA[$i+2][$msa_len]   = ' ';
 
@@ -2657,7 +2705,7 @@ sub RecordGhostMSAs
 	    while ($nucl_seq_pos < scalar(@NuclSeq)) {
 		$MSA[0][$msa_len] = ' ';
 		$MSA[1][$msa_len] = lc($NuclSeq[$nucl_seq_pos]);
-		for (my $i=0; $i<$num_source_species; $i++) {
+		for (my $i=0; $i<$num_matched; $i++) {
 		    $MSA[$i+2][$msa_len] = ' ';
 		}
 		$nucl_seq_pos++;
@@ -2668,7 +2716,8 @@ sub RecordGhostMSAs
 	    # THAT'S IT!
 	    # Now the only remaining work is the final formatting of the string!
 	    my $longest_name_len = length($target_species);
-	    foreach my $species (@SourceSpecies) {
+	    foreach my $source_id (@MatchedSourceIDs) {
+		my $species = $SourceSpecies[$source_id];
 		if (length($species) > $longest_name_len) {
 		    $longest_name_len = length($species);
 		}
@@ -2686,8 +2735,8 @@ sub RecordGhostMSAs
 		$FormattedNames[1] = ' '.$FormattedNames[1];
 	    }
 
-	    for (my $i=0; $i<$num_source_species; $i++) {
-		$FormattedNames[$i+2] = '  '.$SourceSpecies[$i].'  ';
+	    for (my $i=0; $i<$num_matched; $i++) {
+		$FormattedNames[$i+2] = '  '.$SourceSpecies[$MatchedSourceIDs[$i]].'  ';
 		while (length($FormattedNames[$i+2]) < $longest_name_len) {
 		    $FormattedNames[$i+2] = ' '.$FormattedNames[$i+2];
 		}
@@ -2725,7 +2774,7 @@ sub RecordGhostMSAs
 
 	    my @SourcePctsID;
 	    my @SourceRatios;
-	    for (my $i=0; $i<$num_source_species; $i++) {
+	    for (my $i=0; $i<$num_matched; $i++) {
 
 		my $ratio = $SourceMatches[$i]+$SourceMismatches[$i];
 		my $pct_id = int(1000.0 * $SourceMatches[$i] / $ratio);
@@ -2754,13 +2803,15 @@ sub RecordGhostMSAs
 
 	    # Metadata item 2: Source sequence info.
 	    $meta_str = $meta_str."  Source";
-	    if ($num_source_species > 1) { $meta_str = $meta_str.'s'; }
-	    else                         { $meta_str = $meta_str.' '; }
-	    $meta_str = $meta_str.": $SourceSpecies[0] $SourceExons[0]\n";
-	    $meta_str = $meta_str."         : $SourcePctsID[0] $SourceRatios[0]\n";
-	    for (my $i=1; $i<$num_source_species; $i++) {
-		$meta_str = $meta_str."         : $SourceSpecies[$i] $SourceExons[$i]\n";
-		$meta_str = $meta_str."         : $SourcePctsID[$i] $SourceRatios[$i]\n";
+	    if ($num_matched > 1) { $meta_str = $meta_str.'s'; }
+	    else                  { $meta_str = $meta_str.' '; }
+	    $source_id = $MatchedSourceIDs[0];
+	    $meta_str  = $meta_str.": $SourceSpecies[$source_id] $SourceExons[$source_id]\n";
+	    $meta_str  = $meta_str."         : $SourcePctsID[$source_id] $SourceRatios[$source_id]\n";
+	    for (my $i=1; $i<$num_matched; $i++) {
+		$source_id = $MatchedSourceIDs[$i];
+		$meta_str  = $meta_str."         : $SourceSpecies[$source_id] $SourceExons[$source_id]\n";
+		$meta_str  = $meta_str."         : $SourcePctsID[$source_id] $SourceRatios[$source_id]\n";
 	    }
 
 	    # Print the alignment!!!
@@ -2994,7 +3045,7 @@ sub LocalMatchMismatchAli
     my $trace_len = scalar(@ITrace);
     for (my $pos=0; $pos<$trace_len/2; $pos++) {
 
-	my $flip_pos = $trace_len-1 - $pos;
+	my $flip_pos = ($trace_len-1) - $pos;
 
 	my $tmp = $ITrace[$pos];
 	$ITrace[$pos] = $ITrace[$flip_pos];
@@ -3005,6 +3056,7 @@ sub LocalMatchMismatchAli
 	$JTrace[$flip_pos] = $tmp;
 
     }
+    $trace_len--;
 
     # Determine the "score contribution" for each cell
     my @TraceScore;
@@ -3037,7 +3089,7 @@ sub LocalMatchMismatchAli
 	= ($window_size-$min_matches)*Max($gap,$mismatch) + $min_matches*$match;
 
     # Scan left
-    my $left_end_pos = $key_pos - $window_size/2;
+    my $left_end_pos = $key_pos - int($window_size/2);
     if ($left_end_pos > 0 && $left_end_pos + $window_size < $trace_len) {
 
 	my $window_score = 0;
@@ -3056,7 +3108,7 @@ sub LocalMatchMismatchAli
     }
 
     # Scan right
-    my $right_end_pos = $key_pos + $window_size/2;
+    my $right_end_pos = $key_pos + int($window_size/2);
     if ($right_end_pos < $trace_len-1 && $right_end_pos - $window_size >= 0) {
 
 	my $window_score = 0;
@@ -3520,7 +3572,7 @@ sub GetMapSummaryStats
 	my $longest_gene_name = 4; # 'Gene'
 	foreach my $hit (@FullHitList) {
 
-	    my @HitData = split(/\|/);
+	    my @HitData = split(/\|/,$hit);
 	    next if ($HitData[0] ne $species);
 
 	    if (length($HitData[0]) > $longest_gene_name) {
