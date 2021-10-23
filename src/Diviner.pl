@@ -2816,11 +2816,11 @@ sub RecordGhostMSAs
 	    else                  { $meta_str = $meta_str.' '; }
 	    $source_id = $MatchedSourceIDs[0];
 	    $meta_str  = $meta_str.": $SourceSpecies[$source_id] $SourceExons[$source_id]\n";
-	    $meta_str  = $meta_str."         : $SourcePctsID[$source_id] $SourceRatios[$source_id]\n";
+	    $meta_str  = $meta_str."         : $SourcePctsID[0] $SourceRatios[0]\n";
 	    for (my $i=1; $i<$num_matched; $i++) {
 		$source_id = $MatchedSourceIDs[$i];
 		$meta_str  = $meta_str."         : $SourceSpecies[$source_id] $SourceExons[$source_id]\n";
-		$meta_str  = $meta_str."         : $SourcePctsID[$source_id] $SourceRatios[$source_id]\n";
+		$meta_str  = $meta_str."         : $SourcePctsID[$i] $SourceRatios[$i]\n";
 	    }
 
 	    # Print the alignment!!!
@@ -3383,13 +3383,23 @@ sub RecordFrameConflict
     my @SourceSpecies = @{$source_species_ref};
     my @SourceSeqs = @{$source_seqs_ref};
 
+    my $file_exists = 0;
+    if (-e $fname) {
+	$file_exists = 1;
+    }
+
     open(my $outf,'>>',$fname) || die "\n  ERROR: Failed to open output file '$fname'\n\n";
 
+    if ($file_exists) {
+	print $outf "\n===========================================================\n\n";
+    }
+    
     if ($revcomp) {
 	$chr = $chr.'[revcomp]';
     }
 
-    print $outf "Target Search  : $target_species $chr:$search_start..$search_end\n";
+    print $outf "Target Species : $target_species";
+    print $outf "Search Range   : $chr:$search_start..$search_end\n";
     print $outf "Nucleotides    : ";
     my @Nucls = split(//,$nucl_seq);
     for (my $i=0; $i<scalar(@Nucls); $i++) {
@@ -3398,12 +3408,22 @@ sub RecordFrameConflict
 	    print $outf "\n                 ";
 	}
     }
-    print $outf "\n";
+    print $outf "\n\n";
 
-    print $outf "MSA Frame ($best_frame_num) : $FrameTranslations[$best_frame_num]\n";
-    foreach my $source_id (@MatchedSourceIDs) {
-	print $outf "               + $SourceSpecies[$source_id]\n";
+    print $outf "MSA Frame ($best_frame_num)  : ";
+    my @Seq = split(//,$FrameTranslations[$best_frame_num]);
+    for (my $i=0; $i<scalar(@Seq); $i++) {
+	print $outf "$Seq[$i]";
+	if ($i+1 < scalar(@Seq) && ($i+1) % 60 == 0) {
+	    print $outf "\n                 ";
+	}
     }
+    print $outf "\n\n";
+
+    foreach my $source_id (@MatchedSourceIDs) {
+	print $outf "                 + $SourceSpecies[$source_id]\n";
+    }
+    print $outf "\n";
     
     my %PrefFramesToSpecies;
     my %SpeciesToIDs;
@@ -3418,20 +3438,28 @@ sub RecordFrameConflict
 	}
     }
 
-    for (my $i=0; $i<3; $i++) {
+    for (my $frame=0; $frame<3; $frame++) {
 
-	next if ($i==$best_frame_num);
-	print $outf "    Frame  $i  : $FrameTranslations[$i]\n";
+	next if ($frame == $best_frame_num);
 
-	if (!$PrefFramesToSpecies{$i}) {
-	    print $outf "                - Not preferred by any source species\n";
+	my @Seq = split(//,$FrameTranslations[$frame]);
+	for (my $i=0; $i<scalar(@Seq); $i++) {
+	    print $outf "$Seq[$i]";
+	    if ($i+1 < scalar(@Seq) && ($i+1) % 60 == 0) {
+		print $outf "\n                 ";
+	    }
+	}
+	print $outf "\n\n";
+
+	if (!$PrefFramesToSpecies{$frame}) {
+	    print $outf "                 - Not preferred by any source species\n\n";
 	    next;
 	}
 
-	foreach my $source_species (split(/\,/,$PrefFramesToSpecies{$i})) {
+	foreach my $source_species (split(/\,/,$PrefFramesToSpecies{$frame})) {
 	    my $source_id = $SpeciesToIDs{$source_species}-1;
-	    print $outf "                + $source_species\n";
-	    print $outf "                  $SourceSeqs[$source_id]\n";
+	    print $outf "                 + $source_species\n";
+	    print $outf "                   $SourceSeqs[$source_id]\n\n";
 	}
 	
     }
