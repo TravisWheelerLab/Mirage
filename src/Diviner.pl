@@ -1703,15 +1703,15 @@ sub FindGhostExons
 	    $exon_str = $exon_str.' '.$end_exon;
 	}
 
-	my $target_info = "MSA Ali Region : $exon_str\n";
-	$target_info = $target_info."    Target Genome  : $target_species ($chr:$SearchRanges[0]..$SearchRanges[1])\n";
-	$target_info = $target_info."    Source Species : $source_species\n";
+	my $target_info = "MSA Ali Region  : $exon_str\n";
+	$target_info = $target_info."    Target Genome   : $target_species ($chr:$SearchRanges[0]..$SearchRanges[1])\n";
+	$target_info = $target_info."    Source Species  : $source_species\n";
 	
 	# Is it an especially elusive ghost we're chasing?
 	if ($num_tbn_hits == 0) {
 	    print $outf "[ ] Search failure (no tblastn hits)\n";
 	    print $outf "    $target_info";
-	    print $outf "    Search Sequence: $SearchSeqs[$q]\n\n";
+	    print $outf "    Search Sequence : $SearchSeqs[$q]\n\n";
 	    next;
 	}
 	
@@ -3090,9 +3090,9 @@ sub LocalMatchMismatchAli
 	}
     }
 
-    # We'll set our condition for killing the alignment as being a window of 5
-    # aminos where 4 of the positions are gaps or mismatches.
-    my $window_size = 5;
+    # We'll set our condition for killing the alignment as being a window of 8
+    # aminos where 6 of the positions are gaps or mismatches.
+    my $window_size = 8;
     my $min_matches = 2;
     my $kill_trigger # Scores below this terminate our walk
 	= ($window_size-$min_matches)*Max($gap,$mismatch) + $min_matches*$match;
