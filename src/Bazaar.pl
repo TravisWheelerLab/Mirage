@@ -219,7 +219,7 @@ for (my $seq_id=0; $seq_id<scalar(@ChimericSeqNames); $seq_id++) {
     my $seqstr = '';
     while (my $line = <$msaf>) {
 	last if ($line =~ /\>/);
-	$line =~ s/\n|\r|\s|\*//g;
+	$line =~ s/\n|\r|\s|\///g;
 	$seqstr = $seqstr.uc($line);
     }
     close($msaf);

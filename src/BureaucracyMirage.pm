@@ -37,7 +37,7 @@ sub TranslateCodon;
 #'A','A','A','A',  # GC-
 #'G','G','G','G',  # GG-
 #'V','V','V','V',  # GT-
-#'X','Y','X','Y',  # TA-
+#'*','Y','*','Y',  # TA-
 #'S','S','S','S',  # TC-
 #'S','C','W','C',  # TG-
 #'L','F','L','F'); # TT-
@@ -57,7 +57,7 @@ my %CODONHASH = (
     'GCA','A',  'GCC','A',  'GCG','A',  'GCT','A',
     'GGA','G',  'GGC','G',  'GGG','G',  'GGT','G',
     'GTA','V',  'GTC','V',  'GTG','V',  'GTT','V',
-    'TAA','X',  'TAC','Y',  'TAG','X',  'TAT','Y',
+    'TAA','*',  'TAC','Y',  'TAG','*',  'TAT','Y',
     'TCA','S',  'TCC','S',  'TCG','S',  'TCT','S',
     'TGA','S',  'TGC','C',  'TGG','W',  'TGT','C',
     'TTA','L',  'TTC','F',  'TTG','L',  'TTT','F');
@@ -287,7 +287,7 @@ sub ParseMirageSeqname
 #  INPUT : $codon_str
 #  OUTPUT: $amino
 #
-#  NOTE  :  We'll return '-' for abnormal inputs and 'X' for stop codons
+#  NOTE  :  We'll return '-' for abnormal inputs and '*' for stop codons
 #
 sub TranslateCodon
 {
