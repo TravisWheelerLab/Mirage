@@ -28,4 +28,3 @@ ENV PATH=${PATH}:/opt/bin
 
 VOLUME /code
 WORKDIR /code
-

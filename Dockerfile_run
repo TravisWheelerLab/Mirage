@@ -1,0 +1,12 @@
+FROM mirage-build AS build
+
+RUN cmake . && \
+    make && \
+    make build-dependencies && \
+    make build-perl && \
+    make build-shell
+
+FROM debian:bullseye-slim
+
+COPY --from=build build /code
+ENV PATH=$PATH:/code
