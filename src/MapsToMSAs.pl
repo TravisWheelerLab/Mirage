@@ -356,7 +356,7 @@ sub ComposeMSA
     
     my @MSA;
     for (my $i=0; $i<$num_seqs; $i++) {
-	$MSA[$i][0] = '*';
+	$MSA[$i][0] = '/';
     }
     my $msa_len  = 1;
 
@@ -763,7 +763,7 @@ sub ComposeMSA
 	}
 
 	# EXON DONE BABY!!!!
-	for(my $i=0; $i<$num_seqs; $i++) { $MSA[$i][$msa_len] = '*'; }
+	for(my $i=0; $i<$num_seqs; $i++) { $MSA[$i][$msa_len] = '/'; }
 	$msa_len++;
 
 	$pos_index = $next_index;
@@ -1383,7 +1383,7 @@ sub MinorClean
     for (my $j=0; $j<$msa_len; $j++) {
 	
 	# If we hit an intron marker we look back and consider fixing this exon
-	if ($MSA[0][$j] eq '*') {
+	if ($MSA[0][$j] eq '/') {
 
 	    push(@IntronPositions,$j);
 	    $exon_end = $j;

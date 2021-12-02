@@ -21,7 +21,7 @@ sub PostHocCleanup;
 
 # Because this script only makes sense within the context of mirage,
 # we don't offer additional options.
-if (@ARGV != 2) { die "\n  USAGE:  perl MSA.pl <in> <out>\n\n"; }
+if (@ARGV != 2) { die "\n  USAGE:  ./FinalMSA.pl [in.afa] [out.afa]\n\n"; }
 
 
 # Where we'll store the sequence names and the MSA
@@ -159,7 +159,7 @@ sub RemoveIntronGaps
 	for (my $i=0; $i<$num_seqs; $i++) {
 
 	    # It's a splice boundary marker
-	    if ($MSA[$i][$j] eq '*') {
+	    if ($MSA[$i][$j] eq '/') {
 		$splice_site = 1;
 		last;
 	    }

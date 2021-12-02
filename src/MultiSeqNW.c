@@ -152,7 +152,7 @@ ConvertToTupleSet
   // We do a start-up check to make sure that this isn't a
   // gap or intron position.
   for (i=0; i<num_letters; i++) {
-    if (letters[i] == '*') {
+    if (letters[i] == '/') {
       ts = InitTupleSet(0,1);
       return ts;
     }
@@ -277,6 +277,8 @@ ConvertToIndex (char letter)
     return 18;
   case 'V':
     return 19;
+  case 'X':
+    return 20;
   default:
     return -1;
   }
@@ -321,7 +323,7 @@ CalcGap
       
       // Didn't think so.  Need to ID intron and calc. dist. for friendo.
 
-      // 1. We're working with an insertion ('*'-profile on x-aligned axis).
+      // 1. We're working with an insertion ('/'-profile on x-aligned axis).
       if (Tuple1->MarksIntron) {
 
 	if (Tuple2->NearestIntron > 10 && intron_gap_base > 0) 
@@ -331,7 +333,7 @@ CalcGap
 
       }
 
-      // 2. We're working with a deletion ('*'-profile on y-aligned axis).
+      // 2. We're working with a deletion ('/'-profile on y-aligned axis).
       if (Tuple2->MarksIntron) {
 
 	if (Tuple1->NearestIntron > 10 && intron_gap_base > 0) 
@@ -394,7 +396,7 @@ CalcMatch
   int i,j,x,y;
   for (i=0; i<Tuple1->NumTuples; i++) {
     for (j=0; j<Tuple2->NumTuples; j++) {
-      x = 20*ConvertToIndex(Tuple1->TupleChars[i]);
+      x = 21*ConvertToIndex(Tuple1->TupleChars[i]);
       y = ConvertToIndex(Tuple2->TupleChars[j]);
       if (x < 0 || y < 0) continue; // Something's weird, but it'll be weird across the board
       score += (BLOSUM62[x+y] * Tuple1->TupleRatios[i] * Tuple2->TupleRatios[j]);
@@ -558,7 +560,7 @@ IntronAdjustment
     // Check if we're in an intron 'danger zone'
     intron = 0;
     for (i=0; i<numSeqs; i++) {
-      if (MSA[i][runner+1] == '*') {
+      if (MSA[i][runner+1] == '/') {
 	runner++;
 	intron = 1;
 	break;
@@ -717,7 +719,7 @@ IntronAdjustment
     // above, we just need to worry about what's right of the splice site
     intron = 0;
     for (i=0; i<numSeqs; i++) {
-      if (MSA[i][runner] == '*') {
+      if (MSA[i][runner] == '/') {
 	intron = 1;
 	break;
       }
@@ -1330,7 +1332,7 @@ int main (int argc, char ** argv)
   // site markers, which would cause problems during traceback, so we just
   // do a quick check
   int needs_splices = 0;
-  if (FirstSeq[0] != '*' && FirstSeq[0] != '-') {
+  if (FirstSeq[0] != '/' && FirstSeq[0] != '-') {
 
     if (MSA1Size == 1) 
       unspliced = 1;
@@ -1362,8 +1364,8 @@ int main (int argc, char ** argv)
     // Now we can actual get our sequence set up
     for (i=MSA1Length; i>0; i--)
       FirstSeq[i] = FirstSeq[i-1];
-    FirstSeq[0]            = '*';
-    FirstSeq[MSA1Length+1] = '*';
+    FirstSeq[0]            = '/';
+    FirstSeq[MSA1Length+1] = '/';
     MSA1Length += 2;
 
     // Record that we're going to be adding splice sites to this batch
@@ -1439,7 +1441,7 @@ int main (int argc, char ** argv)
     
     // Do we need to add splice sites?
     if (needs_splices) {
-      MSA1[k][pos] = '*';
+      MSA1[k][pos] = '/';
       pos++;
     }
     
@@ -1456,7 +1458,7 @@ int main (int argc, char ** argv)
     }
 
     if (needs_splices) {
-      MSA1[k][pos] = '*';
+      MSA1[k][pos] = '/';
       pos++;
     }
 
@@ -1542,7 +1544,7 @@ int main (int argc, char ** argv)
 
   // It's possible that this sequence might be passed in without splice sites, too
   needs_splices = 0;
-  if (FirstSeq[0] != '*' && FirstSeq[0] != '-') {
+  if (FirstSeq[0] != '/' && FirstSeq[0] != '-') {
     
     if (MSA2Size == 1) 
       unspliced = 1;
@@ -1574,8 +1576,8 @@ int main (int argc, char ** argv)
     // Now we can actual get our sequence set up
     for (i=MSA2Length; i>0; i--)
       FirstSeq[i] = FirstSeq[i-1];
-    FirstSeq[0]            = '*';
-    FirstSeq[MSA2Length+1] = '*';
+    FirstSeq[0]            = '/';
+    FirstSeq[MSA2Length+1] = '/';
     MSA2Length += 2;
 
     // Record that we're going to be adding splice sites to this batch
@@ -1639,7 +1641,7 @@ int main (int argc, char ** argv)
     // Do we need to add splice sites?
     pos = 0;
     if (needs_splices) {
-      MSA2[k][pos] = '*';
+      MSA2[k][pos] = '/';
       pos++;
     }
     
@@ -1657,7 +1659,7 @@ int main (int argc, char ** argv)
     }
 
     if (needs_splices) {
-      MSA2[k][pos] = '*';
+      MSA2[k][pos] = '/';
       pos++;
     }    
 
