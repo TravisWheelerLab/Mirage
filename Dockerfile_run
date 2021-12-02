@@ -1,5 +1,8 @@
 FROM traviswheelerlab/mirage-build AS build
 
+ADD . /code
+WORKDIR /code
+RUN rm -f CMakeCache.txt
 RUN cmake . && \
     make && \
     make build-dependencies && \
@@ -8,5 +11,5 @@ RUN cmake . && \
 
 FROM debian:bullseye-slim
 
-COPY --from=build build /code
+COPY --from=build /code/build /code
 ENV PATH=$PATH:/code
