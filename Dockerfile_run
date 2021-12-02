@@ -1,4 +1,4 @@
-FROM mirage-build AS build
+FROM traviswheelerlab/mirage-build AS build
 
 RUN cmake . && \
     make && \
