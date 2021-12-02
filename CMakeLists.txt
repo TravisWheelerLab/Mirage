@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
 project(
         Mirage
-        VERSION 2.0.0-alpha
+        VERSION 2.0.0
         HOMEPAGE_URL https://github.com/TravisWheelerLab/Mirage
 )
 
