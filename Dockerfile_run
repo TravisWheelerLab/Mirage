@@ -1,8 +1,12 @@
 FROM traviswheelerlab/mirage-build AS build
 
-ADD . /mirage
+RUN mkdir /mirage
 WORKDIR /mirage
-RUN rm -f CMakeCache.txt
+
+COPY CMakeLists.txt ./
+COPY src ./
+COPY dependencies ./
+
 RUN cmake . && \
     make
 
