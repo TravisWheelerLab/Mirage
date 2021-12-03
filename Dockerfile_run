@@ -1,15 +1,12 @@
 FROM traviswheelerlab/mirage-build AS build
 
-ADD . /code
-WORKDIR /code
+ADD . /mirage
+WORKDIR /mirage
 RUN rm -f CMakeCache.txt
 RUN cmake . && \
-    make && \
-    make build-dependencies && \
-    make build-perl && \
-    make build-shell
+    make
 
 FROM debian:bullseye-slim
 
-COPY --from=build /code/build /code
-ENV PATH=$PATH:/code
+COPY --from=build /mirage/build /opt/mirage
+ENV PATH=$PATH:/opt/mirage
