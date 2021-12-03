@@ -66,17 +66,3 @@ add_custom_target(
         COMMAND ${CMAKE_SOURCE_DIR}/src/install-dependencies.sh
         VERBATIM
 )
-
-# Docker targets so that we don't have to type out the tag every time.
-
-add_custom_target(
-        build-image
-        COMMAND docker build -t traviswheelerlab/mirage_build:latest -f Dockerfile_build .
-        VERBATIM
-)
-
-add_custom_target(
-        push-image
-        COMMAND docker push traviswheelerlab/mirage_build:latest
-        VERBATIM
-)
