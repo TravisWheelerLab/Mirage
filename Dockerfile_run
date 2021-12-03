@@ -4,8 +4,9 @@ RUN mkdir /mirage
 WORKDIR /mirage
 
 COPY CMakeLists.txt ./
-COPY src ./
-COPY dependencies ./
+COPY src ./src
+COPY dependencies ./dependencies
+RUN ls -la .
 
 RUN cmake . && \
     make
