@@ -1,0 +1,17 @@
+FROM traviswheelerlab/mirage-build AS build
+
+RUN mkdir /mirage
+WORKDIR /mirage
+
+COPY CMakeLists.txt ./
+COPY src ./src
+COPY dependencies ./dependencies
+RUN ls -la .
+
+RUN cmake . && \
+    make
+
+FROM debian:bullseye-slim
+
+COPY --from=build /mirage/build /opt/mirage
+ENV PATH=$PATH:/opt/mirage

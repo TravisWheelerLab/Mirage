@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
 project(
         Mirage
-        VERSION 1.0.0
+        VERSION 2.0.0
         HOMEPAGE_URL https://github.com/TravisWheelerLab/Mirage
 )
 
@@ -53,39 +53,16 @@ add_custom_target(
 	COMMAND cp
 		${CMAKE_SOURCE_DIR}/src/run_mirage2.sh
 		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/mirage2
-	COMMAND ln
-		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/mirage2
-		${CMAKE_SOURCE_DIR}/mirage2
 	COMMAND cp
 		${CMAKE_SOURCE_DIR}/src/run_diviner.sh
 		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/diviner
-	COMMAND ln
-		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/diviner
-		${CMAKE_SOURCE_DIR}/diviner
 	COMMAND cp
 		${CMAKE_SOURCE_DIR}/src/run_bazaar.sh
 		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/bazaar
-	COMMAND ln
-		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/bazaar
-		${CMAKE_SOURCE_DIR}/bazaar
 )
 
 add_custom_target(
         build-dependencies ALL
         COMMAND ${CMAKE_SOURCE_DIR}/src/install-dependencies.sh
-        VERBATIM
-)
-
-# Docker targets so that we don't have to type out the tag every time.
-
-add_custom_target(
-        build-image
-        COMMAND docker build -t traviswheelerlab/mirage_build:latest -f Dockerfile_build .
-        VERBATIM
-)
-
-add_custom_target(
-        push-image
-        COMMAND docker push traviswheelerlab/mirage_build:latest
         VERBATIM
 )
