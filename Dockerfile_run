@@ -13,5 +13,13 @@ RUN cmake . && \
 
 FROM debian:bullseye-slim
 
+RUN apt-get update && apt-get install -y \
+        perl \
+        rsync \
+        wget && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY --from=build /mirage/build /opt/mirage
 ENV PATH=$PATH:/opt/mirage
+
