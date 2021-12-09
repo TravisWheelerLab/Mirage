@@ -633,7 +633,7 @@ sub UseFastMap
 	RunSystemCommand($sfetch." -range $search_start\.\.$search_end \"$genome\" \"$chr\" > \"$nucl_fname\"");
 
 	# It's... FASTMAP2 TIME!
-	my $mapcmd = $srcdir."../build/FastMap2 \"$gene_fname\" $num_seqs \"$nucl_fname\" $exon_list_str";
+	my $mapcmd = $srcdir."FastMap2 \"$gene_fname\" $num_seqs \"$nucl_fname\" $exon_list_str";
 
 	
 	################################################################
@@ -1255,7 +1255,7 @@ sub GenSpliceGraph
     $weaver_out =~ s/\.in$/\.out/;
 
     # PUT IT TO WORK!!!
-    my $weaver_cmd = $srcdir."../build/ExonWeaver --report-singles \"$weaver_in\" > \"$weaver_out\"";
+    my $weaver_cmd = $srcdir."ExonWeaver --report-singles \"$weaver_in\" > \"$weaver_out\"";
     RunSystemCommand($weaver_cmd);
 
     # If there's any content to the output file, return its name -- otherwise,
@@ -1707,7 +1707,7 @@ sub AttemptSpalnFill
 
 	# OOOOhhOhoHohoh! Looks like we might have a coding region!
 	# Time to see if FastMap can help us out with the specifics...
-	my $mapcmd = $srcdir."../build/FastMap2 \"$temp_fname\" 1 \"$nucl_fname\"";
+	my $mapcmd = $srcdir."FastMap2 \"$temp_fname\" 1 \"$nucl_fname\"";
 	foreach my $coord_pair (split(/\,/,$coordlist_str)) {
 	    $coord_pair =~ /^(\d+)\.\.(\d+)$/;
 	    $mapcmd = $mapcmd.' '.$1.' '.$2;
@@ -2023,7 +2023,7 @@ sub AttemptChimericXWMap
     #       entirely over to BLAT+SPALN
     #
     close($ChimeraFile);
-    my $weaver_cmd = $srcdir."../build/ExonWeaver --allow-inconsistency \"$chimera_in\" > \"$chimera_out\"";
+    my $weaver_cmd = $srcdir."ExonWeaver --allow-inconsistency \"$chimera_in\" > \"$chimera_out\"";
     RunSystemCommand($weaver_cmd);
 
     # We don't need to hold onto this file anymore
@@ -3054,7 +3054,7 @@ sub AttemptBlatFill
     # NOTE: Even though it's possible that our BLAT results will only have found
     #       hits to a single chromosome, we'll use the chimeric search to cover all
     #       possible bizzare splicing patterns.
-    my $weaver_cmd = $srcdir."../build/ExonWeaver --allow-inconsistency \"$xwinfname\" > \"$xwoutfname\"";
+    my $weaver_cmd = $srcdir."ExonWeaver --allow-inconsistency \"$xwinfname\" > \"$xwoutfname\"";
     RunSystemCommand($weaver_cmd);
 
     # Begone, input file!

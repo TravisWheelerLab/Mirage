@@ -1531,7 +1531,7 @@ sub AlignUnmappedSeqs
 
 	# Now we can just chug right on through, aligning seqs the ol'-fashioned way!
 	while ($i<$num_unaligned) {
-	    RunSystemCommand($location."../build/MultiSeqNW \"$UnalignedSeqFiles[$i]\" 1 \"$msa_fname\" $num_aligned -igBase 0 > \"$tmp_outfname\"");
+	    RunSystemCommand($location."MultiSeqNW \"$UnalignedSeqFiles[$i]\" 1 \"$msa_fname\" $num_aligned -igBase 0 > \"$tmp_outfname\"");
 	    RunSystemCommand("mv \"$tmp_outfname\" \"$msa_fname\"");
 	    RunSystemCommand("rm \"$UnalignedSeqFiles[$i]\"");
 	    $num_aligned++;
@@ -1754,7 +1754,7 @@ sub MergeAlignments
 	    close($grep);
 
 	    # Gotta git down with that Needleman-Wunsch
-	    my $nwcmd = $location."../build/MultiSeqNW \"$species1\" $numseqs1 ";
+	    my $nwcmd = $location."MultiSeqNW \"$species1\" $numseqs1 ";
 	    $nwcmd = $nwcmd."\"$species2\" $numseqs2 > \"$MergeFiles[$merge]\"";
 	    RunSystemCommand($nwcmd);
 
