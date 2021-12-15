@@ -34,13 +34,13 @@ report_test_start()
 {
     TEST_TYPE=$1
     printf '  [mirage2 dependencies test '
-    if (( $GLOBAL_TEST_NUM < 10 ));
+    if (( $GLOBAL_TEST_NUM -lt 10 ));
     then
 	printf ' '
     fi
     printf "$GLOBAL_TEST_NUM/$TOTAL_NUM_TESTS]: $TEST_TYPE test $LOCAL_TEST_NUM..."
-    (( GLOBAL_TEST_NUM++ ))
-    (( LOCAL_TEST_NUM++ ))
+    ((GLOBAL_TEST_NUM++))
+    ((LOCAL_TEST_NUM++))
 }
 
 HSI_BASE=hsi
