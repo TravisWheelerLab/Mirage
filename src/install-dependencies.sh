@@ -23,7 +23,7 @@ confirm_identical_files()
     TEST_TYPE=$3
     DIFF=$(diff $FILE1 $FILE2)
     DIFF_EXIT_CODE=$?
-    if (( $DIFF_EXIT_CODE -ne 0 ));
+    if [ $DIFF_EXIT_CODE -ne 0 ];
     then
 	echo "\n    ERROR ($TEST_TYPE): Files '$FILE1' and '$FILE2' do not match"
 	exit 1
