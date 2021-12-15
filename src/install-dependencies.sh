@@ -39,8 +39,8 @@ report_test_start()
 	printf ' '
     fi
     printf "$GLOBAL_TEST_NUM/$TOTAL_NUM_TESTS]: $TEST_TYPE test $LOCAL_TEST_NUM..."
-    $GLOBAL_TEST_NUM=$(( $GLOBAL_TEST_NUM + 1 ))
-    $LOCAL_TEST_NUM=$(( $LOCAL_TEST_NUM + 1 ))
+    ((++GLOBAL_TEST_NUM))
+    ((++LOCAL_TEST_NUM))
 }
 
 HSI_BASE=hsi
