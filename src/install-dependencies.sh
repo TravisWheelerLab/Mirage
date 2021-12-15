@@ -226,7 +226,7 @@ check_spaln()
     EXPECTED_FILE=$EXP_OUTPUTS_DIR/$OUT_FILE_NAME
 
     report_test_start spaln
-    $SPALN -Q3 -O1 -S1 -ya3 -yz4 -yy4 $DNA_INPUT $AMINO_INPUT 1>$OBSERVED_FILE 2>/dev/null
+    $SPALN -Q3 -O1 -S1 -ya3 -yz4 -yy4 $DNA_INPUT $AMINO_INPUT 1>$OBSERVED_FILE
     confirm_identical_files $OBSERVED_FILE $EXPECTED_FILE spaln
     echo ' passed'
 }
@@ -255,7 +255,7 @@ check_blat()
     EXPECTED_FILE=$EXP_OUTPUTS_DIR/$OUT_FILE_NAME
 
     report_test_start blat
-    $BLAT -tileSize=7 -minIdentity=90 -maxIntron=1  -t=dnax -q=prot -out=blast8 -minScore=40 1>/dev/null 2>&1 $DNA_INPUT $AMINO_INPUT $OBSERVED_FILE
+    $BLAT -tileSize=7 -minIdentity=90 -maxIntron=1  -t=dnax -q=prot -out=blast8 -minScore=40 1>/dev/null $DNA_INPUT $AMINO_INPUT $OBSERVED_FILE
     confirm_identical_files $OBSERVED_FILE $EXPECTED_FILE blat
     echo ' passed'
 }
@@ -280,7 +280,7 @@ check_tblastn()
     EXPECTED_FILE=$EXP_OUTPUTS_DIR/$OUT_FILE_NAME
 
     report_test_start tblastn
-    $TBLASTN -outfmt 6 -subject $DNA_INPUT -query $AMINO_INPUT -out $OBSERVED_FILE 1>/dev/null 2>&1
+    $TBLASTN -outfmt 6 -subject $DNA_INPUT -query $AMINO_INPUT -out $OBSERVED_FILE 1>/dev/null
     confirm_identical_files $OBSERVED_FILE $EXPECTED_FILE tblastn
     echo ' passed'
 }
