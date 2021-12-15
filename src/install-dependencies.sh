@@ -34,7 +34,7 @@ report_test_start()
 {
     TEST_TYPE=$1
     printf '  [mirage2 dependencies test '
-    if (( $GLOBAL_TEST_NUM -lt 10 ));
+    if [ $GLOBAL_TEST_NUM -lt 10 ];
     then
 	printf ' '
     fi
