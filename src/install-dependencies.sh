@@ -241,7 +241,7 @@ check_spaln $AA3_NAME $SP3_GENE23_DNA_NAME sp3.g23.spaln.out  # test 24
 
 
 # BLAT
-tar -xzf $BLAT_TAR
+tar -xzf $BLAT_TAR -C $BLAT_DIR
 cd $BLAT_DIR/lib && make && cd -
 cd $BLAT_DIR/jkOwnLib && make && cd -
 cd $BLAT_DIR/blat && mkdir -p ../bin && BINDIR=$PWD/../bin make && cd -
