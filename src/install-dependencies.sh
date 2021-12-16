@@ -64,7 +64,7 @@ TBLASTN_TAR=$TBLASTN_DIR.tgz
 
 confirm_file_exists $TEST_TAR
 confirm_file_exists $HSI_TAR
-confirm_file_exists $BLAT_ZIP
+confirm_file_exists $BLAT_TAR
 confirm_file_exists $SPALN_TAR
 confirm_file_exists $TBLASTN_TAR
 
@@ -241,7 +241,7 @@ check_spaln $AA3_NAME $SP3_GENE23_DNA_NAME sp3.g23.spaln.out  # test 24
 
 
 # BLAT
-tar -xzf $BLAT_TAR -d $DEPS_DIR
+tar -xzf $BLAT_TAR
 cd $BLAT_DIR/lib && make && cd -
 cd $BLAT_DIR/jkOwnLib && make && cd -
 cd $BLAT_DIR/blat && mkdir -p ../bin && BINDIR=$PWD/../bin make && cd -
