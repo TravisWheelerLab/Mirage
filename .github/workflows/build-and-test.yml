@@ -6,7 +6,7 @@ jobs:
   build:
     runs-on: ubuntu-18.04
     container:
-      image: traviswheelerlab/mirage_build
+      image: traviswheelerlab/mirage-build
       volumes:
         - ${{ github.workspace }}:/code
     steps:
