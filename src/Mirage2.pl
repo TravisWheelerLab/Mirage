@@ -441,9 +441,7 @@ sub CheckInstall
     push(@RequiredFiles,$location.'hsi/build/sfetch');
     push(@RequiredFiles,$location.'hsi/build/sstat');
     push(@RequiredFiles,$location.'spaln/src/spaln');
-    push(@RequiredFiles,$location.'blat/blat.linux.x86_64');
-    push(@RequiredFiles,$location.'blat/blat.macOSX.x86_64');
-    push(@RequiredFiles,$location.'blat/blat.macOSX.i386');
+    push(@RequiredFiles,$location.'blat/bin/blat');
 
     foreach my $file (@RequiredFiles) {
 	if (!(-e $file)) { die "\n  Failure: Could not locate required file '$file'\n\n"; }
