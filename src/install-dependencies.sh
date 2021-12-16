@@ -44,7 +44,7 @@ report_test_start()
 }
 
 HSI_BASE=hsi
-BLAT_BASE=blat
+BLAT_BASE=blatSrc
 SPALN_BASE=spaln
 TBLASTN_BASE=tblastn
 
@@ -58,13 +58,13 @@ TBLASTN_DIR=$DEPS_DIR/$TBLASTN_BASE
 
 TEST_TAR=$TEST_DIR.tgz
 HSI_TAR=$HSI_DIR.tgz
-BLAT_TAR=$BLAT_DIR.tgz
+BLAT_ZIP=${BLAT_DIR}36.zip
 SPALN_TAR=$SPALN_DIR.tgz
 TBLASTN_TAR=$TBLASTN_DIR.tgz
 
 confirm_file_exists $TEST_TAR
 confirm_file_exists $HSI_TAR
-confirm_file_exists $BLAT_TAR
+confirm_file_exists $BLAT_ZIP
 confirm_file_exists $SPALN_TAR
 confirm_file_exists $TBLASTN_TAR
 
@@ -241,8 +241,11 @@ check_spaln $AA3_NAME $SP3_GENE23_DNA_NAME sp3.g23.spaln.out  # test 24
 
 
 # BLAT
-tar -xf $BLAT_TAR -C $DEPS_DIR
-BLAT=$BLAT_DIR/blat.linux.x86_64
+unzip $BLAT_ZIP -d $DEPS_DIR
+cd $BLAT_DIR/lib && make && cd -
+cd $BLAT_DIR/jkOwnLib && make && cd -
+cd $BLAT_DIR/blat && mkdir -p ../bin && BINDIR=$PWD/../bin make && cd -
+BLAT=$BLAT_DIR/bin/blat
 check_blat()
 {
     DNA_NAME=$1
@@ -292,10 +295,10 @@ check_tblastn $DNA3_NAME $AA3_NAME sp3.tblastn.out  # test 30
 
 #
 BUILD_DIR=build
-mv $HSI_DIR $BUILD_DIR/$HSI_BASE
-mv $BLAT_DIR $BUILD_DIR/$BLAT_BASE
-mv $SPALN_DIR $BUILD_DIR/$SPALN_BASE
-mv $TBLASTN_DIR $BUILD_DIR/$TBLASTN_BASE
+mv -f $HSI_DIR $BUILD_DIR/$HSI_BASE
+mv -f $BLAT_DIR $BUILD_DIR/$BLAT_BASE
+mv -f $SPALN_DIR $BUILD_DIR/$SPALN_BASE
+mv -f $TBLASTN_DIR $BUILD_DIR/$TBLASTN_BASE
 
 
 # Cleanup

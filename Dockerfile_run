@@ -14,6 +14,7 @@ RUN cmake . && \
 FROM debian:bullseye-slim
 
 RUN apt-get update && apt-get install -y \
+        libpng16-16 \
         perl \
         rsync \
         wget && \
