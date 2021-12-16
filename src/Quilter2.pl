@@ -2635,15 +2635,21 @@ sub RunBlatOnFileSet
 
     close($CumBlatFile);
 
-    # Right on! Now it's time to run BLAT on our big concatenated file!
-    # In order to do that, we'd better know where to find BLAT...
-    my $BLAT;
-    my $UnameCmd = OpenSystemCommand('uname -a |');
-    my $uname = <$UnameCmd>;
-    close($UnameCmd);
-    if    (uc($uname) =~ /^LINUX /)  { $BLAT = $srcdir.'blat/blat.linux.x86_64';  }
-    elsif (uc($uname) =~ /^DARWIN /) { $BLAT = $srcdir.'blat/blat.macOSX.x86_64'; }
-    else                             { $BLAT = $srcdir.'blat/blat.macOSX.i386';   }
+    # NOTE: Now that we're building BLAT from source rather than
+    #       using a binary, we don't need to know anything about the
+    #       OS
+    #
+    ## Right on! Now it's time to run BLAT on our big concatenated file!
+    ## In order to do that, we'd better know where to find BLAT...
+    ##my $UnameCmd = OpenSystemCommand('uname -a |');
+    ##my $uname = <$UnameCmd>;
+    ##close($UnameCmd);
+    ##my $BLAT;
+    ##if    (uc($uname) =~ /^LINUX /)  { $BLAT = $srcdir.'blat/blat.linux.x86_64';  }
+    ##elsif (uc($uname) =~ /^DARWIN /) { $BLAT = $srcdir.'blat/blat.macOSX.x86_64'; }
+    ##else                             { $BLAT = $srcdir.'blat/blat.macOSX.i386';   }
+    #
+    my $BLAT = $srcdir.'blat/bin/blat';
 
     # I think that now is the time for honesty... We're running BLAT!
     DispProgQuilter('blatrunning');

@@ -44,7 +44,7 @@ report_test_start()
 }
 
 HSI_BASE=hsi
-BLAT_BASE=blatSrc
+BLAT_BASE=blat
 SPALN_BASE=spaln
 TBLASTN_BASE=tblastn
 
@@ -58,13 +58,13 @@ TBLASTN_DIR=$DEPS_DIR/$TBLASTN_BASE
 
 TEST_TAR=$TEST_DIR.tgz
 HSI_TAR=$HSI_DIR.tgz
-BLAT_ZIP=${BLAT_DIR}36.zip
+BLAT_TAR=${BLAT_DIR}Src36.tgz
 SPALN_TAR=$SPALN_DIR.tgz
 TBLASTN_TAR=$TBLASTN_DIR.tgz
 
 confirm_file_exists $TEST_TAR
 confirm_file_exists $HSI_TAR
-confirm_file_exists $BLAT_ZIP
+confirm_file_exists $BLAT_TAR
 confirm_file_exists $SPALN_TAR
 confirm_file_exists $TBLASTN_TAR
 
@@ -241,7 +241,7 @@ check_spaln $AA3_NAME $SP3_GENE23_DNA_NAME sp3.g23.spaln.out  # test 24
 
 
 # BLAT
-unzip $BLAT_ZIP -d $DEPS_DIR
+tar -xzf $BLAT_TAR -C $DEPS_DIR
 cd $BLAT_DIR/lib && make && cd -
 cd $BLAT_DIR/jkOwnLib && make && cd -
 cd $BLAT_DIR/blat && mkdir -p ../bin && BINDIR=$PWD/../bin make && cd -
