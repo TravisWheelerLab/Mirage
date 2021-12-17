@@ -82,7 +82,7 @@ FindDependencies();
 my $sindex       = $Dependencies{'sindex'};
 my $sfetch       = $Dependencies{'sfetch'};
 my $sstat        = $Dependencies{'sstat'};
-my $quilter      = $Dependencies{'quilter'};
+my $quilter      = $Dependencies{'quilter2'};
 my $maps_to_msas = $Dependencies{'mapstomsas'};
 my $multi_seq_nw = $Dependencies{'multiseqnw'};
 my $final_msa    = $Dependencies{'finalmsa'};
