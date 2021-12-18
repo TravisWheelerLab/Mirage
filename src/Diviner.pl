@@ -14,6 +14,7 @@ use DisplayProgress;
 
 # Subroutines
 sub PrintUsage;
+sub FindDependencies;
 sub ParseArgs;
 sub ParseGTF;
 sub GetMappedSeqMSA;
@@ -69,24 +70,24 @@ my %AminoIndex
 if (@ARGV < 2) { PrintUsage(); }
 
 
-
 # Figure out what the location of the Mirage src directory is
 my $location = $0;
 $location =~ s/Diviner\.pl$//;
 
-# We're going to need these friends
-my $sindex = $location.'hsi/build/sindex';
-my $sfetch = $location.'hsi/build/sfetch';
-my $sstat  = $location.'hsi/build/sstat';
+# Find all the friends we're going to need inside Diviner
+my %Dependencies;
+FindDependencies();
 
-# Another friend we'll need is tblastn... but which one?!
-my $tblastn = $location.'tblastn/';
-my $UnameCmd = OpenSystemCommand('uname -a |');
-my $uname = <$UnameCmd>;
-close($UnameCmd);
-if    (uc($uname) =~ /^LINUX /)  { $tblastn = $tblastn.'tblastn.linux.x86_64';  }
-elsif (uc($uname) =~ /^DARWIN /) { $tblastn = $tblastn.'tblastn.macOSX.x86_64'; }
-else                             { die "\n  Failure: tblastn unsupported\n\n";  }
+# We're going to need these friends
+my $sindex  = $Dependencies{'sindex'};
+my $sfetch  = $Dependencies{'sfetch'};
+my $sstat   = $Dependencies{'sstat'};
+my $tblastn = $Dependencies{'tblastn'};
+
+# An astute observer will notice that these aren't the same settings as Quilter
+# uses, which is because this isn't frickin' Quilter, geez.
+# It's rad that our standardized filenames let us play like this!
+$tblastn = $tblastn.' -outfmt 6 ';
 
 
 # TODO: Make these options available as commandline arguments
@@ -103,11 +104,6 @@ my $input_dirname = ConfirmDirectory($ARGV[0]);
 my $final_results_dirname = ConfirmDirectory($input_dirname.'Final-MSAs');
 my $all_species_dirname = ConfirmDirectory($input_dirname.'Species-MSAs');
 
-
-# An astute observer will notice that these aren't the same settings as Quilter
-# uses, which is because this isn't frickin' Quilter, geez.
-# It's rad that our standardized filenames let us play like this!
-$tblastn = $tblastn.' -outfmt 6 ';
 
 # Start off the real work by parsing the species guide, which will give
 # us genome locations and chromosome lengths.
@@ -409,6 +405,63 @@ sub PrintUsage
     print "  OPT.s :  -cpus=[int]\n";
     print "           -outdirname=[string]\n";
     die "\n";
+}
+
+
+
+
+
+###############################################################
+#
+#  Function: FindDependencies
+#
+sub FindDependencies
+{
+    my $location = $0;
+    $location =~ s/Diviner\.pl$//;
+
+    my @RequiredFiles;
+    if (-d $location.'hsi') {
+
+	# Source built
+	push(@RequiredFiles,$location.'hsi/build/sindex');
+	push(@RequiredFiles,$location.'hsi/build/sfetch');
+	push(@RequiredFiles,$location.'hsi/build/sstat');
+
+	my $UnameCmd = OpenSystemCommand('uname -a |');
+	my $uname = <$UnameCmd>;
+	close($UnameCmd);
+	if (uc($uname) =~ /^LINUX /)  {
+	    push(@RequiredFiles,$location.'tblastn/tblastn.linux.x86_64');
+	} elsif (uc($uname) =~ /^DARWIN /) {
+	    push(@RequiredFiles,$location.'tblastn/tblastn.macOSX.x86_64');
+	} else {
+	    die "\n  Failure: tblastn unsupported\n\n";
+	}
+
+    } else {
+
+	# Docker
+	push(@RequiredFiles,$location.'sindex');
+	push(@RequiredFiles,$location.'sfetch');
+	push(@RequiredFiles,$location.'sstat');
+	push(@RequiredFiles,$location.'tblastn.linux.x86_64');
+
+    }
+
+    foreach my $file (@RequiredFiles) {
+
+	if (!(-e $file)) {
+	    die "\n  Failure: Could not locate required file '$file'\n\n";
+	}
+
+	$file =~ /\/([^\/]+)$/;
+        my $dependency_name = lc($1);
+        $dependency_name =~ s/\.[^\.]+$//;
+        $Dependencies{$dependency_name} = $file;
+
+    }
+    
 }
 
 

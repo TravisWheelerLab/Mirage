@@ -29,7 +29,7 @@ use DisplayProgress;
 sub PrintUsage;
 sub DetailedUsage;
 sub PrintVersion;
-sub CheckInstall;
+sub FindDependencies;
 sub CheckSourceFiles;
 sub ParseArgs;
 sub VerifiedClean;
@@ -54,6 +54,7 @@ sub FormatTimeString;
 my $mirage_version = 'Version 2.0.0a';
 
 
+
 ##################
 ##################
 ####          ####
@@ -73,12 +74,18 @@ if (@ARGV == 0) { PrintUsage(); }
 my $location = $0;
 $location =~ s/Mirage2\.pl$//;
 
+# Where are all our dependencies?
+my %Dependencies;
+FindDependencies();
 
 # We're going to need these friends
-my $hsi_dirname = $location.'hsi/build/';
-my $sindex = $hsi_dirname.'sindex';
-my $sfetch = $hsi_dirname.'sfetch';
-my $sstat  = $hsi_dirname.'sstat';
+my $sindex       = $Dependencies{'sindex'};
+my $sfetch       = $Dependencies{'sfetch'};
+my $sstat        = $Dependencies{'sstat'};
+my $quilter      = $Dependencies{'quilter2'};
+my $maps_to_msas = $Dependencies{'mapstomsas'};
+my $multi_seq_nw = $Dependencies{'multiseqnw'};
+my $final_msa    = $Dependencies{'finalmsa'};
 
 
 # Where we'll be storing timing information
@@ -183,7 +190,7 @@ for (my $i=0; $i<$num_species-1; $i++) {
     $IntervalStart = [Time::HiRes::gettimeofday()];
 
     # Start assembling that command!
-    my $QuilterCmd = 'perl '.$location.'Quilter2.pl';
+    my $QuilterCmd = $quilter;
 
     # KEY 1: Protein database (implicit in species directory, under 'seqs/')
     $QuilterCmd = $QuilterCmd.' '.$species_dirname;
@@ -208,7 +215,7 @@ for (my $i=0; $i<$num_species-1; $i++) {
     $IntervalStart = [Time::HiRes::gettimeofday()];
 
     # As easy as it gets!
-    my $MapsToMSAsCmd = 'perl '.$location.'MapsToMSAs.pl '.$species_seqdir;
+    my $MapsToMSAsCmd = $maps_to_msas.' '.$species_seqdir;
 
     # Rock 'n' roll 'n' align!
     RunSystemCommand($MapsToMSAsCmd);
@@ -418,18 +425,17 @@ sub PrintVersion { die "\n  Mirage $mirage_version\n\n"; }
 
 ########################################################################
 #
-# Function Name: CheckInstall
+# Function Name: FindDependencies
 #
-# About:  Verify that spaln is running and that everything is where
-#         we hope it would be.
-#
-sub CheckInstall
+sub FindDependencies
 {
 
-    # Figure out what the location of the Mirage src directory is
+    # Figure out what the location of the Mirage build directory is
     my $location = $0;
     $location =~ s/Mirage2\.pl$//;
 
+    # We'll look for our files in different places depending on whether
+    # we think we're in a docker container or a source-built situation
     my @RequiredFiles;
     push(@RequiredFiles,$location.'Quilter2.pl');
     push(@RequiredFiles,$location.'ExonWeaver');
@@ -437,51 +443,36 @@ sub CheckInstall
     push(@RequiredFiles,$location.'MapsToMSAs.pl');
     push(@RequiredFiles,$location.'MultiSeqNW');
     push(@RequiredFiles,$location.'FinalMSA.pl');
-    push(@RequiredFiles,$location.'hsi/build/sindex');
-    push(@RequiredFiles,$location.'hsi/build/sfetch');
-    push(@RequiredFiles,$location.'hsi/build/sstat');
-    push(@RequiredFiles,$location.'spaln/src/spaln');
-    push(@RequiredFiles,$location.'blat/bin/blat');
+    if (-d $location.'hsi') {
+	# Source built
+	push(@RequiredFiles,$location.'hsi/build/sindex');
+	push(@RequiredFiles,$location.'hsi/build/sfetch');
+	push(@RequiredFiles,$location.'hsi/build/sstat');
+	push(@RequiredFiles,$location.'spaln/src/spaln');
+	push(@RequiredFiles,$location.'blat/bin/blat');	
+    } else {
+	# Docker
+	push(@RequiredFiles,$location.'sindex');
+	push(@RequiredFiles,$location.'sfetch');
+	push(@RequiredFiles,$location.'sstat');
+	push(@RequiredFiles,$location.'spaln');
+	push(@RequiredFiles,$location.'blat');		
+    }
 
     foreach my $file (@RequiredFiles) {
-	if (!(-e $file)) { die "\n  Failure: Could not locate required file '$file'\n\n"; }
-    }
 
-    die "\n  Lookin' good!\n\n";
-
-}
-
-
-
-
-
-########################################################################
-#
-# Function Name: CheckSourceFiles
-#
-# About: This function verifies that all required files are present
-#        in the src directory and, if anything needs to be compiled,
-#        runs some compilation commands.
-#
-sub CheckSourceFiles
-{
-    my @RequiredFiles;
-    push(@RequiredFiles,$location.'Quilter2.pl');
-    push(@RequiredFiles,$location.'MapsToMSAs.pl');
-    push(@RequiredFiles,$location.'FinalMSA.pl');
-    push(@RequiredFiles,$location.'FastMap2');
-    push(@RequiredFiles,$location.'ExonWeaver');
-    push(@RequiredFiles,$location.'MultiSeqNW');
-
-    foreach my $srcfile (@RequiredFiles) {
-	if (!(-e $srcfile)) {
-	    die "\n  Failed to locate required file '$srcfile'\n\n";
+	if (!(-e $file)) {
+	    die "\n  Failure: Could not locate required file '$file'\n\n";
 	}
+
+	$file =~ /\/([^\/]+)$/;
+	my $dependency_name = lc($1);
+	$dependency_name =~ s/\.[^\.]+$//;
+	$Dependencies{$dependency_name} = $file;
+
     }
+
 }
-
-
-
 
 
 
@@ -521,9 +512,9 @@ sub ParseArgs
 
     # If the user just wants a little help, I don't think it's too
     # difficult to give them a hand
-    if ($Options{help})    { DetailedUsage(); }
-    if ($Options{check})   { CheckInstall();  }
-    if ($Options{version}) { PrintVersion();  }
+    if ($Options{help})    { DetailedUsage();             }
+    if ($Options{check})   { die "\n  Looking good!\n\n"; } # FindDependencies already passed
+    if ($Options{version}) { PrintVersion();              }
 
     # If we don't have the required files, give usage
     my $proteindb = $ARGV[0];
@@ -1529,7 +1520,7 @@ sub AlignUnmappedSeqs
 
 	# Now we can just chug right on through, aligning seqs the ol'-fashioned way!
 	while ($i<$num_unaligned) {
-	    RunSystemCommand($location."MultiSeqNW \"$UnalignedSeqFiles[$i]\" 1 \"$msa_fname\" $num_aligned -igBase 0 > \"$tmp_outfname\"");
+	    RunSystemCommand($multi_seq_nw." \"$UnalignedSeqFiles[$i]\" 1 \"$msa_fname\" $num_aligned -igBase 0 > \"$tmp_outfname\"");
 	    RunSystemCommand("mv \"$tmp_outfname\" \"$msa_fname\"");
 	    RunSystemCommand("rm \"$UnalignedSeqFiles[$i]\"");
 	    $num_aligned++;
@@ -1752,7 +1743,7 @@ sub MergeAlignments
 	    close($grep);
 
 	    # Gotta git down with that Needleman-Wunsch
-	    my $nwcmd = $location."MultiSeqNW \"$species1\" $numseqs1 ";
+	    my $nwcmd = $multi_seq_nw." \"$species1\" $numseqs1 ";
 	    $nwcmd = $nwcmd."\"$species2\" $numseqs2 > \"$MergeFiles[$merge]\"";
 	    RunSystemCommand($nwcmd);
 
@@ -1774,7 +1765,7 @@ sub MergeAlignments
 	    my $tmpname = $outfname;
 	    $tmpname =~ s/\.afa$/\.tmp/;
 
-	    RunSystemCommand($location."FinalMSA.pl \"$infname\" \"$tmpname\"");
+	    RunSystemCommand($final_msa." \"$infname\" \"$tmpname\"");
 	    RunSystemCommand("rm \"$infname\"");
 
 	    $infname = $tmpname;

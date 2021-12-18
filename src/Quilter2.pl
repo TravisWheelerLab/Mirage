@@ -15,6 +15,7 @@ use BureaucracyMirage;
 use DisplayProgress;
 
 sub PrintUsage;
+sub FindDependencies;
 sub ParseArgs;
 sub ParseChromSizes;
 sub UseGTF;
@@ -56,6 +57,19 @@ sub OPSO_SelenocysteineCheck;
 if (@ARGV < 3) { PrintUsage(0); }
 
 
+# As long as everything's going as expected, figure out where we are
+my $location = $0;
+$location =~ s/Quilter2.pl$//;
+
+# Where are all my friends at?
+my %Dependencies;
+FindDependencies();
+my $sfetch      = $Dependencies{'sfetch'};
+my $exon_weaver = $Dependencies{'exonweaver'};
+my $fastmap2    = $Dependencies{'fastmap2'};
+my $blat        = $Dependencies{'blat'};
+my $spaln       = $Dependencies{'spaln'};
+
 
 # As you'd expect, we'll parse the commandline arguments right up top
 my $opts_ref = ParseArgs();
@@ -70,17 +84,6 @@ my $genome = ConfirmFile($ARGV[1]);
 
 # As you'd expect, we'll want to parse the gtf, if one's been provided
 my $gtfname = $ARGV[2];
-
-# As long as everything's going as expected, figure out where we are
-my $srcdir = $0;
-$srcdir =~ s/Quilter2.pl$//;
-my $sfetch = $srcdir.'hsi/build/sfetch';
-my $spaln  = $srcdir.'spaln/src/spaln';
-
-# Spaln requires certain environment variables to be set, so why don'tcha set 'em?
-$spaln =~ /^(.*)spaln$/;
-$ENV{'ALN_TAB'} = $1.'../table';
-$ENV{'ALN_DBS'} = $1.'../seqdb';
 
 # Since we use the same options for all spaln searches, let's just set those now
 # NOTE: I'm going to test out forcing forward-strand only (S1)
@@ -156,7 +159,7 @@ if (scalar(@BlatFileNames)) {
     # telling us!
     GenBlatMaps($blat_outfname,\%BlatNameGuide,\%BlatGenes,$num_cpus);
 
-    # Cleanup on line 160! << CRITICAL: KEEP THIS LINE NUMBER CORRECT, FOR JOKE
+    # Cleanup on line 161! << CRITICAL: KEEP THIS LINE NUMBER CORRECT, FOR JOKE
     RunSystemCommand("rm \"$blat_outfname\"");
 
 }
@@ -192,6 +195,55 @@ sub PrintUsage
     die "\n"; # Eventually we'll give more info if help is requestied...
 }
 
+
+
+
+############################################################
+#
+#  Function: FindDependencies
+#
+sub FindDependencies
+{
+
+    # Figure out what the location of the Mirage build directory is
+    my $location = $0;
+    $location =~ s/Quilter2\.pl$//;
+
+    # We'll look for our files in different places depending on whether
+    # we think we're in a docker container or a source-built situation
+    my @RequiredFiles;
+    push(@RequiredFiles,$location.'ExonWeaver');
+    push(@RequiredFiles,$location.'FastMap2');
+    if (-d $location.'hsi') {
+        # Source built
+        push(@RequiredFiles,$location.'hsi/build/sfetch');
+        push(@RequiredFiles,$location.'spaln/src/spaln');
+	$ENV{'ALN_TAB'} = $location.'spaln/table';
+	$ENV{'ALN_DBS'} = $location.'spaln/seqdb';
+        push(@RequiredFiles,$location.'blat/bin/blat'); 
+    } else {
+        # Docker
+        push(@RequiredFiles,$location.'sfetch');
+        push(@RequiredFiles,$location.'spaln');
+	$ENV{'ALN_TAB'} = $location.'table';
+	$ENV{'ALN_DBS'} = $location.'seqdb';
+        push(@RequiredFiles,$location.'blat');       
+    }
+
+    foreach my $file (@RequiredFiles) {
+
+        if (!(-e $file)) {
+            die "\n  Failure: Could not locate required file '$file'\n\n";
+        }
+
+        $file =~ /\/([^\/]+)$/;
+        my $dependency_name = lc($1);
+        $dependency_name =~ s/\.[^\.]+$//;
+        $Dependencies{$dependency_name} = $file;
+
+    }
+
+}
 
 
 
@@ -633,7 +685,7 @@ sub UseFastMap
 	RunSystemCommand($sfetch." -range $search_start\.\.$search_end \"$genome\" \"$chr\" > \"$nucl_fname\"");
 
 	# It's... FASTMAP2 TIME!
-	my $mapcmd = $srcdir."FastMap2 \"$gene_fname\" $num_seqs \"$nucl_fname\" $exon_list_str";
+	my $mapcmd = $fastmap2." \"$gene_fname\" $num_seqs \"$nucl_fname\" $exon_list_str";
 
 	
 	################################################################
@@ -1255,7 +1307,7 @@ sub GenSpliceGraph
     $weaver_out =~ s/\.in$/\.out/;
 
     # PUT IT TO WORK!!!
-    my $weaver_cmd = $srcdir."ExonWeaver --report-singles \"$weaver_in\" > \"$weaver_out\"";
+    my $weaver_cmd = $exon_weaver." --report-singles \"$weaver_in\" > \"$weaver_out\"";
     RunSystemCommand($weaver_cmd);
 
     # If there's any content to the output file, return its name -- otherwise,
@@ -1707,7 +1759,7 @@ sub AttemptSpalnFill
 
 	# OOOOhhOhoHohoh! Looks like we might have a coding region!
 	# Time to see if FastMap can help us out with the specifics...
-	my $mapcmd = $srcdir."FastMap2 \"$temp_fname\" 1 \"$nucl_fname\"";
+	my $mapcmd = $fastmap2." \"$temp_fname\" 1 \"$nucl_fname\"";
 	foreach my $coord_pair (split(/\,/,$coordlist_str)) {
 	    $coord_pair =~ /^(\d+)\.\.(\d+)$/;
 	    $mapcmd = $mapcmd.' '.$1.' '.$2;
@@ -2023,7 +2075,7 @@ sub AttemptChimericXWMap
     #       entirely over to BLAT+SPALN
     #
     close($ChimeraFile);
-    my $weaver_cmd = $srcdir."ExonWeaver --allow-inconsistency \"$chimera_in\" > \"$chimera_out\"";
+    my $weaver_cmd = $exon_weaver." --allow-inconsistency \"$chimera_in\" > \"$chimera_out\"";
     RunSystemCommand($weaver_cmd);
 
     # We don't need to hold onto this file anymore
@@ -2637,7 +2689,7 @@ sub RunBlatOnFileSet
 
     # NOTE: Now that we're building BLAT from source rather than
     #       using a binary, we don't need to know anything about the
-    #       OS
+    #       OS!  Neat!
     #
     ## Right on! Now it's time to run BLAT on our big concatenated file!
     ## In order to do that, we'd better know where to find BLAT...
@@ -2648,8 +2700,6 @@ sub RunBlatOnFileSet
     ##if    (uc($uname) =~ /^LINUX /)  { $BLAT = $srcdir.'blat/blat.linux.x86_64';  }
     ##elsif (uc($uname) =~ /^DARWIN /) { $BLAT = $srcdir.'blat/blat.macOSX.x86_64'; }
     ##else                             { $BLAT = $srcdir.'blat/blat.macOSX.i386';   }
-    #
-    my $BLAT = $srcdir.'blat/bin/blat';
 
     # I think that now is the time for honesty... We're running BLAT!
     DispProgQuilter('blatrunning');
@@ -2660,7 +2710,7 @@ sub RunBlatOnFileSet
     $blat_outfname =~ s/\.fa$/\.out/;
 
     # Assemble and run the BLAT command!
-    my $blat_cmd  = $BLAT.' -tileSize=7 -minIdentity=90 -maxIntron=1';
+    my $blat_cmd  = $blat.' -tileSize=7 -minIdentity=90 -maxIntron=1';
     $blat_cmd     = $blat_cmd.' -t=dnax -q=prot -out=blast8 -minScore=40';
     $blat_cmd     = $blat_cmd.' 1>/dev/null 2>&1';
     $blat_cmd     = $blat_cmd.' '.$genome.' '.$cum_blat_fname.' '.$blat_outfname;
@@ -3060,7 +3110,7 @@ sub AttemptBlatFill
     # NOTE: Even though it's possible that our BLAT results will only have found
     #       hits to a single chromosome, we'll use the chimeric search to cover all
     #       possible bizzare splicing patterns.
-    my $weaver_cmd = $srcdir."ExonWeaver --allow-inconsistency \"$xwinfname\" > \"$xwoutfname\"";
+    my $weaver_cmd = $exon_weaver." --allow-inconsistency \"$xwinfname\" > \"$xwoutfname\"";
     RunSystemCommand($weaver_cmd);
 
     # Begone, input file!
