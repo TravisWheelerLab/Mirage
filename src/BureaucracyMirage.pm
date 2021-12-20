@@ -20,7 +20,7 @@ sub OpenDirectory;
 sub CreateDirectory;
 
 # More bio-specific functions
-sub FindDependencies
+sub FindDependencies;
 sub ParseMirageSeqName;
 sub TranslateCodon;
 
@@ -264,7 +264,7 @@ sub FindDependencies
 
     # Figure out what the location of the Mirage build directory is
     my $location = $0;
-    $location =~ s/\/?[^\/]+$//;
+    $location =~ s/[^\/]+$//;
 
     # We'll look for our files in different places depending on whether
     # we think we're in a docker container or a source-built situation
