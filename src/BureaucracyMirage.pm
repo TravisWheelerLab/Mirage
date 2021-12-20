@@ -20,7 +20,7 @@ sub OpenDirectory;
 sub CreateDirectory;
 
 # More bio-specific functions
-sub FindDependencies
+sub FindDependencies;
 sub ParseMirageSeqName;
 sub TranslateCodon;
 
