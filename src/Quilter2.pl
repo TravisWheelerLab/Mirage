@@ -15,7 +15,6 @@ use BureaucracyMirage;
 use DisplayProgress;
 
 sub PrintUsage;
-sub FindDependencies;
 sub ParseArgs;
 sub ParseChromSizes;
 sub UseGTF;
@@ -62,13 +61,25 @@ my $location = $0;
 $location =~ s/Quilter2.pl$//;
 
 # Where are all my friends at?
-my %Dependencies;
-FindDependencies();
-my $sfetch      = $Dependencies{'sfetch'};
-my $exon_weaver = $Dependencies{'exonweaver'};
-my $fastmap2    = $Dependencies{'fastmap2'};
-my $blat        = $Dependencies{'blat'};
-my $spaln       = $Dependencies{'spaln'};
+my $dependencies_ref = FindDependencies();
+my %Dependencies = %{$dependencies_ref};
+my $sfetch       = $Dependencies{'sfetch'};
+my $exon_weaver  = $Dependencies{'exonweaver'};
+my $fastmap2     = $Dependencies{'fastmap2'};
+my $blat         = $Dependencies{'blat'};
+my $spaln        = $Dependencies{'spaln'};
+
+# We'll need to set these SPALN environment variables, but exactly how we set
+# them depends on whether we're in a source-built or Docker context
+if ($spaln =~ /spaln\/src\/spaln$/) {
+    # Source-built
+    $ENV{'ALN_TAB'} = $location.'spaln/table';
+    $ENV{'ALN_DBS'} = $location.'spaln/seqdb';
+} else {
+    # Docker
+    $ENV{'ALN_TAB'} = $location.'table';
+    $ENV{'ALN_DBS'} = $location.'seqdb';
+}
 
 
 # As you'd expect, we'll parse the commandline arguments right up top
@@ -195,55 +206,6 @@ sub PrintUsage
     die "\n"; # Eventually we'll give more info if help is requestied...
 }
 
-
-
-
-############################################################
-#
-#  Function: FindDependencies
-#
-sub FindDependencies
-{
-
-    # Figure out what the location of the Mirage build directory is
-    my $location = $0;
-    $location =~ s/Quilter2\.pl$//;
-
-    # We'll look for our files in different places depending on whether
-    # we think we're in a docker container or a source-built situation
-    my @RequiredFiles;
-    push(@RequiredFiles,$location.'ExonWeaver');
-    push(@RequiredFiles,$location.'FastMap2');
-    if (-d $location.'hsi') {
-        # Source built
-        push(@RequiredFiles,$location.'hsi/build/sfetch');
-        push(@RequiredFiles,$location.'spaln/src/spaln');
-	$ENV{'ALN_TAB'} = $location.'spaln/table';
-	$ENV{'ALN_DBS'} = $location.'spaln/seqdb';
-        push(@RequiredFiles,$location.'blat/bin/blat'); 
-    } else {
-        # Docker
-        push(@RequiredFiles,$location.'sfetch');
-        push(@RequiredFiles,$location.'spaln');
-	$ENV{'ALN_TAB'} = $location.'table';
-	$ENV{'ALN_DBS'} = $location.'seqdb';
-        push(@RequiredFiles,$location.'blat');       
-    }
-
-    foreach my $file (@RequiredFiles) {
-
-        if (!(-e $file)) {
-            die "\n  Failure: Could not locate required file '$file'\n\n";
-        }
-
-        $file =~ /\/([^\/]+)$/;
-        my $dependency_name = lc($1);
-        $dependency_name =~ s/\.[^\.]+$//;
-        $Dependencies{$dependency_name} = $file;
-
-    }
-
-}
 
 
 

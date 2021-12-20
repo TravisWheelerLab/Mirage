@@ -20,6 +20,7 @@ sub OpenDirectory;
 sub CreateDirectory;
 
 # More bio-specific functions
+sub FindDependencies
 sub ParseMirageSeqName;
 sub TranslateCodon;
 
@@ -251,6 +252,84 @@ sub CreateDirectory
     if (system("mkdir \"$dirname\"")) { die "\n  ERROR:  Failed to create directory '$dirname'\n\n"; }
     return ConfirmDirectory($dirname);
 }
+
+
+
+########################################################################
+#
+#  FUNCTION:  FindDependencies
+#
+sub FindDependencies
+{
+
+    # Figure out what the location of the Mirage build directory is
+    my $location = $0;
+    $location =~ s/\/?[^\/]+$//;
+
+    # We'll look for our files in different places depending on whether
+    # we think we're in a docker container or a source-built situation
+    my @RequiredFiles;
+    push(@RequiredFiles,$location.'Quilter2.pl');
+    push(@RequiredFiles,$location.'ExonWeaver');
+    push(@RequiredFiles,$location.'FastMap2');
+    push(@RequiredFiles,$location.'MapsToMSAs.pl');
+    push(@RequiredFiles,$location.'MultiSeqNW');
+    push(@RequiredFiles,$location.'FinalMSA.pl');
+
+    # The actual "dependencies" are going to differ depending on whether
+    # or not we're in the land of building from source or running in a
+    # Docker container
+    if (-d $location.'hsi') {
+
+	# Source built
+	push(@RequiredFiles,$location.'hsi/build/sindex');
+	push(@RequiredFiles,$location.'hsi/build/sfetch');
+	push(@RequiredFiles,$location.'hsi/build/sstat');
+	push(@RequiredFiles,$location.'spaln/src/spaln');
+	push(@RequiredFiles,$location.'blat/bin/blat');	
+
+	# For Diviner, we'll need to know which tblastn executable to use
+	my $UnameCmd = OpenSystemCommand('uname -a |');
+        my $uname = <$UnameCmd>;
+	close($UnameCmd);
+        if (uc($uname) =~ /^LINUX /)  {
+            push(@RequiredFiles,$location.'tblastn/tblastn.linux.x86_64');
+        } elsif (uc($uname) =~ /^DARWIN /) {
+            push(@RequiredFiles,$location.'tblastn/tblastn.macOSX.x86_64');
+        } else {
+            die "\n  Failure: tblastn unsupported\n\n";
+        }
+
+    } else {
+
+	# Docker
+	push(@RequiredFiles,$location.'sindex');
+	push(@RequiredFiles,$location.'sfetch');
+	push(@RequiredFiles,$location.'sstat');
+	push(@RequiredFiles,$location.'spaln');
+	push(@RequiredFiles,$location.'blat');		
+        push(@RequiredFiles,$location.'tblastn.linux.x86_64');
+
+    }
+
+    my %Dependencies;
+    foreach my $file (@RequiredFiles) {
+
+	if (!(-e $file)) {
+	    die "\n  Failure: Could not locate required file '$file'\n\n";
+	}
+
+	$file =~ /\/([^\/]+)$/;
+	my $dependency_name = lc($1);
+	$dependency_name =~ s/\.[^\.]+$//;
+	$Dependencies{$dependency_name} = $file;
+
+    }
+
+    return \%Dependencies;
+
+}
+
 
 
 ###################################################################
