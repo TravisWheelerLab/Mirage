@@ -29,7 +29,6 @@ use DisplayProgress;
 sub PrintUsage;
 sub DetailedUsage;
 sub PrintVersion;
-sub FindDependencies;
 sub CheckSourceFiles;
 sub ParseArgs;
 sub VerifiedClean;
@@ -75,8 +74,8 @@ my $location = $0;
 $location =~ s/Mirage2\.pl$//;
 
 # Where are all our dependencies?
-my %Dependencies;
-FindDependencies();
+my $dependencies_ref = FindDependencies();
+my %Dependencies = %{$dependencies_ref};
 
 # We're going to need these friends
 my $sindex       = $Dependencies{'sindex'};
@@ -419,60 +418,6 @@ sub DetailedUsage
 #
 sub PrintVersion { die "\n  Mirage $mirage_version\n\n"; }
 
-
-
-
-
-########################################################################
-#
-# Function Name: FindDependencies
-#
-sub FindDependencies
-{
-
-    # Figure out what the location of the Mirage build directory is
-    my $location = $0;
-    $location =~ s/Mirage2\.pl$//;
-
-    # We'll look for our files in different places depending on whether
-    # we think we're in a docker container or a source-built situation
-    my @RequiredFiles;
-    push(@RequiredFiles,$location.'Quilter2.pl');
-    push(@RequiredFiles,$location.'ExonWeaver');
-    push(@RequiredFiles,$location.'FastMap2');
-    push(@RequiredFiles,$location.'MapsToMSAs.pl');
-    push(@RequiredFiles,$location.'MultiSeqNW');
-    push(@RequiredFiles,$location.'FinalMSA.pl');
-    if (-d $location.'hsi') {
-	# Source built
-	push(@RequiredFiles,$location.'hsi/build/sindex');
-	push(@RequiredFiles,$location.'hsi/build/sfetch');
-	push(@RequiredFiles,$location.'hsi/build/sstat');
-	push(@RequiredFiles,$location.'spaln/src/spaln');
-	push(@RequiredFiles,$location.'blat/bin/blat');	
-    } else {
-	# Docker
-	push(@RequiredFiles,$location.'sindex');
-	push(@RequiredFiles,$location.'sfetch');
-	push(@RequiredFiles,$location.'sstat');
-	push(@RequiredFiles,$location.'spaln');
-	push(@RequiredFiles,$location.'blat');		
-    }
-
-    foreach my $file (@RequiredFiles) {
-
-	if (!(-e $file)) {
-	    die "\n  Failure: Could not locate required file '$file'\n\n";
-	}
-
-	$file =~ /\/([^\/]+)$/;
-	my $dependency_name = lc($1);
-	$dependency_name =~ s/\.[^\.]+$//;
-	$Dependencies{$dependency_name} = $file;
-
-    }
-
-}
 
 
 
