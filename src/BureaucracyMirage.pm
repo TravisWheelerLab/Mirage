@@ -320,8 +320,9 @@ sub FindDependencies
 	}
 
 	$file =~ /\/([^\/]+)$/;
+	my $executable_name = $1;
+	$executable_name =~ /^([^\.]+)/;
 	my $dependency_name = lc($1);
-	$dependency_name =~ s/\.[^\.]+$//;
 	$Dependencies{$dependency_name} = $file;
 
     }
