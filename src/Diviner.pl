@@ -2529,17 +2529,14 @@ sub RecordGhostMSAs
 	    while ($start_col<$amino_msa_len) {
 
 		my @Col = split(//,$AminoMSA[$start_col]);
-		my $trim_it = 0;
-		if ($Col[0] =~ /[A-Z]/) {
-		    $trim_it = 1;
-		    for (my $i=1; $i<=$num_matched; $i++) {
-			if ($Col[$i] ne '-') {
-			    $trim_it = 0;
-			    last;
-			}
+
+		my $trim_it = 1;
+		for (my $i=1; $i<=$num_matched; $i++) {
+		    if ($Col[$i] ne '-') {
+			$trim_it = 0;
+			last;
 		    }
 		}
-
 		last if (!$trim_it);
 
 		$start_col++;
@@ -2568,17 +2565,14 @@ sub RecordGhostMSAs
 	    while ($end_col>=0) {
 
 		my @Col = split(//,$AminoMSA[$end_col]);
-		my $trim_it = 0;
-		if ($Col[0] =~ /[A-Z]/) {
-		    $trim_it = 1;
-		    for (my $i=1; $i<=$num_matched; $i++) {
-			if ($Col[$i] ne '-') {
-			    $trim_it = 0;
-			    last;
-			}
+
+		my $trim_it = 1;
+		for (my $i=1; $i<=$num_matched; $i++) {
+		    if ($Col[$i] ne '-') {
+			$trim_it = 0;
+			last;
 		    }
 		}
-
 		last if (!$trim_it);
 
 		$end_col--;
@@ -3092,7 +3086,7 @@ sub LocalMatchMismatchAli
     my $window_size = 8;
     my $min_matches = 2;
     my $kill_trigger # Scores below this terminate our walk
-	= ($window_size-$min_matches)*Max($gap,$mismatch) + $min_matches*$match;
+	= ($window_size-$min_matches) * Max($gap,$mismatch) + $min_matches*$match;
 
     # Scan left
     my $left_end_pos = $key_pos - int($window_size/2);
@@ -3217,24 +3211,24 @@ sub MultiAminoSeqAli
     my $len2 = scalar(@Seqs2);
 
     # Let's be good and proper and use affine gapping
-    my $gap_open = -2.0;
+    my $gap_open = -1.5;
     my $gap_end  = -1.5;
     my $gap_ext  = -1.0;
     my @Match;
     my @HorizGap;
     my @VertGap;
     $Match[0][0]    = 0.0;
-    $HorizGap[0][0] = 0.0;
-    $VertGap[0][0]  = 0.0;
+    $HorizGap[0][0] = $gap_open;
+    $VertGap[0][0]  = $gap_open;
     for (my $i=1; $i<=$len1; $i++) {
-	$HorizGap[$i][0] = $HorizGap[$i-1][0] + $gap_ext;
-	$Match[$i][0]    = $HorizGap[$i][0]   + $gap_end;
-	$VertGap[$i][0]  = $HorizGap[$i][0]   + $gap_end;
+	$HorizGap[$i][0] = $gap_open;
+	$Match[$i][0]    = -100.0;
+	$VertGap[$i][0]  = -100.0;
     }
     for (my $j=1; $j<=$len2; $j++) {
-	$VertGap[0][$j]  = $VertGap[0][$j-1] + $gap_ext;
-	$Match[0][$j]    = $VertGap[0][$j]   + $gap_end;
-	$HorizGap[0][$j] = $VertGap[0][$j]   + $gap_end;
+	$VertGap[0][$j]  = $gap_open;
+	$Match[0][$j]    = -100.0;
+	$HorizGap[0][$j] = -100.0;
     }
 
     for (my $i=1; $i<=$len1; $i++) {
