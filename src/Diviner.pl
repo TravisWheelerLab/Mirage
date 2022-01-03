@@ -616,7 +616,7 @@ sub GetMappedSeqMSA
     }
 
     # We'll get rid of any all-gap columns to get our actual msa_len.
-    # Note that this will clear any original '*' columns (if we're
+    # Note that this will clear any original '/' columns (if we're
     # looking at a dirty MSA), but that's fine since we're re-inserting them.
     my $msa_len = 0;
     for (my $j=0; $j<$base_msa_len; $j++) {
@@ -844,7 +844,7 @@ sub GetMappedSeqMSA
 	# Have we hit our next splice column?
 	if ($splice_col_id < scalar(@SpliceColList) && $SpliceColList[$splice_col_id] == $j) {
 	    for (my $i=0; $i<$num_seqs; $i++) {
-		$SplicedMSA[$i][$spliced_msa_len] = '*';
+		$SplicedMSA[$i][$spliced_msa_len] = '/';
 		$SplicedMapMSA[$i][$spliced_msa_len] = 0;
 	    }
 	    $spliced_msa_len++;
@@ -861,7 +861,7 @@ sub GetMappedSeqMSA
 
     # Finally, round things out with a splice site column
     for (my $i=0; $i<$num_seqs; $i++) {
-	$SplicedMSA[$i][$spliced_msa_len] = '*';
+	$SplicedMSA[$i][$spliced_msa_len] = '/';
 	$SplicedMapMSA[$i][$spliced_msa_len] = 0;
     }
     $spliced_msa_len++;
@@ -1010,8 +1010,8 @@ sub ReduceMSAToSpecies
 	for (my $j=0; $j<$msa_len; $j++) {
 
 	    # If this is a splice-site column, we can take it super easy
-	    if ($MSA[0][$j] eq '*') {
-		$SpeciesMSA[$num_species][$j] = '*';
+	    if ($MSA[0][$j] eq '/') {
+		$SpeciesMSA[$num_species][$j] = '/';
 		$SpeciesMapMSA[$num_species][$j] = 0;
 		next;
 	    }
@@ -1100,7 +1100,7 @@ sub FindGhostExons
     my @ExonEnds;
     my $num_exons = 0;
     for (my $j=0; $j<$msa_len; $j++) {
-	if ($MSA[0][$j] eq '*') {
+	if ($MSA[0][$j] eq '/') {
 	    $num_exons++;
 	    push(@ExonEnds,$j) if ($j);
 	    push(@ExonStarts,$j+1) if ($j+1 < $msa_len);
