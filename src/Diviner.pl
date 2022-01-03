@@ -640,9 +640,6 @@ sub GetMappedSeqMSA
     # Next up will be associating each residue with its mapping coordinates
     # and determining where there ought to be splice site boundaries marked.
     #
-    # TODO: Maybe have an option to spit out a 'dirtified' MSA to a file, once
-    #       we've drawn in our splice site positions...
-    #
     my @MapMSA;
     foreach my $species (keys %SpeciesToMapfiles) {
 
