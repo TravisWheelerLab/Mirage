@@ -223,7 +223,7 @@ int MBB_AminoToIndex (char residue) {
   if (residue >= 97) residue -= 32;
   if (residue < 65 || residue > 90)
     return -1;
-  return MBB_AMINO_INDEX[residue];
+  return MBB_AMINO_INDEX[residue-65];
 }
 
 
