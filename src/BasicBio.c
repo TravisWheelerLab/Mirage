@@ -202,17 +202,28 @@ int MBB_DNAtoNum (char residue) {
   if (residue > 96)
     residue -= 32;
 
-  // Find character, assuming we aren't being tricked
+  // Find character
   if (residue < 69) {
-    if (residue == 65)
-      return 0;
-    return 1;
+    if (residue == 65) return 0;
+    if (residue == 67) return 1;
   } else {
-    if (residue == 71)
-      return 2;
-    return 3;
+    if (residue == 71) return 2;
+    if (residue == 84) return 3;
+    if (residue == 85) return 3;
   }
+  return -1;
   
+}
+
+/*
+ * Function: MBB_AminoToIndex
+ *
+ */
+int MBB_AminoToIndex (char residue) {
+  if (residue >= 97) residue -= 32;
+  if (residue < 65 || residue > 90)
+    return -1;
+  return MBB_AMINO_INDEX[residue];
 }
 
 

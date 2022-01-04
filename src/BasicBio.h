@@ -64,6 +64,7 @@ void MBB_SortInts(int * Vals, int * Index, int num_vals);
 void MBB_SortFloats(float * Vals, int * Index, int num_vals);
 
 int MBB_DNAtoNum(char residue);
+int MBB_AminoToIndex(char residue);
 char MBB_TranslateCodon(char * Codon);
 float MBB_AminoAliScore(char amino1, char amino2);
 

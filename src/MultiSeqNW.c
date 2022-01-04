@@ -177,71 +177,6 @@ void DestroyTupleSet (TUPLE_SET * ts)
 
 
 
-/* FUNCTION: ConvertToIndex
- *
- *    ABOUT: Take a character and figure out where its index is
- *           in BLOSUM62.
- *
- */
-int
-ConvertToIndex (char letter)
-{
-  // Capitalize (should be unnecessary, but better safe than sorry)
-  if (letter >= 97) 
-    letter -= 32;
-
-  // Convert
-  switch(letter) {
-  case 'A':
-    return 0;
-  case 'R':
-    return 1;
-  case 'N':
-    return 2;
-  case 'D':
-    return 3;
-  case 'C':
-    return 4;
-  case 'Q':
-    return 5;
-  case 'E':
-    return 6;
-  case 'G':
-    return 7;
-  case 'H':
-    return 8;
-  case 'I':
-    return 9;
-  case 'L':
-    return 10;
-  case 'K':
-    return 11;
-  case 'M':
-    return 12;
-  case 'F':
-    return 13;
-  case 'P':
-    return 14;
-  case 'S':
-    return 15;
-  case 'T':
-    return 16;
-  case 'W':
-    return 17;
-  case 'Y':
-    return 18;
-  case 'V':
-    return 19;
-  case 'X':
-    return 20;
-  default:
-    return -1;
-  }
-}
-
-
-
-
 /* FUNCTION: CalcGap
  *
  *    ABOUT: Calculate the cost of starting a gap in our DP matrix
@@ -348,8 +283,8 @@ CalcMatch
   int i,j,x,y;
   for (i=0; i<Tuple1->NumTuples; i++) {
     for (j=0; j<Tuple2->NumTuples; j++) {
-      x = 21*ConvertToIndex(Tuple1->TupleChars[i]);
-      y = ConvertToIndex(Tuple2->TupleChars[j]);
+      x = 21*MBB_AminoToIndex(Tuple1->TupleChars[i]);
+      y = MBB_AminoToIndex(Tuple2->TupleChars[j]);
       if (x < 0 || y < 0) continue; // Something's weird, but it'll be weird across the board
       score += (MBB_BLOSUM62[x+y] * Tuple1->TupleRatios[i] * Tuple2->TupleRatios[j]);
     }
