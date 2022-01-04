@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "MultiSeqNW.h"
+#include "BasicBio.h"
 
 
 // Maximum and minimum macros -- UNSAFE
@@ -30,52 +31,6 @@
 #define INTRON_TO_INTRON (0.0)
 #define NEGATIVE_INF     (0.0-INFINITY)
 */
-
-
-// The BLOSUM 62 scoring matrix.  Because we're performing global alignment,
-// our choice of scoring matrix is more or less arbitrary.  Scores are in
-// half-bits.
-const float BLOSUM62[400] = {
-   4, -1, -2, -2,  0, -1, -1,  0, -2, -1, -1, -1, -1, -2, -1,  1,  0, -3, -2,  0,
-  -1,  5,  0, -2, -3,  1,  0, -2,  0, -3, -2,  2, -1, -3, -2, -1, -1, -3, -2, -3,
-  -2,  0,  6,  1, -3,  0,  0,  0,  1, -3, -3,  0, -2, -3, -2,  1,  0, -4, -2, -3,
-  -2, -2,  1,  6, -3,  0,  2, -1, -1, -3, -4, -1, -3, -3, -1,  0, -1, -4, -3, -3,
-   0, -3, -3, -3,  9, -3, -4, -3, -3, -1, -1, -3, -1, -2, -3, -1, -1, -2, -2, -1,
-  -1,  1,  0,  0, -3,  5,  2, -2,  0, -3, -2,  1,  0, -3, -1,  0, -1, -2, -1, -2,
-  -1,  0,  0,  2, -4,  2,  5, -2,  0, -3, -3,  1, -2, -3, -1,  0, -1, -3, -2, -2,
-   0, -2,  0, -1, -3, -2, -2,  6, -2, -4, -4, -2, -3, -3, -2,  0, -2, -2, -3, -3,
-  -2,  0,  1, -1, -3,  0,  0, -2,  8, -3, -3, -1, -2, -1, -2, -1, -2, -2,  2, -3,
-  -1, -3, -3, -3, -1, -3, -3, -4, -3,  4,  2, -3,  1,  0, -3, -2, -1, -3, -1,  3,
-  -1, -2, -3, -4, -1, -2, -3, -4, -3,  2,  4, -2,  2,  0, -3, -2, -1, -2, -1,  1,
-  -1,  2,  0, -1, -3,  1,  1, -2, -1, -3, -2,  5, -1, -3, -1,  0, -1, -3, -2, -2,
-  -1, -1, -2, -3, -1,  0, -2, -3, -2,  1,  2, -1,  5,  0, -2, -1, -1, -1, -1,  1,
-  -2, -3, -3, -3, -2, -3, -3, -3, -1,  0,  0, -3,  0,  6, -4, -2, -2,  1,  3, -1,
-  -1, -2, -2, -1, -3, -1, -1, -2, -2, -3, -3, -1, -2, -4,  7, -1, -1, -4, -3, -2,
-   1, -1,  1,  0, -1,  0,  0,  0, -1, -2, -2,  0, -1, -2, -1,  4,  1, -3, -2, -2,
-   0, -1,  0, -1, -1, -1, -1, -2, -2, -1, -1, -1, -1, -2, -1,  1,  5, -2, -2,  0,
-  -3, -3, -4, -4, -2, -2, -3, -2, -2, -3, -2, -3, -1,  1, -4, -3, -2, 11,  2, -3,
-  -2, -2, -2, -3, -2, -1, -2, -3,  2, -1, -1, -2, -1,  3, -3, -2, -2,  2,  7, -1,
-   0, -3, -3, -3, -1, -2, -2, -3, -3,  3,  1, -2,  1, -1, -2, -2,  0, -3, -1,  4,
-};
-
-
-
-
-float Min (float a, float b)
-{
-  if (a < b) return a;
-  return b;
-}
-
-
-float Max (float a, float b)
-{
-  if (a > b) return a;
-  return b;
-}
-
-
-
 
 
 
@@ -222,71 +177,6 @@ void DestroyTupleSet (TUPLE_SET * ts)
 
 
 
-/* FUNCTION: ConvertToIndex
- *
- *    ABOUT: Take a character and figure out where its index is
- *           in BLOSUM62.
- *
- */
-int
-ConvertToIndex (char letter)
-{
-  // Capitalize (should be unnecessary, but better safe than sorry)
-  if (letter >= 97) 
-    letter -= 32;
-
-  // Convert
-  switch(letter) {
-  case 'A':
-    return 0;
-  case 'R':
-    return 1;
-  case 'N':
-    return 2;
-  case 'D':
-    return 3;
-  case 'C':
-    return 4;
-  case 'Q':
-    return 5;
-  case 'E':
-    return 6;
-  case 'G':
-    return 7;
-  case 'H':
-    return 8;
-  case 'I':
-    return 9;
-  case 'L':
-    return 10;
-  case 'K':
-    return 11;
-  case 'M':
-    return 12;
-  case 'F':
-    return 13;
-  case 'P':
-    return 14;
-  case 'S':
-    return 15;
-  case 'T':
-    return 16;
-  case 'W':
-    return 17;
-  case 'Y':
-    return 18;
-  case 'V':
-    return 19;
-  case 'X':
-    return 20;
-  default:
-    return -1;
-  }
-}
-
-
-
-
 /* FUNCTION: CalcGap
  *
  *    ABOUT: Calculate the cost of starting a gap in our DP matrix
@@ -329,7 +219,7 @@ CalcGap
 	if (Tuple2->NearestIntron > 10 && intron_gap_base > 0) 
 	  return basescore+intron_gap_max; // Avoiding overflow
 
-	return basescore+Max(intron_gap_max,intron_gap_base * pow(intron_gap_mult,Tuple2->NearestIntron));
+	return basescore+MBB_MaxFloat(intron_gap_max,intron_gap_base * pow(intron_gap_mult,Tuple2->NearestIntron));
 
       }
 
@@ -339,11 +229,8 @@ CalcGap
 	if (Tuple1->NearestIntron > 10 && intron_gap_base > 0) 
 	  return basescore+intron_gap_max; // Avoiding overflow
 
-	return basescore+Max(intron_gap_max,intron_gap_base * pow(intron_gap_mult,Tuple1->NearestIntron));
+	return basescore+MBB_MaxFloat(intron_gap_max,intron_gap_base * pow(intron_gap_mult,Tuple1->NearestIntron));
 	
-	// NOTE:  The above line was originally this, for unclear reasons...:
-	//return basescore+Max(intron_gap_max,(intron_gap_base * pow(intron_gap_mult,Tuple1->NearestIntron-1))-1);
-
       }
 
     }
@@ -396,10 +283,10 @@ CalcMatch
   int i,j,x,y;
   for (i=0; i<Tuple1->NumTuples; i++) {
     for (j=0; j<Tuple2->NumTuples; j++) {
-      x = 21*ConvertToIndex(Tuple1->TupleChars[i]);
-      y = ConvertToIndex(Tuple2->TupleChars[j]);
+      x = 21*MBB_AminoToIndex(Tuple1->TupleChars[i]);
+      y = MBB_AminoToIndex(Tuple2->TupleChars[j]);
       if (x < 0 || y < 0) continue; // Something's weird, but it'll be weird across the board
-      score += (BLOSUM62[x+y] * Tuple1->TupleRatios[i] * Tuple2->TupleRatios[j]);
+      score += (MBB_BLOSUM62[x+y] * Tuple1->TupleRatios[i] * Tuple2->TupleRatios[j]);
     }
   }
 
@@ -949,25 +836,25 @@ MSNeedlemanWunsch
     for (j=1; j<MSA2Length; j++) {
 
       // Match State
-      Match[i][j] = Max(Insert[i-1][j-1],Delete[i-1][j-1]);
-      Match[i][j] = Max(Match[i][j],Match[i-1][j-1]);
+      Match[i][j] = MBB_MaxFloat(Insert[i-1][j-1],Delete[i-1][j-1]);
+      Match[i][j] = MBB_MaxFloat(Match[i][j],Match[i-1][j-1]);
       Match[i][j] = CalcMatch(Match[i][j],TS1[i],TS2[j],intron_to_intron,negative_inf);
       
       // Insert State -- VERTICAL
-      Insert[i][j] = Max(CalcGap(Insert[i][j-1],TS1[i],TS2[j],0,unspliced,
-				 intron_gap_base,intron_gap_max,intron_gap_cont,intron_gap_mult,
-				 gap_start,gap_continue,negative_inf),
-			 CalcGap(Match[i][j-1],TS1[i],TS2[j],1,unspliced,
-				 intron_gap_base,intron_gap_max,intron_gap_cont,intron_gap_mult,
-				 gap_start,gap_continue,negative_inf));
+      Insert[i][j] = MBB_MaxFloat(CalcGap(Insert[i][j-1],TS1[i],TS2[j],0,unspliced,
+					  intron_gap_base,intron_gap_max,intron_gap_cont,intron_gap_mult,
+					  gap_start,gap_continue,negative_inf),
+				  CalcGap(Match[i][j-1],TS1[i],TS2[j],1,unspliced,
+					  intron_gap_base,intron_gap_max,intron_gap_cont,intron_gap_mult,
+					  gap_start,gap_continue,negative_inf));
 
       // Delete State -- HORIZONTAL
-      Delete[i][j] = Max(CalcGap(Delete[i-1][j],TS1[i],TS2[j],0,unspliced,
-				 intron_gap_base,intron_gap_max,intron_gap_cont,intron_gap_mult,
-				 gap_start,gap_continue,negative_inf),
-			 CalcGap(Match[i-1][j],TS1[i],TS2[j],1,unspliced,
-				 intron_gap_base,intron_gap_max,intron_gap_cont,intron_gap_mult,
-				 gap_start,gap_continue,negative_inf));
+      Delete[i][j] = MBB_MaxFloat(CalcGap(Delete[i-1][j],TS1[i],TS2[j],0,unspliced,
+					  intron_gap_base,intron_gap_max,intron_gap_cont,intron_gap_mult,
+					  gap_start,gap_continue,negative_inf),
+				  CalcGap(Match[i-1][j],TS1[i],TS2[j],1,unspliced,
+					  intron_gap_base,intron_gap_max,intron_gap_cont,intron_gap_mult,
+					  gap_start,gap_continue,negative_inf));
       
     }
 
@@ -1679,7 +1566,7 @@ int main (int argc, char ** argv)
   
   // The starting point for our tuples
   char * tuple_base;
-  if ((tuple_base = malloc(Max(MSA1Size,MSA2Size) * sizeof(char))) == NULL) {
+  if ((tuple_base = malloc(MBB_MaxInt(MSA1Size,MSA2Size) * sizeof(char))) == NULL) {
     printf("  ERROR:  Failed to initialize 'tuple_base'\n");
     return 1;
   }
@@ -1704,7 +1591,7 @@ int main (int argc, char ** argv)
   }
   for (j=MSA1Length-2; j>0; j--) {
     if (TS1[j]->MarksIntron) continue;
-    TS1[j]->NearestIntron = Min(TS1[j]->NearestIntron,TS1[j+1]->NearestIntron+1);
+    TS1[j]->NearestIntron = MBB_MinInt(TS1[j]->NearestIntron,TS1[j+1]->NearestIntron+1);
   }
 
   // MSA2 -> TS2
@@ -1726,7 +1613,7 @@ int main (int argc, char ** argv)
   }
   for (j=MSA2Length-2; j>0; j--) {
     if (TS2[j]->MarksIntron) continue;
-    TS2[j]->NearestIntron = Min(TS2[j]->NearestIntron,TS2[j+1]->NearestIntron+1);
+    TS2[j]->NearestIntron = MBB_MinInt(TS2[j]->NearestIntron,TS2[j+1]->NearestIntron+1);
   }
 
 
