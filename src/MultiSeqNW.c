@@ -283,7 +283,7 @@ CalcMatch
   int i,j,x,y;
   for (i=0; i<Tuple1->NumTuples; i++) {
     for (j=0; j<Tuple2->NumTuples; j++) {
-      x = 21*MBB_AminoToIndex(Tuple1->TupleChars[i]);
+      x = 21 * MBB_AminoToIndex(Tuple1->TupleChars[i]);
       y = MBB_AminoToIndex(Tuple2->TupleChars[j]);
       if (x < 0 || y < 0) continue; // Something's weird, but it'll be weird across the board
       score += (MBB_BLOSUM62[x+y] * Tuple1->TupleRatios[i] * Tuple2->TupleRatios[j]);
