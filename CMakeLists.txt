@@ -12,6 +12,7 @@ add_executable(
         MultiSeqNW
 
         src/MultiSeqNW.c
+	src/BasicBio.c
 )
 target_link_libraries(MultiSeqNW m)
 install(TARGETS MultiSeqNW RUNTIME)

@@ -59,7 +59,7 @@ static char MBB_CODON_TABLE[64]=
    'A','A','A','A', // GC-
    'G','G','G','G', // GG-
    'V','V','V','V', // GT-
-   'X','Y','X','Y', // TA-
+   '*','Y','*','Y', // TA-
    'S','S','S','S', // TC-
    'S','C','W','C', // TG-
    'L','F','L','F'};// TT-
