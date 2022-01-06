@@ -3695,8 +3695,8 @@ sub GetMapSummaryStats
 	    my @HitData = split(/\|/,$hit);
 	    next if ($HitData[0] ne $species);
 
-	    if (length($HitData[0]) > $longest_gene_name) {
-		$longest_gene_name = length($HitData[0]);
+	    if (length($HitData[1]) > $longest_gene_name) {
+		$longest_gene_name = length($HitData[1]);
 	    }
 
 	}
