@@ -347,7 +347,7 @@ for ($threadID=0; $threadID<$num_cpus; $threadID++) {
 if ($total_ghost_exons == 0) {
 
     # Wowza yowza bo-bowza!  Really?  Nothing?  Okay...
-    system("rm -rf $outdirname");
+    system("rm -rf $outdirname \&");
     print "\n  No potentially unannotated exons detected\n\n";
 
     exit(0);
