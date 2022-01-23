@@ -107,7 +107,7 @@ if (lc($ARGV[scalar(@ARGV)-1]) !~ /\-full/) {
 
     $download_all = 0;
     
-    my $inf = OpenInputFile($ARGV[0]);
+    my $inf = OpenInputFile($ARGV[scalar(@ARGV)-1]);
     while (my $line = <$inf>) {
 
 	# Eliminate any leading or trailing whitespace
