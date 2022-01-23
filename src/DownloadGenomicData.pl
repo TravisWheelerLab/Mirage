@@ -457,10 +457,21 @@ foreach my $species (keys %SpeciesToGenomes) {
 my ($common_tree,$latin_tree)
     = RecursiveTreeReduce(GetStaticCommonTree(),\%ReducedSpeciesToSciNames);
 
+# We'll count the number of species in our trees -- if there are less than
+# three, then there really isn't any point in having a species tree
+my $num_species_in_tree = 1;
+foreach my $char (split /\,/,$common_tree) {
+    $num_species_in_tree++ if ($char eq ',');
+}
+if ($num_species_in_tree < 3) {
+    $common_tree = 0;
+    $latin_tree = 0;
+}
+
 
 # 1. Common name species guide
 my $SpeciesGuide = OpenOutputFile($outdirname.'Common-Species-Guide');
-print $SpeciesGuide "$common_tree\n";
+print $SpeciesGuide "$common_tree\n" if ($common_tree);
 foreach my $species (sort keys %SpeciesToGenomes) {
 
     my $genome = $SpeciesToGenomes{$species};
@@ -485,7 +496,7 @@ close($SpeciesGuide);
 
 # 2. Scientific name species guide
 $SpeciesGuide = OpenOutputFile($outdirname.'Latin-Species-Guide');
-print $SpeciesGuide "$latin_tree\n";
+print $SpeciesGuide "$latin_tree\n" if ($latin_tree);
 my %AllSciSpeciesNames;
 foreach my $species (sort keys %SpeciesToGenomes) {
 
