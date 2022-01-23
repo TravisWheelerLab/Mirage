@@ -347,7 +347,7 @@ for ($threadID=0; $threadID<$num_cpus; $threadID++) {
 if ($total_ghost_exons == 0) {
 
     # Wowza yowza bo-bowza!  Really?  Nothing?  Okay...
-    system("rm -rf $outdirname");
+    system("rm -rf $outdirname \&");
     print "\n  No potentially unannotated exons detected\n\n";
 
     exit(0);
@@ -2314,11 +2314,17 @@ sub RecordGhostMSAs
 	    my @SourceSpecies;
 	    my @SourceSeqs;
 	    my @SourceExons;
+	    my $novel_exon = 1;
 	    foreach my $hit (split(/\&/,$ExonHits[$i])) {
+
 		$hit =~ /^[^\|]+\|([^\:]+)\:([^\:]+)\:([^\|]+)\|/;
 		push(@SourceSpecies,$1);
 		push(@SourceSeqs,$2);
 		push(@SourceExons,lc($3));
+
+		$hit =~ /\|(\d)$/;
+		$novel_exon *= $1;
+
 	    }
 	    my $num_source_species = scalar(@SourceSpecies);
 
@@ -2797,6 +2803,12 @@ sub RecordGhostMSAs
 	    $meta_str = $meta_str."  Target : $target_species $chr";
 	    $meta_str = $meta_str.'[revcomp]' if ($revcomp);
 	    $meta_str = $meta_str.":$translation_start..$translation_end\n";
+
+	    if ($novel_exon) {
+		$meta_str = $meta_str."         : Novel exon (no GTF overlaps)\n";
+	    } else {
+		$meta_str = $meta_str."         : Overlaps with GTF entry\n";
+	    }
 
 	    # Metadata item 2: Source sequence info.
 	    $meta_str = $meta_str."  Source";

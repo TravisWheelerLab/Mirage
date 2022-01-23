@@ -263,7 +263,7 @@ print "  + Inter-species alignment complete\n";
 # For a touch of cleanup, get rid of our species-specific protein databases
 for (my $i=0; $i<$num_species; $i++) {
     my $seqdirname = $SpeciesDir{$Species[$i]}.'seqs/';
-    RunSystemCommand("rm -rf \"$seqdirname\"");
+    RunSystemCommand("rm -rf \"$seqdirname\" \&");
 }
 
 # We'll also clear out the alias and name guide files
@@ -274,7 +274,7 @@ RunSystemCommand("rm \"$aliasfname\"") if (-e $aliasfname);
 # If there weren't any genomeless sequences, we can clear out the Misc dir
 if (!$misc_seqs) {
     my $miscdir = $SpeciesDir{'Misc'};
-    RunSystemCommand("rm -rf \"$miscdir\"");
+    RunSystemCommand("rm -rf \"$miscdir\" \&");
 }
 
 # Check whether we actually had any mapping misses to report -- if not,
@@ -282,7 +282,7 @@ if (!$misc_seqs) {
 EvaluateMissDir($misses_dirname);
 
 # No more progress to be made!
-system("rm -rf \"$progress_dirname\"");
+system("rm -rf \"$progress_dirname\" \&");
 
 # If we've been collecting timing data, now's the time to let it loose
 if ($timed) {
@@ -1746,7 +1746,7 @@ sub MergeAlignments
     while (wait() != -1) {}
 
     # Clear out the secret temporary directory and bump on back to the top level!
-    RunSystemCommand("rm -rf \"$tmpdir\"");
+    RunSystemCommand("rm -rf \"$tmpdir\" \&");
     
 }
 
