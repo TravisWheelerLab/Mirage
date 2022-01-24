@@ -1027,7 +1027,25 @@ sub GenerateSpeciesDBs
 
 	} elsif ($spec_gene_filename) {
 
-	    print $SpecGeneFile "$line\n";
+	    # If we the lengths of lines are large, we'll split them up
+	    # (to make buffering easier for FastMap and friends)
+	    my $max_chars_per_line = 240;
+	    if (length($line) > $max_chars_per_line) {
+
+		my $line_len = 0;
+		foreach my $char (split(//,$line)) {
+		    if ($line_len == $max_chars_per_line) {
+			print $SpecGeneFile "\n";
+			$line_len = 0;
+		    }
+		    print $SpecGeneFile "$char";
+		    $line_len++;
+		}
+		print $SpecGeneFile "\n";
+		
+	    } else {
+		print $SpecGeneFile "$line\n";
+	    }
 
 	    # Wait! Before you move on, how many characters are we lookin' at here?
 	    my $linelen = length($line);
