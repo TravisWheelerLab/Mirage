@@ -1030,6 +1030,7 @@ sub GenerateSpeciesDBs
 	    # If we the lengths of lines are large, we'll split them up
 	    # (to make buffering easier for FastMap and friends)
 	    my $max_chars_per_line = 240;
+	    $line =~ s/\s//g; # Avoiding one pathological case
 	    if (length($line) > $max_chars_per_line) {
 
 		my $line_len = 0;
