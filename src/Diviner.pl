@@ -19,6 +19,7 @@ sub ParseGTF;
 sub GetMappedSeqMSA;
 sub ParseAFA;
 sub RecordSplicedMSA;
+sub RecordSplicedMap;
 sub ReduceMSAToSpecies;
 sub FindGhostExons;
 sub FindAliQualityDrops;
@@ -262,8 +263,9 @@ for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
     my @SpeciesNames = @{$seqnames_ref};
     my $num_species = $num_seqs;
 
-    # Write this one out, too!
+    # Write these ones out, too!
     RecordSplicedMSA(\@MSA,\@SpeciesNames,$num_seqs,$msa_len,$gene_outdir.$gene.'-species.afa');
+    RecordSplicedMap(\@MSA,\@MapMSA,\@SpeciesNames,\%SpeciesToChrs,$num_seqs,$msa_len,$gene_outdir.$gene.'-maps.out');
     
     # Now that we have our super-reduced splice-site-ified MSA, let's get real nasty
     # with it (by way of locating exons suggestive of "ghosts")!
@@ -945,6 +947,88 @@ sub RecordSplicedMSA
 	}
 	print $outf "\n" if ($msa_len % 60);
 	#print $outf "\n";
+	
+    }
+    close($outf);
+
+}
+
+
+
+
+###############################################################
+#
+#  Function: RecordSplicedMap
+#
+sub RecordSplicedMap
+{
+
+    my $msa_ref = shift;
+    my $map_msa_ref = shift;
+    my $species_names_ref = shift;
+    my $species_to_chrs_ref = shift;
+    my $num_species = shift;
+    my $msa_len = shift;
+    my $outfname = shift;
+
+    my @MSA = @{$msa_ref};
+    my @MapMSA = @{$map_msa_ref};
+    my @SpeciesNames = @{$species_names_ref};
+    my %SpeciesToChrs = %{$species_to_chrs_ref};
+    
+    my $outf = OpenOutputFile($outfname);
+    for (my $i=0; $i<$num_species; $i++) {
+
+	my $species = $SpeciesNames[$i];
+	my $chr = $SpeciesToChrs{$species};
+
+	my @ExonMaps;
+	my $num_exons = 0;
+	my $exon_maps_str = '';
+	for (my $j=0; $j<$msa_len; $j++) {
+
+	    next if ($MSA[$i][$j] eq '-');
+
+	    if ($MSA[$i][$j] eq '/') {
+		if ($exon_maps_str) {
+		    push(@ExonMaps,$exon_maps_str);
+		    $num_exons++;
+		}
+		$exon_maps_str = '';
+	    } elsif ($exon_maps_str) {
+		$exon_maps_str = $exon_maps_str.','.$MapMSA[$i][$j];
+	    } else {
+		$exon_maps_str = $MapMSA[$i][$j];
+	    }
+	    
+	}
+
+	print $outf "Species    : $species\n";
+	print $outf "Chromosome : $chr\n";
+	print $outf "Num Exons  : $num_exons\n";
+
+	my $species_num_aminos = 0;
+	for (my $j=0; $j<$num_exons; $j++) {
+
+	    $species_num_aminos++;
+
+	    my $exon_map_str = $ExonMaps[$j];
+
+	    $exon_map_str =~ /^(\d+)/;
+	    my $start_nucl = $1;
+
+	    $exon_map_str =~ /(\d+)$/;
+	    my $end_nucl = $1;
+
+	    print $outf "* Aminos $species_num_aminos..";
+	    $species_num_aminos += scalar(split(/\,/,$exon_map_str))-1;
+	    print $outf "$species_num_aminos, $chr:$start_nucl..$end_nucl\n";
+
+	    print $outf "$exon_map_str\n";
+	    
+	}
+
+	print $outf "\n";
 	
     }
     close($outf);
