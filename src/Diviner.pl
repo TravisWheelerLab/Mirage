@@ -252,7 +252,7 @@ for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
     my $gene_outdir = CreateDirectory($outgenesdir.$gene);
 
     # Get your butt into this file, mister!
-    RecordSplicedMSA(\@MSA,\@SeqNames,$num_seqs,$msa_len,$gene_outdir.$gene.'-seqs.afa');
+    RecordSplicedMSA(\@MSA,\@SeqNames,$num_seqs,$msa_len,$gene_outdir.'all-mapped-seqs.afa');
 
     # Now we'll reduce our MSA even further, down to just one sequence per
     # species!
@@ -264,8 +264,8 @@ for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
     my $num_species = $num_seqs;
 
     # Write these ones out, too!
-    RecordSplicedMSA(\@MSA,\@SpeciesNames,$num_seqs,$msa_len,$gene_outdir.$gene.'-species.afa');
-    RecordSplicedMap(\@MSA,\@MapMSA,\@SpeciesNames,\%SpeciesToChrs,$num_seqs,$msa_len,$gene_outdir.$gene.'-maps.out');
+    RecordSplicedMSA(\@MSA,\@SpeciesNames,$num_seqs,$msa_len,$gene_outdir.'per-species.afa');
+    RecordSplicedMap(\@MSA,\@MapMSA,\@SpeciesNames,\%SpeciesToChrs,$num_seqs,$msa_len,$gene_outdir.'genome-map-coords.out');
     
     # Now that we have our super-reduced splice-site-ified MSA, let's get real nasty
     # with it (by way of locating exons suggestive of "ghosts")!
@@ -1189,6 +1189,28 @@ sub FindGhostExons
     }
     $num_exons--; # We'll have overcounted by one, but that's okie-dokie
 
+    # We also want to have information about the specific amino acid indices
+    # involved in our hits, so we'll record the start index of each exon, per species
+    my @ExonAminoStartIndices;
+    for (my $i=0; $i<$num_species; $i++) {
+	my $amino_count = 0;
+	my $exon_num = 0;
+	for (my $j=0; $j<$msa_len; $j++) {
+	    if ($MSA[$i][$j] eq '/') {
+		$ExonAminoStartIndices[$i][$exon_num] = $amino_count;
+		$exon_num++;
+	    } elsif ($MSA[$i][$j] ne '-') {
+		$amino_count++;
+	    }
+	}
+    }
+
+    # We'll also want to know how to recover species indices from their names, so...
+    my %SpeciesToIndex;
+    for (my $i=0; $i<$num_species; $i++) {
+	$SpeciesToIndex{$SpeciesNames[$i]} = $i+1;
+    }
+
     # Before we get into the nastiness, we'll set some variables to represent the
     # minimum number of amino acids for 'using an exon' and the maximum number
     # of amino acids for 'not using an exon' -- both Inclusive
@@ -1828,7 +1850,13 @@ sub FindGhostExons
 
 	for (my $hit=0; $hit<$num_tbn_hits; $hit++) {
 
-	    print $outf "    + Aminos $HitAminoStarts[$hit]..$HitAminoEnds[$hit] ";
+	    # These are the start and end coordinates within the species MSA,
+	    # allowing for recovery of specific aminos in that context later
+	    my $hit_amino_start = $HitAminoStarts[$hit] + $ExonAminoStartIndices[$SpeciesToIndex{$target_species}-1][$start_exon-1];
+	    my $hit_amino_end = $hit_amino_start + ($HitAminoEnds[$hit] - $HitAminoStarts[$hit]);
+
+	    #print $outf "    + Aminos $HitAminoStarts[$hit]..$HitAminoEnds[$hit] ";
+	    print $outf "    + Aminos $hit_amino_start..$hit_amino_end ";
 	    print $outf "mapped to $target_species $chr:$HitNuclStarts[$hit]..$HitNuclEnds[$hit] ";
 	    print $outf "($HitEVals[$hit])\n";
 
@@ -2228,8 +2256,8 @@ sub RecordGhostMSAs
 	next if ($line !~ /Search success/);
 
 	$line = <$inf>; # MSA position info.
-	$line =~ /(Exons? \S+)/;
-	my $source_exons = $1;
+	$line =~ /Exons? (\S+)/;
+	my $msa_exons = $1;
 	
 	$line = <$inf>; # Full target search region
 	$line =~ /\: (\S+) \(([^\:]+)\:/;
@@ -2250,29 +2278,46 @@ sub RecordGhostMSAs
 	$line =~ /\: (\d+)/;
 	my $num_tbn_hits = $1;
 
-	my $wide_start = 0;
-	my $wide_end = 0;
+	# What's the lowest start nucl and highest end nucl (flip for revcomp)?
+	my $wide_nucl_start = 0;
+	my $wide_nucl_end = 0;
+
+	# For the provided source sequence, what are the start and end aminos?
+	# The way that we get this is by finding the lowest aligned amino coord,
+	# counting back to the start of the alignment, and then adding the length.
+	# Simple, right?
+	my $wide_amino_start = 0;
+	my $wide_amino_end = 0;
+
+	# Has this exon been annotated in a GTF file provided to Diviner?
 	my $novel_exon = 1;
 	while ($num_tbn_hits) {
 
 	    $line = <$inf>;
+
+	    $line =~ /Aminos (\d+)\./;
+	    my $start_amino_coord = $1;
+	    if (!$wide_amino_start || $start_amino_coord < $wide_amino_start) {
+		$wide_amino_start = $start_amino_coord;
+	    }
+
 	    $line =~ /\:(\d+)\.\.(\d+)/;
-	    my $hit_start = $1;
-	    my $hit_end = $2;
+	    my $hit_nucl_start = $1;
+	    my $hit_nucl_end = $2;
 
 	    if ($revcomp) {
-		if (!$wide_start || $hit_start > $wide_start) {
-		    $wide_start = $hit_start;
+		if (!$wide_nucl_start || $hit_nucl_start > $wide_nucl_start) {
+		    $wide_nucl_start = $hit_nucl_start;
 		}
-		if (!$wide_end || $hit_end < $wide_end) {
-		    $wide_end = $hit_end;
+		if (!$wide_nucl_end || $hit_nucl_end < $wide_nucl_end) {
+		    $wide_nucl_end = $hit_nucl_end;
 		}
 	    } else {
-		if (!$wide_start || $hit_start < $wide_start) {
-		    $wide_start = $hit_start;
+		if (!$wide_nucl_start || $hit_nucl_start < $wide_nucl_start) {
+		    $wide_nucl_start = $hit_nucl_start;
 		}
-		if (!$wide_end || $hit_end > $wide_end) {
-		    $wide_end = $hit_end;
+		if (!$wide_nucl_end || $hit_nucl_end > $wide_nucl_end) {
+		    $wide_nucl_end = $hit_nucl_end;
 		}
 	    }
 
@@ -2283,9 +2328,20 @@ sub RecordGhostMSAs
 	    
 	}
 
+	# What is the actual amino range (w.r.t. this species' "exome" for the gene)?
+	if ($source_seq =~ /^([a-z]+)[A-Z]/) {
+	    my $offset = length($1);
+	    $wide_amino_start -= $offset;
+	}
+	$wide_amino_end = $wide_amino_start + length($source_seq) - 1;
+
+	# For simplification
+	my $wide_amino_range = $wide_amino_start.'..'.$wide_amino_end;
+	my $wide_nucl_range = $wide_nucl_start.'..'.$wide_nucl_end;
+
 	# Time to record this bad boi!
-	my $hash_val = $target_chr.':'.$wide_start.'..'.$wide_end;
-	$hash_val = $hash_val.'|'.$source_species.':'.$source_seq.':'.$source_exons;
+	my $hash_val = $target_chr.':'.$wide_nucl_range.':'.$wide_amino_range;
+	$hash_val = $hash_val.'|'.$source_species.':'.$source_seq.':'.$msa_exons;
 	$hash_val = $hash_val.'|'.$novel_exon;
 
 	if ($TargetSpeciesToHits{$target_species}) {
@@ -2395,17 +2451,37 @@ sub RecordGhostMSAs
 	for (my $i=0; $i<$num_exons; $i++) {
 
 	    # Start off by getting access to the specific source species matches
+	    my @SourceAminoRanges;
 	    my @SourceSpecies;
 	    my @SourceSeqs;
-	    my @SourceExons;
+	    my $msa_start_exon = -1;
+	    my $msa_end_exon = -1;
 	    my $novel_exon = 1;
 	    foreach my $hit (split(/\&/,$ExonHits[$i])) {
+		
+		$hit =~ /\:(\d+\.\.\d+)\|([^\:]+)\:([^\:]+)\:([^\|]+)\|/;
+		push(@SourceAminoRanges,$1);
+		push(@SourceSpecies,$2);
+		push(@SourceSeqs,$3);
+		my $hit_exon_range = $4;
 
-		$hit =~ /^[^\|]+\|([^\:]+)\:([^\:]+)\:([^\|]+)\|/;
-		push(@SourceSpecies,$1);
-		push(@SourceSeqs,$2);
-		push(@SourceExons,lc($3));
+		my $hit_msa_start_exon;
+		my $hit_msa_end_exon;
+		if ($hit_exon_range =~ /(\d+)\.\.(\d+)/) {
+		    $hit_msa_start_exon = $1;
+		    $hit_msa_end_exon = $2;
+		} else {
+		    $hit_msa_start_exon = $hit_exon_range;
+		    $hit_msa_end_exon = $hit_exon_range;
+		}
 
+		if ($msa_start_exon == -1 || $hit_msa_start_exon < $msa_start_exon) {
+		    $msa_start_exon = $hit_msa_start_exon;
+		}
+		if ($msa_end_exon == -1 || $hit_msa_end_exon > $msa_end_exon) {
+		    $msa_end_exon = $hit_msa_end_exon;
+		}
+		
 		$hit =~ /\|(\d)$/;
 		$novel_exon *= $1;
 
@@ -2567,25 +2643,40 @@ sub RecordGhostMSAs
 	    # Starting off by priming with the first source sequence
 	    my $source_id = $MatchedSourceIDs[0];
 	    my @SourceSeqChars = split(//,$SourceSeqs[$source_id]);
+
 	    my @AminoMSA;
 	    for (my $char_id=$BestFrameStarts[$best_frame_num][$source_id];
 		 $char_id<=$BestFrameEnds[$best_frame_num][$source_id];
 		 $char_id++) {
 		push(@AminoMSA,$SourceSeqChars[$char_id]);
 	    }
-	    
+
 	    # And now for the rest of the crew...
 	    for (my $meta_id=1; $meta_id<$num_matched; $meta_id++) {
+
 		$source_id = $MatchedSourceIDs[$meta_id];
 		@SourceSeqChars = split(//,$SourceSeqs[$source_id]);
+
 		my @SourceAliChars;
 		for (my $char_id=$BestFrameStarts[$best_frame_num][$source_id];
 		     $char_id<=$BestFrameEnds[$best_frame_num][$source_id];
 		     $char_id++) {
 		    push(@SourceAliChars,$SourceSeqChars[$char_id]);
 		}
+
 		my $amino_msa_ref = MultiAminoSeqAli(\@AminoMSA,\@SourceAliChars);
 		@AminoMSA = @{$amino_msa_ref};
+
+	    }
+	    
+	    # Correcting the amino ranges (to reflect precise aminos used in MSA)
+	    for (my $meta_id=0; $meta_id<$num_matched; $meta_id++) {
+		$source_id = $MatchedSourceIDs[$meta_id];
+		$SourceAminoRanges[$source_id] =~ /^(\d+)\.\./;
+		my $amino_range_start = $1;
+		my $true_amino_range_start = $amino_range_start + $BestFrameStarts[$best_frame_num][$source_id];
+		my $true_amino_range_end = $amino_range_start + $BestFrameEnds[$best_frame_num][$source_id];
+		$SourceAminoRanges[$source_id] = $true_amino_range_start.'..'.$true_amino_range_end;
 	    }
 	    
 	    # We align the target sequence last so that it's (perhaps) more of an
@@ -2894,16 +2985,22 @@ sub RecordGhostMSAs
 		$meta_str = $meta_str."         : Overlaps with GTF entry\n";
 	    }
 
-	    # Metadata item 2: Source sequence info.
+	    # Metadata item 2: Where in the species MSA are these source sequences?
 	    $meta_str = $meta_str."  Source";
 	    if ($num_matched > 1) { $meta_str = $meta_str.'s'; }
 	    else                  { $meta_str = $meta_str.' '; }
-	    $source_id = $MatchedSourceIDs[0];
-	    $meta_str  = $meta_str.": $SourceSpecies[$source_id] $SourceExons[$source_id]\n";
-	    $meta_str  = $meta_str."         : $SourcePctsID[0] $SourceRatios[0]\n";
-	    for (my $i=1; $i<$num_matched; $i++) {
+
+	    $meta_str = $meta_str.': Species MSA exon';
+	    if ($msa_start_exon == $msa_end_exon) {
+		$meta_str = $meta_str." $msa_start_exon\n";
+	    } else {
+		$meta_str = $meta_str."s $msa_start_exon..$msa_end_exon\n";
+	    }
+
+	    # Metadata item 3: Specific source sequence info.
+	    for (my $i=0; $i<$num_matched; $i++) {
 		$source_id = $MatchedSourceIDs[$i];
-		$meta_str  = $meta_str."         : $SourceSpecies[$source_id] $SourceExons[$source_id]\n";
+		$meta_str  = $meta_str."         : $SourceSpecies[$source_id] $SourceAminoRanges[$source_id]\n";
 		$meta_str  = $meta_str."         : $SourcePctsID[$i] $SourceRatios[$i]\n";
 	    }
 
