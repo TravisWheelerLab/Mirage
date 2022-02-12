@@ -252,7 +252,7 @@ for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
     my $gene_outdir = CreateDirectory($outgenesdir.$gene);
 
     # Get your butt into this file, mister!
-    RecordSplicedMSA(\@MSA,\@SeqNames,$num_seqs,$msa_len,$gene_outdir.'all-mapped-seqs.afa');
+    RecordSplicedMSA(\@MSA,\@SeqNames,$num_seqs,$msa_len,$gene_outdir.'mapped-seqs.afa');
 
     # Now we'll reduce our MSA even further, down to just one sequence per
     # species!
@@ -264,8 +264,8 @@ for (my $gene_id=$start_gene_id; $gene_id<$end_gene_id; $gene_id++) {
     my $num_species = $num_seqs;
 
     # Write these ones out, too!
-    RecordSplicedMSA(\@MSA,\@SpeciesNames,$num_seqs,$msa_len,$gene_outdir.'per-species.afa');
-    RecordSplicedMap(\@MSA,\@MapMSA,\@SpeciesNames,\%SpeciesToChrs,$num_seqs,$msa_len,$gene_outdir.'genome-map-coords.out');
+    RecordSplicedMSA(\@MSA,\@SpeciesNames,$num_seqs,$msa_len,$gene_outdir.'species.afa');
+    RecordSplicedMap(\@MSA,\@MapMSA,\@SpeciesNames,\%SpeciesToChrs,$num_seqs,$msa_len,$gene_outdir.'genome-mappings.out');
     
     # Now that we have our super-reduced splice-site-ified MSA, let's get real nasty
     # with it (by way of locating exons suggestive of "ghosts")!
@@ -2986,11 +2986,7 @@ sub RecordGhostMSAs
 	    }
 
 	    # Metadata item 2: Where in the species MSA are these source sequences?
-	    $meta_str = $meta_str."  Source";
-	    if ($num_matched > 1) { $meta_str = $meta_str.'s'; }
-	    else                  { $meta_str = $meta_str.' '; }
-
-	    $meta_str = $meta_str.': Species MSA exon';
+	    $meta_str = $meta_str."  Source : Species-level MSA exon";
 	    if ($msa_start_exon == $msa_end_exon) {
 		$meta_str = $meta_str." $msa_start_exon\n";
 	    } else {
@@ -3000,8 +2996,10 @@ sub RecordGhostMSAs
 	    # Metadata item 3: Specific source sequence info.
 	    for (my $i=0; $i<$num_matched; $i++) {
 		$source_id = $MatchedSourceIDs[$i];
-		$meta_str  = $meta_str."         : $SourceSpecies[$source_id] $SourceAminoRanges[$source_id]\n";
-		$meta_str  = $meta_str."         : $SourcePctsID[$i] $SourceRatios[$i]\n";
+		$meta_str  = $meta_str."         : $SourceSpecies[$source_id]";
+		$meta_str  = $meta_str." / aminos $SourceAminoRanges[$source_id]";
+		$meta_str  = $meta_str." / $SourcePctsID[$i]"; # " $SourceRatios[$i]";
+		$meta_str  = $meta_str."\n";
 	    }
 
 	    # Print the alignment!!!
