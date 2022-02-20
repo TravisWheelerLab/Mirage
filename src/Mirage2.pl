@@ -1076,6 +1076,7 @@ sub GenerateSpeciesDBs
 	    RunSystemCommand("rmdir \"$SpeciesDir{$species}\/alignments\"");
 	    RunSystemCommand("rmdir \"$SpeciesDir{$species}\/mappings\"");
 	    RunSystemCommand("rmdir \"$SpeciesDir{$species}\/seqs\"");
+	    RunSystemCommand("rmdir \"$SpeciesDir{$species}\/timing\""); # DEBUGGING?
 	    RunSystemCommand("rmdir \"$SpeciesDir{$species}\"");
 	    $SpeciesDir{$species} = 0;
 	    next;
