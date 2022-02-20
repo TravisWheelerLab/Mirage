@@ -152,6 +152,7 @@ foreach my $species (@Species) {
     CreateDirectory($SpeciesDir{$species}.'seqs');
     CreateDirectory($SpeciesDir{$species}.'alignments');
     CreateDirectory($SpeciesDir{$species}.'mappings');
+    CreateDirectory($SpeciesDir{$species}.'timing'); # DEBUGGING?
 }
 
 # Divide the database according to species

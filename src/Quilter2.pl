@@ -47,6 +47,12 @@ sub ParseBlatLine;
 sub ParseSpalnOutput;
 sub FinalFileCheck;
 
+# Timing stuff (for debugging)
+my $GlobalTimer;
+my $TimerOutf;
+sub StartTimer;
+sub ReportTimer;
+
 # Original Spaln parsing code
 sub OPSO_ParseSpalnOutput;
 sub OPSO_SelenocysteineCheck;
@@ -89,6 +95,9 @@ my %Opts     = %{$opts_ref};
 # As you'd expect, we want to know what there is to know about our proteins
 my $species_dirname = ConfirmDirectory($ARGV[0]);
 my $seq_dirname = ConfirmDirectory($species_dirname.'seqs');
+
+# DEBUGGING?
+my $timing_dirname = ConfirmDirectory($species_dirname.'timing');
 
 # As you'd expect, next up is confirming the genome
 my $genome = ConfirmFile($ARGV[1]);
@@ -321,7 +330,6 @@ sub UseGTF
 	# Report your progress
 	$genes_completed++;
 	DispProgQuilter('fm2|'.$threadID.'|'.$genes_completed);
-
 	
     }
 
@@ -495,6 +503,12 @@ sub UseFastMap
     $gene_fname =~ /\/([^\/]+)\.fa$/;
     my $gene = $1;
 
+
+    # DEBUGGING?
+    # Initialize timing file for this gene
+    open($TimerOutf,'>>',$timing_dirname.$gene.'.q2.out');
+    
+    
     # Before we get into the mapping business, let's load in the protein sequences,
     # since they might have something to say about how we build our graph...
     my $GeneFile = OpenInputFile($gene_fname);
@@ -526,6 +540,7 @@ sub UseFastMap
 	    print $BlatFile "\n" if (scalar(@Seq) % 60);
 	    print $BlatFile "\n";
 	}
+	close($TimerOutf); # DEBUGGING?
 	return;
     }
 
@@ -555,6 +570,12 @@ sub UseFastMap
 	$XWInputNames[$i] = 0;
 	$SpliceGraphs[$i] = 0;
     }
+
+
+    # DEBUGGING?
+    # We'll want to know how long FastMap2 and ExonWeaver take to complete
+    StartTimer();
+    
 
     # Now we can go chromosome-by-chromosome and try to build the
     # best splice graph for our sequences we can on a single chromosome
@@ -707,7 +728,13 @@ sub UseFastMap
 	    }
 	}
     }
+    
 
+    # DEBUGGING?
+    # Record how much time we spent on FastMap2+ExonWeaver
+    ReportTimer('FastMap2+ExonWeaver');
+
+    
     # We'll save removing the nucleotide file until the end, in case we end up
     # reusing the file name for SPALN-assisted search
     
@@ -716,6 +743,11 @@ sub UseFastMap
     # which we can read in to check for full-protein splicings (or else to see if
     # there's at least agreement on some canonical exons...)
 
+
+    # DEBUGGING?
+    # How long do we spend checking for full maps?
+    StartTimer();
+    
     
     # First off, we'll see which sequences have full-protein mappings and
     # record the mapped chromosomes, so we can determine a canonical
@@ -761,6 +793,13 @@ sub UseFastMap
 	    $top_chr_mapcount = $FullMapsByChr{$chr};
 	}
     }
+
+
+    # DEBUGGING?
+    # How long did it take to decide if we liked any of the Mirage-toolkit-based
+    # mappings?
+    ReportTimer('Full-FastMap2-Map-Check');
+    
 
     # If we don't have any full maps, we'll end up punting to BLAT.
     # Otherwise, let's kick off the mapping parsery!
@@ -994,6 +1033,12 @@ sub UseFastMap
 	    
 	}
 
+	
+	# DEBUGGING?
+	# Let's time how long we spend on the spaln searching
+	StartTimer();
+
+	
 	# Do that nasty Spaln searchin'!
 	my ($spaln_hits_ref,$spaln_pcts_id_ref)
 	    = SpalnSearch(\@UnmappedSeqNames,\@UnmappedSeqs,\@ProtFnames,
@@ -1032,6 +1077,12 @@ sub UseFastMap
 	    
 	}
 
+
+	# DEBUGGING?
+	# How long did we spend on handling Spalny stuff?
+	ReportTimer('Trying-Spaln');
+	
+
     }
 
     # We can at least say that we got one sequence to fully map, so let's pop
@@ -1059,6 +1110,9 @@ sub UseFastMap
 	}
     }
     if (-e $nucl_fname) { RunSystemCommand("rm \"$nucl_fname\""); }
+
+    # DEBUGGING?
+    close($TimerOutf);
 
 }
 
@@ -2808,6 +2862,10 @@ sub GenBlatMaps
 	}
 	close($inf);
 
+	# DEBUGGING?
+	# Initialize timing for this gene (or maybe re-open... who knows?)
+	open($TimerOutf,'>>',$timing_dirname.$gene.'.q2.out');
+
 	# Now we can go sequence-by-sequence (again, treating partials specially)
 	# looking for a full mapping.
 	# We'll want to see partials before treating the full sequence, so we'll
@@ -2826,6 +2884,10 @@ sub GenBlatMaps
 		# Revert to the original sequence name
 		$seqname =~ s/\-partial$//;
 
+		# DEBUGGING?
+		# How expensive is 'filling?'
+		StartTimer();
+
 		# Has BLAT given us the power to fill in the gaps in this sequence?
 		my $seq = $Seqs{$seqname};
 		$FullMaps[$i] = AttemptBlatFill($seqname,$seq,\@BlatHits);
@@ -2838,12 +2900,21 @@ sub GenBlatMaps
 		#       the non-partial work... BUT THIS MIGHT BE SOMETHING TO CHANGE
 		$FullMaps[++$i] = 0 if ($FullMaps[$i]);
 		$num_full_maps++; # This won't increment otherwise
+
+		# DEBUGGING?
+		ReportTimer('Attempt-Blat-Fill');
 		
 	    } else {
 
+		# DEBUGGING?
+		StartTimer();
+		
 		# Dive right on in with Spaln!
 		my $seq = $Seqs{$seqname};
 		$FullMaps[$i] = BlatToSpalnSearch($seqname,$seq,\@BlatHits);
+
+		# DEBUGGING?
+		ReportTimer('Blat-To-Spaln');
 
 	    }
 
@@ -2851,6 +2922,9 @@ sub GenBlatMaps
 	    $num_full_maps++ if ($FullMaps[$i]);
 
 	}
+
+	# DEBUGGING?
+	close($TimerOutf);
 
 	# Regardless of whether or not we found anything, we're done with this gene!
 	$genes_completed++;
@@ -4424,6 +4498,29 @@ sub FinalFileCheck
 
 
 
+
+
+
+
+#########################################################################
+#
+#  Function Name: StartTimer
+#
+sub StartTimer
+{
+    $GlobalTimer = [Time::HiRes::gettimeofday()];
+}
+
+#########################################################################
+#
+#  Function Name: ReportTimer
+#
+sub ReportTimer
+{
+    my $segment = shift;
+    my $time_in_seconds = Time::HiRes::tv_interval($GlobalTimer);
+    print $TimerOutf "$segment: $time_in_seconds\n";
+}
 
 
 #
