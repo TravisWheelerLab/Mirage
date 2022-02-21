@@ -51,6 +51,7 @@ sub FinalFileCheck;
 my $GlobalTimer;
 my $TimerOutf;
 sub StartTimer;
+sub GetElapsedTime;
 sub ReportTimer;
 
 # Original Spaln parsing code
@@ -573,7 +574,7 @@ sub UseFastMap
 
 
     # We'll want to know how long FastMap2 and ExonWeaver take to complete
-    StartTimer() if ($gene_timing);
+    $GlobalTimer = StartTimer() if ($gene_timing);
     
 
     # Now we can go chromosome-by-chromosome and try to build the
@@ -730,7 +731,7 @@ sub UseFastMap
     
 
     # Record how much time we spent on FastMap2+ExonWeaver
-    ReportTimer('FastMap2+ExonWeaver') if ($gene_timing);
+    ReportTimer($GlobalTimer,'FastMap2+ExonWeaver') if ($gene_timing);
 
     
     # We'll save removing the nucleotide file until the end, in case we end up
@@ -743,7 +744,7 @@ sub UseFastMap
 
 
     # How long do we spend checking for full maps?
-    StartTimer() if ($gene_timing);
+    $GlobalTimer = StartTimer() if ($gene_timing);
     
     
     # First off, we'll see which sequences have full-protein mappings and
@@ -794,7 +795,7 @@ sub UseFastMap
 
     # How long did it take to decide if we liked any of the Mirage-toolkit-based
     # mappings?
-    ReportTimer('Full-FastMap2-Map-Check') if ($gene_timing);
+    ReportTimer($GlobalTimer,'Full-FastMap2-Map-Check') if ($gene_timing);
     
 
     # If we don't have any full maps, we'll end up punting to BLAT.
@@ -1031,7 +1032,7 @@ sub UseFastMap
 
 	
 	# Let's time how long we spend on the spaln searching
-	StartTimer() if ($gene_timing);
+	$GlobalTimer = StartTimer() if ($gene_timing);
 
 	
 	# Do that nasty Spaln searchin'!
@@ -1074,7 +1075,7 @@ sub UseFastMap
 
 
 	# How long did we spend on handling Spalny stuff?
-	ReportTimer('Trying-Spaln') if ($gene_timing);
+	ReportTimer($GlobalTimer,'Trying-Spaln') if ($gene_timing);
 	
 
     }
@@ -2877,7 +2878,7 @@ sub GenBlatMaps
 		$seqname =~ s/\-partial$//;
 
 		# How expensive is 'filling?'
-		StartTimer() if ($gene_timing);
+		$GlobalTimer = StartTimer() if ($gene_timing);
 
 		# Has BLAT given us the power to fill in the gaps in this sequence?
 		my $seq = $Seqs{$seqname};
@@ -2892,17 +2893,17 @@ sub GenBlatMaps
 		$FullMaps[++$i] = 0 if ($FullMaps[$i]);
 		$num_full_maps++; # This won't increment otherwise
 
-		ReportTimer('Attempt-Blat-Fill') if ($gene_timing);
+		ReportTimer($GlobalTimer,'Attempt-Blat-Fill') if ($gene_timing);
 		
 	    } else {
 
-		StartTimer() if ($gene_timing);
+		$GlobalTimer = StartTimer() if ($gene_timing);
 		
 		# Dive right on in with Spaln!
 		my $seq = $Seqs{$seqname};
 		$FullMaps[$i] = BlatToSpalnSearch($seqname,$seq,\@BlatHits);
 
-		ReportTimer('Blat-To-Spaln') if ($gene_timing);
+		ReportTimer($GlobalTimer,'Blat-To-Spaln') if ($gene_timing);
 
 	    }
 
@@ -3169,6 +3170,287 @@ sub AttemptBlatFill
 #  Function: BlatToSpalnSearch
 #
 sub BlatToSpalnSearch
+{
+    my $seqname = shift;
+    my $seq_str = shift;
+    my $blathits_ref = shift;
+
+    my @BlatHits = @{$blathits_ref};
+
+    
+    # We'll go ahead and kick things off by making a file with the protein sequence
+    my $prot_fname = $seq_dirname.$seqname.'.blat2spaln.prot.in';
+    my $ProtFile = OpenOutputFile($prot_fname);
+    print $ProtFile ">$seqname\n";
+    my @Seq = split(//,$seq_str);
+    for (my $i=0; $i<scalar(@Seq); $i++) {
+	print $ProtFile "$Seq[$i]";
+	print $ProtFile "\n" if (($i+1) % 60 == 0);
+    }
+    print $ProtFile "\n";
+    close($ProtFile);
+
+    
+    # Because our search function needs a list of protein sequences to search,
+    # we have to do this dumb stuff
+    my @ProtFnames;
+    push(@ProtFnames,$prot_fname);
+    my @SeqNames;
+    push(@SeqNames,$seqname);
+    my @SeqStrs;
+    push(@SeqStrs,$seq_str);
+
+
+    # Our first task will be coming up with the list of chromosomes that we hit
+    # to, and what ranges on those chromosomes are relevant, both in terms of
+    # nucleotides and amino acids.
+    my %ChrToNuclRanges;
+    my %ChrToAminoRanges;
+    foreach my $blat_hit (@BlatHits) {
+
+	$blat_hit =~ /^\-\s+(.*)$/;
+	my $blat_outline = $1;
+	my ($chr,$amino_start,$amino_end,$nucl_start,$nucl_end,$score)
+	    = ParseBlatLine($blat_outline);
+
+	# We'll want to know if we're in revcomp-land
+	# NOTE that we're going to force nucl_start < nucl_end, for ease of sorting 
+	if ($nucl_start > $nucl_end) {
+	    $chr = $chr.'[revcomp]';
+	    my $tmp = $nucl_start;
+	    $nucl_start = $nucl_end;
+	    $nucl_end = $tmp;
+	}
+
+	# Have we seen this chromosome before?
+	if ($ChrToNuclRanges{$chr}) {
+
+	    # Now for the fun stuff!
+	    # First off, we need to maintain a list of ranges on the chromosome
+	    # where we have hits.
+	    my @NuclRanges = split(/\|/,$ChrToNuclRanges{$chr});
+	    my $range_id = 0;
+	    my $range_placed = 0;
+	    my $range_str = '';
+	    while ($range_id < scalar(@NuclRanges)) {
+		
+		$NuclRanges[$range_id] =~ /^(\d+)\.\.(\d+)$/;
+		my $range_start = $1;
+		my $range_end = $2;
+
+		if ($nucl_start <= $range_start) {
+
+		    if ($nucl_end < $range_start) {
+			$range_str = $range_str.'|'.$nucl_start.'..'.$nucl_end.'|'.$range_start.'..'.$range_end;
+		    } else {
+			$range_end = Max($range_end,$nucl_end);
+			$range_str = $range_str.'|'.$nucl_start.'..'.$range_end;
+		    }
+		    $range_placed = 1;
+
+		} elsif ($nucl_start <= $range_end) {
+
+		    $range_end = Max($range_end,$nucl_end);
+		    $range_str = $range_str.'|'.$range_start.'..'.$range_end;
+		    $range_placed = 1;
+
+		} else {
+
+		    $range_str = $range_str.'|'.$range_start.'..'.$range_end;
+		    
+		}
+
+		$range_id++;
+		last if ($range_placed);
+		
+	    }
+
+	    while ($range_id < scalar(@NuclRanges)) {
+		$range_str = $range_str.'|'.$NuclRanges[$range_id];
+		$range_id++;
+	    }
+
+	    $range_str = $range_str.'|'.$nucl_start.'..'.$nucl_end if (!$range_placed);
+	    $range_str =~ s/^\|//;
+
+	    $ChrToNuclRanges{$chr} = $range_str;
+	    
+
+	    # Second, let's get the list of ranges on the amino acid sequence
+	    # that have been covered by this chromosome
+	    my @AminoRanges = split(/\|/,$ChrToAminoRanges{$chr});
+	    $range_id = 0;
+	    $range_placed = 0;
+	    $range_str = '';
+	    while ($range_id < scalar(@AminoRanges)) {
+		
+		$AminoRanges[$range_id] =~ /^(\d+)\.\.(\d+)$/;
+		my $range_start = $1;
+		my $range_end = $2;
+
+		if ($amino_start <= $range_start) {
+
+		    if ($amino_end < $range_start) {
+			$range_str = $range_str.'|'.$amino_start.'..'.$amino_end.'|'.$range_start.'..'.$range_end;
+		    } else {
+			$range_end = Max($range_end,$amino_end);
+			$range_str = $range_str.'|'.$amino_start.'..'.$range_end;
+		    }
+		    $range_placed = 1;
+
+		} elsif ($amino_start <= $range_end) {
+
+		    $range_end = Max($range_end,$amino_end);
+		    $range_str = $range_str.'|'.$range_start.'..'.$range_end;
+		    $range_placed = 1;
+
+		} else {
+
+		    $range_str = $range_str.'|'.$range_start.'..'.$range_end;
+		    
+		}
+
+		$range_id++;
+		last if ($range_placed);
+		
+	    }
+
+	    while ($range_id < scalar(@AminoRanges)) {
+		$range_str = $range_str.'|'.$AminoRanges[$range_id];
+		$range_id++;
+	    }
+
+	    $range_str = $range_str.'|'.$amino_start.'..'.$amino_end if (!$range_placed);
+	    $range_str =~ s/^\|//;
+
+	    $ChrToAminoRanges{$chr} = $range_str;
+	    
+	} else {
+	    
+	    $ChrToNuclRanges{$chr} = $nucl_start.'..'.$nucl_end;
+	    $ChrToAminoRanges{$chr} = $amino_start.'..'.$amino_end;
+
+	}
+	
+    }
+
+
+    # Awesome!
+    
+    # Next up, we'll cluster our nucleotide ranges so that if any ranges are
+    # closer than a preset distance (Blat-called intron) we'll merge them together.
+    #
+    # We'll also do a quick computation of proteoform coverage of each
+    # collection of Blat hits (by chromosome)
+    #
+    my $max_blat_intron = 500000; # 500Kb
+    my %ChrToProtCoverage;
+    my %CoverageToChrs;
+    foreach my $chr (keys %ChrToNuclRanges) {
+
+	my @NuclRanges = split(/\|/,$ChrToNuclRanges{$chr});
+
+	# Before we get to merging, we'll pull in a 15Kb window around
+	# our current list of 'exons'
+	my $true_chr = $chr;
+	$true_chr =~ s/\[revcomp\]//;
+	my $chr_len = $ChrSizes{$true_chr};
+	for (my $i=0; $i<scalar(@NuclRanges); $i++) {
+	    $NuclRanges[$i] =~ /^(\d+)\.\.(\d+)$/;
+	    my $start = Max(1,$1-15000);
+	    my $end = Min($chr_len,$2+15000);
+	    $NuclRanges[$i] = $start.'..'.$end;
+	}
+	
+	$NuclRanges[0] =~ /^(\d+)\.\.(\d+)$/;
+	my $range_str = $1.'..';
+	my $range_end = $2;
+
+	# Merging Blat's 'exons'
+	for (my $i=1; $i<scalar(@NuclRanges); $i++) {
+
+	    $NuclRanges[$i] =~ /^(\d+)\.\.(\d+)$/;
+	    my $next_start = $1;
+	    my $next_end = $2;
+
+	    if ($next_start - $range_end > $max_blat_intron) {
+		$range_str = $range_str.$range_end.'|'.$next_start.'..';
+	    }
+	    $range_end = $next_end;
+	    
+	}
+
+	$range_str = $range_str.$range_end;
+
+	# Before we record the final chromosome ranges, we'll correct ourselves
+	# vis-a-vis revcompiness
+	if ($chr =~ /\[revcomp\]/) {
+	    @NuclRanges = split(/\|/,$range_str);
+	    $range_str = '';
+	    foreach my $range (@NuclRanges) {
+		$range =~ /^(\d+)\.\.(\d+)$/;
+		$range_str = $2.'..'.$1.'|'.$range_str;
+	    }
+	    $range_str =~ s/\|$//;
+	}
+	
+	$ChrToNuclRanges{$chr} = $range_str;
+
+	# And now the amino coverage
+	my $covered_aminos = 0;
+	foreach my $amino_range (split(/\|/,$ChrToAminoRanges{$chr})) {
+	    $amino_range =~ /^(\d+)\.\.(\d+)$/;
+	    $covered_aminos += ($2-$1)+1;
+	}
+
+	my $coverage = int(1000.0 * $covered_aminos / length($seq_str)) / 10.0;
+	$ChrToProtCoverage{$chr} = $coverage;
+
+	if ($CoverageToChrs{$coverage}) {
+	    $CoverageToChrs{$coverage} = $CoverageToChrs{$coverage}.'|'.$chr;
+	} else {
+	    $CoverageToChrs{$coverage} = $chr;
+	}
+	
+    }
+
+    
+
+    ##########################
+    #                        #
+    #    S E A R C H    1    #
+    #                        #
+    ##########################
+
+
+    # We'll sort our chromosomes according to coverage, so as to prioritize
+    # our best candidates.
+    my @CoverageSortedChrs;
+    foreach my $coverage (sort {$b <=> $a} keys %CoverageToChrs) {
+	foreach my $chr (split(/\|/,$CoverageToChrs{$coverage})) {
+	    push(@CoverageSortedChrs,$chr);
+	}
+    }
+    
+    my @SpalnPctsID;
+    my @SpalnHitStrs;
+    foreach my $chr (@CoverageSortedChrs) {
+
+    }
+    
+    
+}
+
+
+
+
+
+
+############################################################
+#
+#  Function: DEPRECATED_BlatToSpalnSearch
+#
+sub DEPRECATED_BlatToSpalnSearch
 {
     my $seqname = shift;
     my $seq_str = shift;
@@ -4495,7 +4777,18 @@ sub FinalFileCheck
 #
 sub StartTimer
 {
-    $GlobalTimer = [Time::HiRes::gettimeofday()];
+    return [Time::HiRes::gettimeofday()];
+}
+
+#########################################################################
+#
+#  Function Name: GetElapsedTime
+#
+sub GetElapsedTime
+{
+    my $timer = shift;
+    my $time_in_seconds = Time::HiRes::tv_interval($timer);
+    return $time_in_seconds;
 }
 
 #########################################################################
@@ -4504,8 +4797,9 @@ sub StartTimer
 #
 sub ReportTimer
 {
+    my $timer = shift;
     my $segment = shift;
-    my $time_in_seconds = Time::HiRes::tv_interval($GlobalTimer);
+    my $time_in_seconds = GetElapsedTime($timer);
     print $TimerOutf "$segment: $time_in_seconds\n";
 }
 
