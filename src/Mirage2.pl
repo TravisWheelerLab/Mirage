@@ -117,6 +117,7 @@ my $forcecompile = $Options{forcecompile}; # Hidden
 my $cleanMSA     = $Options{cleanmsa};     # Hidden
 my $just_spaln   = $Options{justspaln};    # Hidden
 my $track_spaln  = $Options{trackspaln};   # Hidden
+my $gene_timing  = $Options{genetiming};   # Hidden
 
 
 # Verify that we have all the files we need on-hand
@@ -152,7 +153,7 @@ foreach my $species (@Species) {
     CreateDirectory($SpeciesDir{$species}.'seqs');
     CreateDirectory($SpeciesDir{$species}.'alignments');
     CreateDirectory($SpeciesDir{$species}.'mappings');
-    CreateDirectory($SpeciesDir{$species}.'timing'); # DEBUGGING?
+    CreateDirectory($SpeciesDir{$species}.'timing') if ($gene_timing);
 }
 
 # Divide the database according to species
@@ -453,6 +454,7 @@ sub ParseArgs
 	"cleanmsa=i",   # Hidden
 	"justspaln",    # Hidden
 	"trackspaln",   # Hidden
+	"genetiming",   # Hidden
 	)
 	|| die "\n  ERROR:  Failed to parse command line arguments\n\n";
 
@@ -1076,7 +1078,7 @@ sub GenerateSpeciesDBs
 	    RunSystemCommand("rmdir \"$SpeciesDir{$species}\/alignments\"");
 	    RunSystemCommand("rmdir \"$SpeciesDir{$species}\/mappings\"");
 	    RunSystemCommand("rmdir \"$SpeciesDir{$species}\/seqs\"");
-	    RunSystemCommand("rmdir \"$SpeciesDir{$species}\/timing\""); # DEBUGGING?
+	    RunSystemCommand("rmdir \"$SpeciesDir{$species}\/timing\"") if ($gene_timing);
 	    RunSystemCommand("rmdir \"$SpeciesDir{$species}\"");
 	    $SpeciesDir{$species} = 0;
 	    next;
