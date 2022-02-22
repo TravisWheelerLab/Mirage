@@ -38,7 +38,8 @@ sub RecordMaximalHits;
 sub RunBlatOnFileSet;
 sub GenBlatMaps;
 sub AttemptBlatFill;
-sub BlatToSpalnSearch;
+sub BlatToSpalnSearch2; # Alt.  B2S search -- less processing (for better, or worse?)
+sub BlatToSpalnSearch1; # Orig. B2S search -- groups amino acids on the front end 
 sub CullBlatHits;
 sub GetSpalnSfetchRanges;
 sub SpalnSearch;
@@ -116,6 +117,10 @@ my $gtfname = $ARGV[2];
 #       for splice site signal (-yy=8 -> -yy=4).
 my $spaln_opts = ' -Q3 -O1 -S1 -ya3 -yz4 -yy4 ';
 $spaln = $spaln.$spaln_opts;
+
+# I'm also going to make a global variable for the maximum number of Blat hits
+# that we allow before we cull to a set number per chromosome.
+my $MaxBlatHits = 5000;
 
 # How many CPUs do we intend to use?
 my $ThreadGuide = OpenInputFile($seq_dirname.'Thread-Guide');
@@ -2902,7 +2907,7 @@ sub GenBlatMaps
 		
 		# Dive right on in with Spaln!
 		my $seq = $Seqs{$seqname};
-		$FullMaps[$i] = BlatToSpalnSearch($seqname,$seq,\@BlatHits);
+		$FullMaps[$i] = BlatToSpalnSearch2($seqname,$seq,\@BlatHits);
 
 		ReportTimer($GlobalTimer,'Blat-To-Spaln') if ($gene_timing);
 
@@ -3168,9 +3173,9 @@ sub AttemptBlatFill
 
 ############################################################
 #
-#  Function: BlatToSpalnSearch
+#  Function: BlatToSpalnSearch2
 #
-sub BlatToSpalnSearch
+sub BlatToSpalnSearch2
 {
     my $seqname = shift;
     my $seq_str = shift;
@@ -3180,7 +3185,7 @@ sub BlatToSpalnSearch
     my $num_blat_hits = scalar(@BlatHits);
 
     # If we have too many Blat hits, cull to a maximum number per chromosome
-    if ($num_blat_hits > 2500) {
+    if ($num_blat_hits > $MaxBlatHits) {
 	$blathits_ref = CullBlatHits(\@BlatHits,500);
 	@BlatHits = @{$blathits_ref};
 	$num_blat_hits = scalar(@BlatHits);
@@ -3682,51 +3687,14 @@ sub BlatToSpalnSearch
 
 
 
-############################################################
-#
-#  Function: CullBlatHits
-#
-sub CullBlatHits
-{
-    my $blathits_ref = shift;
-    my $max_chr_hits = shift;
-
-    my @BlatHits;
-    my %HitsPerChr;
-    foreach my $hit (@{$blathits_ref}) {
-
-	$hit =~ /^\-\s+(.*)$/;
-	my ($chr,$amino_start,$amino_end,$nucl_start,$nucl_end,$score)
-	    = ParseBlatLine($1);
-
-	if ($nucl_start > $nucl_end) {
-	    $chr = $chr.'[revcomp]';
-	}
-
-	if (!$HitsPerChr{$chr}) {
-	    push(@BlatHits,$hit);
-	    $HitsPerChr{$chr}=1;
-	} elsif ($HitsPerChr{$chr} < $max_chr_hits) {
-	    push(@BlatHits,$hit);
-	    $HitsPerChr{$chr}++;	    
-	}
-	
-    }
-
-    return \@BlatHits;
-    
-}
-
-
-
 
 
 
 ############################################################
 #
-#  Function: DEPRECATED_BlatToSpalnSearch
+#  Function: BlatToSpalnSearch1
 #
-sub DEPRECATED_BlatToSpalnSearch
+sub BlatToSpalnSearch1
 {
     my $seqname = shift;
     my $seq_str = shift;
@@ -3734,6 +3702,12 @@ sub DEPRECATED_BlatToSpalnSearch
 
     my @BlatHits = @{$blathits_ref};
 
+    # If we have too many Blat hits, cull to a maximum number per chromosome
+    if (scalar(@BlatHits) > $MaxBlatHits) {
+	$blathits_ref = CullBlatHits(\@BlatHits,500);
+	@BlatHits = @{$blathits_ref};
+    }
+    
     # We'll go ahead and kick things off by making a file with the protein sequence
     my $prot_fname = $seq_dirname.$seqname.'.blat2spaln.prot.in';
     my $ProtFile = OpenOutputFile($prot_fname);
@@ -4160,6 +4134,45 @@ sub DEPRECATED_BlatToSpalnSearch
     
 }
 
+
+
+
+
+
+############################################################
+#
+#  Function: CullBlatHits
+#
+sub CullBlatHits
+{
+    my $blathits_ref = shift;
+    my $max_chr_hits = shift;
+
+    my @BlatHits;
+    my %HitsPerChr;
+    foreach my $hit (@{$blathits_ref}) {
+
+	$hit =~ /^\-\s+(.*)$/;
+	my ($chr,$amino_start,$amino_end,$nucl_start,$nucl_end,$score)
+	    = ParseBlatLine($1);
+
+	if ($nucl_start > $nucl_end) {
+	    $chr = $chr.'[revcomp]';
+	}
+
+	if (!$HitsPerChr{$chr}) {
+	    push(@BlatHits,$hit);
+	    $HitsPerChr{$chr}=1;
+	} elsif ($HitsPerChr{$chr} < $max_chr_hits) {
+	    push(@BlatHits,$hit);
+	    $HitsPerChr{$chr}++;	    
+	}
+	
+    }
+
+    return \@BlatHits;
+    
+}
 
 
 
