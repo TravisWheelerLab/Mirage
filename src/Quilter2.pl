@@ -39,6 +39,7 @@ sub RunBlatOnFileSet;
 sub GenBlatMaps;
 sub AttemptBlatFill;
 sub BlatToSpalnSearch;
+sub CullBlatHits;
 sub GetSpalnSfetchRanges;
 sub SpalnSearch;
 sub ClusterNuclRanges;
@@ -3177,6 +3178,13 @@ sub BlatToSpalnSearch
 
     my @BlatHits = @{$blathits_ref};
     my $num_blat_hits = scalar(@BlatHits);
+
+    # If we have too many Blat hits, cull to a maximum number per chromosome
+    if ($num_blat_hits > 2500) {
+	$blathits_ref = CullBlatHits(\@BlatHits,500);
+	@BlatHits = @{$blathits_ref};
+	$num_blat_hits = scalar(@BlatHits);
+    }
     
     # We'll go ahead and kick things off by making a file with the protein sequence
     my $prot_fname = $seq_dirname.$seqname.'.blat2spaln.prot.in';
@@ -3210,9 +3218,8 @@ sub BlatToSpalnSearch
     foreach my $blat_hit (@BlatHits) {
 
 	$blat_hit =~ /^\-\s+(.*)$/;
-	my $blat_outline = $1;
 	my ($chr,$amino_start,$amino_end,$nucl_start,$nucl_end,$score)
-	    = ParseBlatLine($blat_outline);
+	    = ParseBlatLine($1);
 
 	# We'll want to know if we're in revcomp-land
 	# NOTE that we're going to force nucl_start < nucl_end, for ease of sorting 
@@ -3549,9 +3556,9 @@ sub BlatToSpalnSearch
 
 	for (my $scan_id=$hit_id+1; $scan_id<$num_blat_hits; $scan_id++) {
 
-	    next if ($AllHitsByAminoStarts[$hit_id] eq '-');
+	    next if ($AllHitsByAminoStarts[$scan_id] eq '-');
 
-	    $AllHitsByAminoStarts[$hit_id] =~ /^(\d+)\.\.(\d+)\/(\S+)\:(\d+)\.\.(\d+)$/;
+	    $AllHitsByAminoStarts[$scan_id] =~ /^(\d+)\.\.(\d+)\/(\S+)\:(\d+)\.\.(\d+)$/;
 	    my $scan_amino_start = $1;
 	    my $scan_amino_end = $2;
 	    my $scan_chr = $3;
@@ -3669,6 +3676,44 @@ sub BlatToSpalnSearch
     # And that's all there is!
     return 0 if (!$hit_pct); # Breaking bad  :(
     return $hit_str;         # Breaking good :D
+    
+}
+
+
+
+
+############################################################
+#
+#  Function: CullBlatHits
+#
+sub CullBlatHits
+{
+    my $blathits_ref = shift;
+    my $max_chr_hits = shift;
+
+    my @BlatHits;
+    my %HitsPerChr;
+    foreach my $hit (@{$blathits_ref}) {
+
+	$hit =~ /^\-\s+(.*)$/;
+	my ($chr,$amino_start,$amino_end,$nucl_start,$nucl_end,$score)
+	    = ParseBlatLine($1);
+
+	if ($nucl_start > $nucl_end) {
+	    $chr = $chr.'[revcomp]';
+	}
+
+	if (!$HitsPerChr{$chr}) {
+	    push(@BlatHits,$hit);
+	    $HitsPerChr{$chr}=1;
+	} elsif ($HitsPerChr{$chr} < $max_chr_hits) {
+	    push(@BlatHits,$hit);
+	    $HitsPerChr{$chr}++;	    
+	}
+	
+    }
+
+    return \@BlatHits;
     
 }
 
