@@ -2907,7 +2907,7 @@ sub GenBlatMaps
 		
 		# Dive right on in with Spaln!
 		my $seq = $Seqs{$seqname};
-		$FullMaps[$i] = BlatToSpalnSearch2($seqname,$seq,\@BlatHits);
+		$FullMaps[$i] = BlatToSpalnSearch1($seqname,$seq,\@BlatHits);
 
 		ReportTimer($GlobalTimer,'Blat-To-Spaln') if ($gene_timing);
 
