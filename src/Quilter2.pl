@@ -3340,7 +3340,7 @@ sub BlatToSpalnSearch
 
 	# Before we move onto our next hit, we'll need to add this to our giant
 	# start-amino-ordered list of hits.
-	my $big_hit_str = $amino_start.'..'.$amino_end.'/'.$chr.':'.$nucl_start.'..'.$nucl_end;o
+	my $big_hit_str = $amino_start.'..'.$amino_end.'/'.$chr.':'.$nucl_start.'..'.$nucl_end;
 	my $placed = 0;
 	for (my $i=0; $i<scalar(@AllHitsByAminoStarts); $i++) {
 	    $AllHitsByAminoStarts[$i] =~ /^(\d+)\./;
@@ -3549,7 +3549,7 @@ sub BlatToSpalnSearch
 
 	for (my $scan_id=$hit_id+1; $scan_id<$num_blat_hits; $scan_id++) {
 
-	    next if ($AllHitsByAminoStaarts[$hit_id] eq '-');
+	    next if ($AllHitsByAminoStarts[$hit_id] eq '-');
 
 	    $AllHitsByAminoStarts[$hit_id] =~ /^(\d+)\.\.(\d+)\/(\S+)\:(\d+)\.\.(\d+)$/;
 	    my $scan_amino_start = $1;
@@ -3559,13 +3559,16 @@ sub BlatToSpalnSearch
 	    my $scan_nucl_end = $5;
 
 	    next if ($scan_chr ne $chr);
-	    last if ($scan_start > $amino_end+2); # A bit o' grace
+	    last if ($scan_amino_start > $amino_end+2); # A bit o' grace
 
 	    # This is a hit to the same chromosome / portion of the protein!
 	    # Is it biologically consistent with these being the same exon?
 
 	    my $join_exons = 0;
 	    if ($chr =~ /\-$/) {
+
+		# This is weird because we're sticking with forced 'start<end'
+		# even though we're doing exon positioning logic...
 
 		# Biological Consistency 1: Not a move backwards (revcomp-ily)
 		next if ($nucl_end < $scan_nucl_start);
@@ -3597,17 +3600,75 @@ sub BlatToSpalnSearch
 		$AllHitsByAminoStarts[$scan_id] = '-';
 	    }
 
+	    # NOTE: We allow this to continue even if we didn't join a hit to our
+	    #       current chromosome because there might be a pathological ordering
+	    #       of the hits in Blat output that would interpolate a slightly
+	    #       overlapping chromosomal-rearrangement-exon in between as-expected
+	    #       exons.
+
 	}
+
+	# Pull in a lil' extra
+	my $true_chr = $chr;
+	$true_chr =~ s/\S$//;
+	$nucl_start = Max(1,$nucl_start-15000);
+	$nucl_end = Min($ChrSizes{$true_chr},$nucl_end+15000);
+
+	$current_hit = $amino_start.'..'.$amino_end.'/'.$chr.':'.$nucl_start.'..'.$nucl_end;
+	push(@ReducedHitsByAminoStarts,$current_hit);
+
+	$hit_id++;
 	
     }
+
+    # Now that we have our set of reduced hits, we can compile the nucleotide runs
+    # that we want to search in.
+
+    my @SpalnStarts;
+    my @SpalnEnds;
+    my @SpalnChrs;
+    my $total_nucls = 0;
+    foreach my $reduced_hit (@ReducedHitsByAminoStarts) {
+
+	$reduced_hit =~ /\/(\S+)\:(\d+)\.\.(\d+)$/;
+	my $chr = $1;
+	my $nucl_start = $2;
+	my $nucl_end = $3;
+
+	if ($chr =~ /\-$/) {
+	    my $tmp = $nucl_start;
+	    $nucl_start = $nucl_end;
+	    $nucl_end = $tmp;
+	}
+
+	push(@SpalnStarts,$nucl_start);
+	push(@SpalnEnds,$nucl_end);
+	push(@SpalnChrs,$chr);
+
+	$total_nucls += abs($nucl_end-$nucl_start);
+	
+    }
+
+    my $hit_str;
+    my $hit_pct = 0;
+    if ($total_nucls < 2 * $max_spaln_nucls) {
+
+	my ($hit_strs_ref,$hit_pcts_ref)
+	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs,90.0);
+
+	# We're only going to hang onto the best Spaln output for this search
+	$hit_str = @{$hit_strs_ref}[0];
+	$hit_pct = @{$hit_pcts_ref}[0];
+
+    }
+
     
     # However this breaks, it breaks with you in the bin!
     RunSystemCommand("rm \"$prot_fname\"");
 
     # And that's all there is!
-    return 0 if (!$hit_pct_id);
-    return $hit_str;
-    
+    return 0 if (!$hit_pct); # Breaking bad  :(
+    return $hit_str;         # Breaking good :D
     
 }
 
