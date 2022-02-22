@@ -3186,7 +3186,7 @@ sub BlatToSpalnSearch2
 
     # If we have too many Blat hits, cull to a maximum number per chromosome
     if ($num_blat_hits > $MaxBlatHits) {
-	$blathits_ref = CullBlatHits(\@BlatHits,500);
+	$blathits_ref = CullBlatHits(\@BlatHits);
 	@BlatHits = @{$blathits_ref};
 	$num_blat_hits = scalar(@BlatHits);
     }
@@ -3704,7 +3704,7 @@ sub BlatToSpalnSearch1
 
     # If we have too many Blat hits, cull to a maximum number per chromosome
     if (scalar(@BlatHits) > $MaxBlatHits) {
-	$blathits_ref = CullBlatHits(\@BlatHits,500);
+	$blathits_ref = CullBlatHits(\@BlatHits);
 	@BlatHits = @{$blathits_ref};
     }
     
@@ -4146,7 +4146,8 @@ sub BlatToSpalnSearch1
 sub CullBlatHits
 {
     my $blathits_ref = shift;
-    my $max_chr_hits = shift;
+
+    my $max_chr_hits = 100;
 
     my @BlatHits;
     my %HitsPerChr;
