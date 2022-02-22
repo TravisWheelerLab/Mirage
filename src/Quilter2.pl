@@ -3176,7 +3176,7 @@ sub BlatToSpalnSearch
     my $blathits_ref = shift;
 
     my @BlatHits = @{$blathits_ref};
-
+    my $num_blat_hits = scalar(@BlatHits);
     
     # We'll go ahead and kick things off by making a file with the protein sequence
     my $prot_fname = $seq_dirname.$seqname.'.blat2spaln.prot.in';
@@ -3206,6 +3206,7 @@ sub BlatToSpalnSearch
     # nucleotides and amino acids.
     my %ChrToNuclRanges;
     my %ChrToAminoRanges;
+    my @AllHitsByAminoStarts;
     foreach my $blat_hit (@BlatHits) {
 
 	$blat_hit =~ /^\-\s+(.*)$/;
@@ -3216,16 +3217,19 @@ sub BlatToSpalnSearch
 	# We'll want to know if we're in revcomp-land
 	# NOTE that we're going to force nucl_start < nucl_end, for ease of sorting 
 	if ($nucl_start > $nucl_end) {
-	    $chr = $chr.'[revcomp]';
+	    $chr = $chr.'-';
 	    my $tmp = $nucl_start;
 	    $nucl_start = $nucl_end;
 	    $nucl_end = $tmp;
+	} else {
+	    $chr = $chr.'+';
 	}
 
 	# Have we seen this chromosome before?
 	if ($ChrToNuclRanges{$chr}) {
 
 	    # Now for the fun stuff!
+
 	    # First off, we need to maintain a list of ranges on the chromosome
 	    # where we have hits.
 	    my @NuclRanges = split(/\|/,$ChrToNuclRanges{$chr});
@@ -3324,14 +3328,32 @@ sub BlatToSpalnSearch
 	    $range_str =~ s/^\|//;
 
 	    $ChrToAminoRanges{$chr} = $range_str;
+
 	    
 	} else {
-	    
+
 	    $ChrToNuclRanges{$chr} = $nucl_start.'..'.$nucl_end;
 	    $ChrToAminoRanges{$chr} = $amino_start.'..'.$amino_end;
 
 	}
+
+
+	# Before we move onto our next hit, we'll need to add this to our giant
+	# start-amino-ordered list of hits.
+	my $big_hit_str = $amino_start.'..'.$amino_end.'/'.$chr.':'.$nucl_start.'..'.$nucl_end;o
+	my $placed = 0;
+	for (my $i=0; $i<scalar(@AllHitsByAminoStarts); $i++) {
+	    $AllHitsByAminoStarts[$i] =~ /^(\d+)\./;
+	    if ($amino_start <= $1) {
+		splice(@AllHitsByAminoStarts,$i,0,$big_hit_str);
+		$placed = 1;
+		last;
+	    }
+	}
 	
+	push(@AllHitsByAminoStarts,$big_hit_str) if (!$placed);
+	    
+
     }
 
 
@@ -3353,7 +3375,7 @@ sub BlatToSpalnSearch
 	# Before we get to merging, we'll pull in a 15Kb window around
 	# our current list of 'exons'
 	my $true_chr = $chr;
-	$true_chr =~ s/\[revcomp\]//;
+	$true_chr =~ s/\S$//;
 	my $chr_len = $ChrSizes{$true_chr};
 	for (my $i=0; $i<scalar(@NuclRanges); $i++) {
 	    $NuclRanges[$i] =~ /^(\d+)\.\.(\d+)$/;
@@ -3361,12 +3383,12 @@ sub BlatToSpalnSearch
 	    my $end = Min($chr_len,$2+15000);
 	    $NuclRanges[$i] = $start.'..'.$end;
 	}
+
 	
+	# Merging Blat's 'exons'
 	$NuclRanges[0] =~ /^(\d+)\.\.(\d+)$/;
 	my $range_str = $1.'..';
 	my $range_end = $2;
-
-	# Merging Blat's 'exons'
 	for (my $i=1; $i<scalar(@NuclRanges); $i++) {
 
 	    $NuclRanges[$i] =~ /^(\d+)\.\.(\d+)$/;
@@ -3384,7 +3406,7 @@ sub BlatToSpalnSearch
 
 	# Before we record the final chromosome ranges, we'll correct ourselves
 	# vis-a-vis revcompiness
-	if ($chr =~ /\[revcomp\]/) {
+	if ($chr =~ /\-$/) {
 	    @NuclRanges = split(/\|/,$range_str);
 	    $range_str = '';
 	    foreach my $range (@NuclRanges) {
@@ -3396,6 +3418,7 @@ sub BlatToSpalnSearch
 	
 	$ChrToNuclRanges{$chr} = $range_str;
 
+	
 	# And now the amino coverage
 	my $covered_aminos = 0;
 	foreach my $amino_range (split(/\|/,$ChrToAminoRanges{$chr})) {
@@ -3414,6 +3437,11 @@ sub BlatToSpalnSearch
 	
     }
 
+
+    # Before we get searching, we'll set the ground rule that we won't pull
+    # in more than 20Mb
+    my $max_spaln_nucls = 20000000;
+
     
 
     ##########################
@@ -3422,6 +3450,7 @@ sub BlatToSpalnSearch
     #                        #
     ##########################
 
+    
 
     # We'll sort our chromosomes according to coverage, so as to prioritize
     # our best candidates.
@@ -3431,12 +3460,153 @@ sub BlatToSpalnSearch
 	    push(@CoverageSortedChrs,$chr);
 	}
     }
+    my $search_1_min_coverage = 70.0;
+
     
-    my @SpalnPctsID;
     my @SpalnHitStrs;
+    my @SpalnPctsID;
+    my $num_spaln_hits = 0;
+    my $best_spaln_hit = 0;
     foreach my $chr (@CoverageSortedChrs) {
 
+	last if ($ChrToProtCoverage{$chr} < $search_1_min_coverage);
+
+	my @SpalnStarts;
+	my @SpalnEnds;
+	my @SpalnChrs;
+	my $total_nucls = 0;
+	foreach my $range (split(/\|/,$ChrToNuclRanges{$chr})) {
+
+	    push(@SpalnChrs,$chr);
+
+	    $range =~ /^(\d+)\.\.(\d+)$/;
+	    push(@SpalnStarts,$1);
+	    push(@SpalnEnds,$2);
+	    $total_nucls += abs($2-$1);
+
+	}
+
+	next if ($total_nucls > $max_spaln_nucls);
+
+	my ($hit_strs_ref,$hit_pcts_ref)
+	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs,90.0);
+
+	# We're only going to hang onto the best Spaln output for this search
+	my $hit_str = @{$hit_strs_ref}[0];
+	my $hit_pct = @{$hit_pcts_ref}[0];
+	push(@SpalnHitStrs,$hit_str);
+	push(@SpalnPctsID,$hit_str);
+
+	if ($SpalnPctsID[$best_spaln_hit] < $hit_pct) {
+	    $best_spaln_hit = $num_spaln_hits;
+	}
+
+	$num_spaln_hits++;
+	
     }
+
+    # Did we get lucky-ish with our first search?
+    if ($num_spaln_hits) {
+	RunSystemCommand("rm \"$prot_fname\"");
+	return $SpalnHitStrs[$best_spaln_hit];
+    }
+    
+
+    
+
+    ##########################
+    #                        #
+    #    S E A R C H    2    #
+    #                        #
+    ##########################
+
+
+
+    # In the event that we didn't have a good Spaln hit that met our standards
+    # for biological consistency (i.e., non-chimeric encoding), we'll perform
+    # a search that allows for chimeric events.
+
+    # The main trick is coming up with the right chimeric nucleotide sequence.
+    # To do this, we'll run through our big list of hits (organized by amino
+    # starts), joining any instances where overlapping aminos also overlap on the
+    # genome
+    my @ReducedHitsByAminoStarts;
+    my $hit_id = 0;
+    while ($hit_id < $num_blat_hits) {
+
+	my $current_hit = $AllHitsByAminoStarts[$hit_id];
+	if ($current_hit eq '-') {
+	    $hit_id++;
+	    next;
+	}
+
+	$current_hit =~ /^(\d+)\.\.(\d+)\/(\S+)\:(\d+)\.\.(\d+)$/;
+	my $amino_start = $1;
+	my $amino_end = $2;
+	my $chr = $3;
+	my $nucl_start = $4;
+	my $nucl_end = $5;
+
+	for (my $scan_id=$hit_id+1; $scan_id<$num_blat_hits; $scan_id++) {
+
+	    next if ($AllHitsByAminoStaarts[$hit_id] eq '-');
+
+	    $AllHitsByAminoStarts[$hit_id] =~ /^(\d+)\.\.(\d+)\/(\S+)\:(\d+)\.\.(\d+)$/;
+	    my $scan_amino_start = $1;
+	    my $scan_amino_end = $2;
+	    my $scan_chr = $3;
+	    my $scan_nucl_start = $4;
+	    my $scan_nucl_end = $5;
+
+	    next if ($scan_chr ne $chr);
+	    last if ($scan_start > $amino_end+2); # A bit o' grace
+
+	    # This is a hit to the same chromosome / portion of the protein!
+	    # Is it biologically consistent with these being the same exon?
+
+	    my $join_exons = 0;
+	    if ($chr =~ /\-$/) {
+
+		# Biological Consistency 1: Not a move backwards (revcomp-ily)
+		next if ($nucl_end < $scan_nucl_start);
+
+		# Biological Consistency 2: Reasonable distance
+		next if ($nucl_start - $scan_nucl_end > 1000);
+
+		# Sure, you can be exon buddies!
+		$join_exons = 1;
+		
+	    } else {
+
+		# Biological Consistency 1: Not a move backwards
+		next if ($nucl_start > $scan_nucl_end);
+
+		# Biological Consistency 2: Reasonable distance
+		next if ($scan_nucl_start - $nucl_end > 1000);
+
+		# Pair 'em!
+		$join_exons = 1;
+
+	    }
+
+	    if ($join_exons) {
+		# Good enough for government splicing!
+		$amino_end = Max($amino_end,$scan_amino_end);
+		$nucl_start = Min($nucl_start,$scan_nucl_start);
+		$nucl_end = Max($nucl_end,$scan_nucl_end);
+		$AllHitsByAminoStarts[$scan_id] = '-';
+	    }
+
+	}
+	
+    }
+    
+    # However this breaks, it breaks with you in the bin!
+    RunSystemCommand("rm \"$prot_fname\"");
+
+    # And that's all there is!
+    return 0 if (!$hit_pct_id);
+    return $hit_str;
     
     
 }
