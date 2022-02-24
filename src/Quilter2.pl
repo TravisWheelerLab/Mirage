@@ -3924,23 +3924,43 @@ sub BlatToSpalnSearch1
     }
 
 
+    # We'll sort the chromosomes according to coverage (lazy implementation)
+    my %CoverageToChr;
+    foreach my $chr (keys %CoverageByChr) {
+	my $coverage = $CoverageByChr{$chr};
+	if ($CoverageToChr{$coverage}) {
+	    $CoverageToChr{$coverage} = $CoverageToChr{$coverage}.'|'.$chr;
+	} else {
+	    $CoverageToChr{$coverage} = $chr;
+	}
+    }
+    
+    my @ChrsByCoverage;
+    foreach my $coverage (sort {$b <=> $a} keys %CoverageByChr) {
+	foreach my $chr (split(/\|/,$CoverageByChr{$coverage})) {
+	    push(@ChrsByCoverage,$chr);
+	}
+    }
+
     
 
+    
     ##########################
     #                        #
     #    S E A R C H    1    #
     #                        #
     ##########################
+
     
     
     # Swell! Now we'll go through each of our chromosomes, and any that have more
     # than 75% coverage will be Spalned
     my $top_pct_id  = 0;
     my $top_hit_str = 0;
-    foreach my $chr (keys %CoverageByChr) {
+    foreach my $chr (@ChrsByCoverage) {
 
 	# Do you have solid coverage?
-	next if ($CoverageByChr{$chr} < 3 * $seq_len / 4);
+	next if (4 * $CoverageByChr{$chr} < 3 * $seq_len);
 
 	# Woot! So, if your coverage is so great, where's it coming from?
 	my @RangeStarts;
@@ -3988,7 +4008,13 @@ sub BlatToSpalnSearch1
 	if ($hit_pct_id > $top_pct_id) {
 	    $top_pct_id  = $hit_pct_id;
 	    $top_hit_str = $hit_str;
+	} elsif ($top_pct_id) {
+	    # If there's already been a good hit and a darkhorse chromosome hasn't
+	    # overtaken it, let's just go with our first choice
+	    RunSystemCommand("rm \"$prot_fname\"");
+	    return $top_hit_str;
 	}
+	
     }
 
     # Any chance we got a hit on easy mode?
@@ -3998,19 +4024,23 @@ sub BlatToSpalnSearch1
     }
 
 
+
+    
     ##########################
     #                        #
     #    S E A R C H    2    #
     #                        #
     ##########################
+
+
     
     # Alright, we've tried the 'standard' approach to splicing -- now let's see if
     # there's anything out-of-order, but just on a chromosomal level...
-    foreach my $chr (keys %CoverageByChr) {
+    foreach my $chr (@ChrsByCoverage) {
 
 	# Do you have solid coverage?
-	next if ($CoverageByChr{$chr} < 3 * $seq_len / 4);
-
+	next if (4 * $CoverageByChr{$chr} < 3 * $seq_len);
+	
 	# Woot! So, if your coverage is so great, where's it coming from?
 	my @RangeStarts;
 	my @RangeEnds;
@@ -4057,6 +4087,11 @@ sub BlatToSpalnSearch1
 	if ($hit_pct_id > $top_pct_id) {
 	    $top_pct_id  = $hit_pct_id;
 	    $top_hit_str = $hit_str;
+	} elsif ($top_pct_id) {
+	    # Once again, if we had a winner who wasn't bested, then let's trust
+	    # our collective guts.
+	    RunSystemCommand("rm \"$prot_fname\"");
+	    return $top_hit_str;
 	}
 
     }
@@ -4069,11 +4104,15 @@ sub BlatToSpalnSearch1
     }
 
 
+
+    
     ##########################
     #                        #
     #    S E A R C H    3    #
     #                        #
     ##########################
+
+
     
     # Hmmmmm.....
     # Alright, let's go wild 'n' crazy and see if we can jumble our chromosomes
