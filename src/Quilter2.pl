@@ -3936,8 +3936,8 @@ sub BlatToSpalnSearch1
     }
     
     my @ChrsByCoverage;
-    foreach my $coverage (sort {$b <=> $a} keys %CoverageByChr) {
-	foreach my $chr (split(/\|/,$CoverageByChr{$coverage})) {
+    foreach my $coverage (sort {$b <=> $a} keys %CoverageToChr) {
+	foreach my $chr (split(/\|/,$CoverageToChr{$coverage})) {
 	    push(@ChrsByCoverage,$chr);
 	}
     }
