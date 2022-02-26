@@ -3934,16 +3934,24 @@ sub BlatToSpalnSearch1
 	    $CoverageToChr{$coverage} = $chr;
 	}
     }
-    
+
+    # I'm going to limit our searching to the top 5 chromosomes,
+    # because the likelihood of our best hit coming from a non-top-5
+    # chromosome seems vanishingly low.
+    # Of course, if there's a tie for coverage that pushes us past
+    # 5, we'll include more (rather than arbitrarily enforcing the
+    # cutoff that would be imposed by perl's "foreach").
+    my $max_search_chrs = 5;
     my @ChrsByCoverage;
     foreach my $coverage (sort {$b <=> $a} keys %CoverageToChr) {
 	foreach my $chr (split(/\|/,$CoverageToChr{$coverage})) {
 	    push(@ChrsByCoverage,$chr);
 	}
+	last if (scalar(@ChrsByCoverage) >= $max_search_chrs);
     }
 
-    
 
+    
     
     ##########################
     #                        #
