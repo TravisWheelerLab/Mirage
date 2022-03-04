@@ -239,7 +239,7 @@ sub ParseArgs
 	"help",
 	"v",
 	"time",
-	"genetiming", # Hidden (detailed timing output)
+	"gene-timing", # Hidden (detailed timing output)
 	) || die "\n  ERROR:  Failed to parse Quilter2 commandline arguments\n\n";
 
     if ($Options{help}) { PrintUsage(1); }

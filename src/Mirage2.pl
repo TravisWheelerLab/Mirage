@@ -193,6 +193,9 @@ for (my $i=0; $i<$num_species-1; $i++) {
     # Start assembling that command!
     my $QuilterCmd = $quilter;
 
+    # OPT: Collect detailed gene timing data
+    $QuilterCmd = $QuilterCmd.' --gene-timing' if ($gene_timing);
+	
     # KEY 1: Protein database (implicit in species directory, under 'seqs/')
     $QuilterCmd = $QuilterCmd.' '.$species_dirname;
 
@@ -201,7 +204,7 @@ for (my $i=0; $i<$num_species-1; $i++) {
 
     # KEY 3: GTF index (special case: - for "Just use BLAT")
     $QuilterCmd = $QuilterCmd.' '.$GTFs[$i];
-	
+
     # Make that daaaaaang call.
     RunSystemCommand($QuilterCmd);
 
