@@ -194,7 +194,7 @@ for (my $i=0; $i<$num_species-1; $i++) {
     my $QuilterCmd = $quilter;
 
     # OPT: Collect detailed gene timing data
-    $QuilterCmd = $QuilterCmd.' --gene-timing' if ($gene_timing);
+    $QuilterCmd = $QuilterCmd.' --genetiming' if ($gene_timing);
 	
     # KEY 1: Protein database (implicit in species directory, under 'seqs/')
     $QuilterCmd = $QuilterCmd.' '.$species_dirname;
