@@ -113,12 +113,12 @@ my $verbose         = $Options{verbose};
 my $num_cpus        = $Options{cpus};
 my $timed           = $Options{time};
 my $stack_arfs      = $Options{stackarfs};
-my $forcecompile    = $Options{forcecompile}; # Hidden
-my $cleanMSA        = $Options{cleanmsa};     # Hidden
-my $just_spaln      = $Options{justspaln};    # Hidden
-my $track_spaln     = $Options{trackspaln};   # Hidden
-my $gene_timing     = $Options{genetiming};   # Hidden
-my $max_spaln_nucls = $Options{maxspalnnucls} # Hidden
+my $forcecompile    = $Options{forcecompile};  # Hidden
+my $cleanMSA        = $Options{cleanmsa};      # Hidden
+my $just_spaln      = $Options{justspaln};     # Hidden
+my $track_spaln     = $Options{trackspaln};    # Hidden
+my $gene_timing     = $Options{genetiming};    # Hidden
+my $max_spaln_nucls = $Options{maxspalnnucls}; # Hidden
 
 
 # Verify that we have all the files we need on-hand
