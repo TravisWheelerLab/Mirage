@@ -118,6 +118,9 @@ my $gtfname = $ARGV[2];
 my $spaln_opts = ' -Q3 -O1 -S1 -ya3 -yz4 -yy4 ';
 $spaln = $spaln.$spaln_opts;
 
+# Capping the length of nucleotide sequence that we feed into spaln
+my $max_spaln_nucls = $Opts{maxspalnnucls};
+
 # I'm also going to make a global variable for the maximum number of Blat hits
 # that we allow before we cull to a set number per chromosome.
 my $MaxBlatHits = 5000;
@@ -233,17 +236,21 @@ sub PrintUsage
 #
 sub ParseArgs
 {
-    my %Options;
+    my %Options = (
+	maxspalnnucls => 10000000, # 10 Mb as our standard cutoff
+	);
+    
     &GetOptions(
 	\%Options,
 	"help",
 	"v",
 	"time",
 	"genetiming", # Hidden (detailed timing output)
+	"maxspalnnucls=i"
 	) || die "\n  ERROR:  Failed to parse Quilter2 commandline arguments\n\n";
 
     if ($Options{help}) { PrintUsage(1); }
-    
+
     return \%Options;
 }
 
@@ -3995,8 +4002,8 @@ sub BlatToSpalnSearch1
 	my @SpalnStarts = @{$starts_ref};
 	my @SpalnEnds   = @{$ends_ref};
 	
-	# We won't do a search that would require pulling in >15Mb
-	next if ($sum_len > 15000000);
+	# Skip this search if we've exceeded our sequence length cap
+	next if ($sum_len > $max_spaln_nucls);
 
 	# Because we're using a function that plays friendly with a multiple-chromosome
 	# version of this index building, we'll need to note the chromosomes for each
@@ -4077,8 +4084,8 @@ sub BlatToSpalnSearch1
 	my @SpalnStarts = @{$starts_ref};
 	my @SpalnEnds   = @{$ends_ref};
 
-	# We still won't do a search that would require pulling in >15Mb
-	next if ($sum_len > 15000000);
+	# Skip this search if we've exceeded our sequence length cap
+	next if ($sum_len > $max_spaln_nucls);
 
 	my @SpalnChrs;
 	for (my $i=0; $i<$num_ranges; $i++) {

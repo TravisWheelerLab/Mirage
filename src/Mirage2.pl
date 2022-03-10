@@ -106,18 +106,19 @@ my %Options = %{$optsRef};
 
 
 # Change options to more intelligible variables
-my $ProteinDB    = ConfirmFile($ARGV[0]);
-my $SpeciesGuide = ConfirmFile($ARGV[1]);
-my $ResultsDir   = $Options{outdirname};
-my $verbose      = $Options{verbose};
-my $num_cpus     = $Options{cpus};
-my $timed        = $Options{time};
-my $stack_arfs   = $Options{stackarfs};
-my $forcecompile = $Options{forcecompile}; # Hidden
-my $cleanMSA     = $Options{cleanmsa};     # Hidden
-my $just_spaln   = $Options{justspaln};    # Hidden
-my $track_spaln  = $Options{trackspaln};   # Hidden
-my $gene_timing  = $Options{genetiming};   # Hidden
+my $ProteinDB       = ConfirmFile($ARGV[0]);
+my $SpeciesGuide    = ConfirmFile($ARGV[1]);
+my $ResultsDir      = $Options{outdirname};
+my $verbose         = $Options{verbose};
+my $num_cpus        = $Options{cpus};
+my $timed           = $Options{time};
+my $stack_arfs      = $Options{stackarfs};
+my $forcecompile    = $Options{forcecompile}; # Hidden
+my $cleanMSA        = $Options{cleanmsa};     # Hidden
+my $just_spaln      = $Options{justspaln};    # Hidden
+my $track_spaln     = $Options{trackspaln};   # Hidden
+my $gene_timing     = $Options{genetiming};   # Hidden
+my $max_spaln_nucls = $Options{maxspalnnucls} # Hidden
 
 
 # Verify that we have all the files we need on-hand
@@ -195,6 +196,10 @@ for (my $i=0; $i<$num_species-1; $i++) {
 
     # OPT: Collect detailed gene timing data
     $QuilterCmd = $QuilterCmd.' --genetiming' if ($gene_timing);
+
+    # OPT: Manually set cap on nucleotide sequence length for spaln search
+    $QuilterCmd = $QuilterCmd.' -maxspalnnucls='.$max_spaln_nucls
+	if ($max_spaln_nucls);
 	
     # KEY 1: Protein database (implicit in species directory, under 'seqs/')
     $QuilterCmd = $QuilterCmd.' '.$species_dirname;
@@ -441,6 +446,7 @@ sub ParseArgs
 	cpus => $defaultcpus,
 	outdirname => 'Mirage-Results',
 	cleanmsa => 1,
+	maxspalnnucls => 0,
 	);
 
     &GetOptions( 
@@ -453,11 +459,12 @@ sub ParseArgs
 	"cpus=i",
 	"time",
 	"stackarfs",
-	"forcecompile", # Hidden
-	"cleanmsa=i",   # Hidden
-	"justspaln",    # Hidden
-	"trackspaln",   # Hidden
-	"genetiming",   # Hidden
+	"forcecompile",    # Hidden
+	"cleanmsa=i",      # Hidden
+	"justspaln",       # Hidden
+	"trackspaln",      # Hidden
+	"genetiming",      # Hidden
+	"maxspalnnucls=i", # Hidden
 	)
 	|| die "\n  ERROR:  Failed to parse command line arguments\n\n";
 
