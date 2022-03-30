@@ -1277,8 +1277,8 @@ sub GenSpliceGraph
     my $num_hits = scalar(@Hits);
 
     # If the graph is obnoxiously large we'll just skip this one...
-    # Defining obnoxiously large as 4x4 hits per position, for no reason
-    return (0,0) if ($seq_len * 16 < $num_hits);
+    # Defining obnoxiously large as more than 10,000 hits
+    return (0,0) if ($num_hits > 10000);
 
     # Now we can prep a lil' file for ExonWeaver
     my $weaver_in = $gene_fname;
