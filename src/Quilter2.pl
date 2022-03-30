@@ -678,27 +678,12 @@ sub UseFastMap
 	}
 
 	# Extract the appropriate genomic region for our search
-	RunSystemCommand($sfetch." -range $search_start\.\.$search_end \"$genome\" \"$chr\" > \"$nucl_fname\"");
+	my $sfetch_cmd = $sfetch." -range $search_start\.\.$search_end \"$genome\" \"$chr\" > \"$nucl_fname\"";
+	RunSystemCommand($sfetch_cmd);
 
 	# It's... FASTMAP2 TIME!
-	my $mapcmd = $fastmap2." \"$gene_fname\" $num_seqs \"$nucl_fname\" $exon_list_str";
-
-	
-	################################################################
-	#
-	# It's... JUST GATHERING TIMING DATA!
-	#
-	#$mapcmd = $mapcmd.' 1>/dev/null';
-	#my $starttime = [Time::HiRes::gettimeofday()];
-	#RunSystemCommand($mapcmd);
-	#my $runtime = Time::HiRes::tv_interval($starttime);
-	#return $runtime;
-	#
-	# It's... A TEST TO SEE IF BLOCK-Y FASTMAP IS TOO SLOW!
-	#
-	################################################################
-
-	my $hitref = ParseFastMapOutput($mapcmd,$num_seqs,$ChrSizes{$chr});
+	my $map_cmd = $fastmap2." \"$gene_fname\" $num_seqs \"$nucl_fname\" $exon_list_str";
+	my $hitref  = ParseFastMapOutput($map_cmd,$num_seqs,$ChrSizes{$chr});
 
 	# We now have an array with the hits for each sequence stored in
 	# an &-separated list.  These hits are in |-separated format,
@@ -1782,12 +1767,12 @@ sub AttemptSpalnFill
 
 	# OOOOhhOhoHohoh! Looks like we might have a coding region!
 	# Time to see if FastMap can help us out with the specifics...
-	my $mapcmd = $fastmap2." \"$temp_fname\" 1 \"$nucl_fname\"";
+	my $map_cmd = $fastmap2." \"$temp_fname\" 1 \"$nucl_fname\"";
 	foreach my $coord_pair (split(/\,/,$coordlist_str)) {
 	    $coord_pair =~ /^(\d+)\.\.(\d+)$/;
-	    $mapcmd = $mapcmd.' '.$1.' '.$2;
+	    $map_cmd = $map_cmd.' '.$1.' '.$2;
 	}
-	my $hitref  = ParseFastMapOutput($mapcmd,1);
+	my $hitref  = ParseFastMapOutput($map_cmd,1);
 	my @SeqHits = @{$hitref};
 	next if (!$SeqHits[0]);
 
