@@ -1276,9 +1276,46 @@ sub GenSpliceGraph
     my @Hits     = split(/\&/,$hitstr);
     my $num_hits = scalar(@Hits);
 
-    # If the graph is obnoxiously large we'll just skip this one...
-    # Defining obnoxiously large as more than 10,000 hits
-    return (0,0) if ($num_hits > 10000);
+    # If we have more than 2500 hits we'll pare down to that number
+    my $max_xw_hits = 2500;
+    if ($num_hits > $max_xw_hits) {
+
+	my %ScoreDensityToHitID;
+	for (my $hit_id = 1; $hit_id <= $num_hits; $hit_id++) {
+
+	    my @HitData = split(/\|/,$Hits[$hit_id-1]);
+
+	    my $hit_score = $HitData[6] + 0.0;
+	    my $hit_length = $HitData[1] - $HitData[0] + 1.0;
+	    my $score_dens = $hit_score / $hit_length;
+
+	    if ($ScoreDensityToHitID{$score_dens}) {		
+		$ScoreDensityToHitID{$score_dens} = $ScoreDensityToHitID{$score_dens}.'|'.$hit_id;
+	    } else {
+		$ScoreDensityToHitID{$score_dens} = $hit_id;
+	    }
+	    
+	}
+	my @SortedScoreDensities = sort {$b <=> $a} keys %ScoreDensityToHitID;
+
+	my @ReducedHitIDs;
+	my $score_dens_id = 0;
+	while (scalar(@ReducedHitIDs) < $max_xw_hits) {
+	    foreach my $hit_id (split(/\|/,$ScoreDensityToHitID{$SortedScoreDensities[$score_dens_id++]})) {
+		$hit_id--;
+		push(@ReducedHitIDs,$hit_id);
+	    }	    
+	}
+
+	my @ReducedHits;
+	foreach my $hit_id (sort @ReducedHitIDs) {
+	    push(@ReducedHits,$Hits[$hit_id]);
+	}
+
+	@Hits = @ReducedHits;
+	$num_hits = scalar(@Hits);
+	
+    }
 
     # Now we can prep a lil' file for ExonWeaver
     my $weaver_in = $gene_fname;
