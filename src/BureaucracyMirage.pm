@@ -4,6 +4,7 @@
 use warnings;
 use strict;
 use POSIX;
+use Time::HiRes;
 
 # Very general functions
 sub Max;
@@ -18,6 +19,9 @@ sub OpenOutputFile;
 sub ConfirmDirectory;
 sub OpenDirectory;
 sub CreateDirectory;
+sub StartTimer;
+sub GetElapsedTime;
+sub SecondsToSMHD;
 
 # More bio-specific functions
 sub FindDependencies;
@@ -251,6 +255,55 @@ sub CreateDirectory
 
     if (system("mkdir \"$dirname\"")) { die "\n  ERROR:  Failed to create directory '$dirname'\n\n"; }
     return ConfirmDirectory($dirname);
+}
+
+
+###################################################################
+#
+#  FUNCTION:  StartTimer
+#
+sub StartTimer
+{
+    return [Time::HiRes::gettimeofday()];
+}
+
+
+###################################################################
+#
+#  FUNCTION:  GetElapsedTime
+#
+sub GetElapsedTime
+{
+    my $timer = shift;
+    my $time_in_seconds = Time::HiRes::tv_interval($timer);
+    return $time_in_seconds;
+}
+
+
+###################################################################
+#
+#  FUNCTION:  SecondsToSMHD
+#
+sub SecondsToSMHD
+{
+    my $total_seconds = shift;
+
+    my $seconds = int($total_seconds * 100) / 100.0;
+
+    my $minutes = int($seconds / 60);
+    return (1,$seconds,0,0,0) if (!$minutes);
+    $seconds -= $minutes * 60;
+
+    my $hours = int($minutes / 60);
+    return (2,$seconds,$minutes,0,0) if (!$hours);
+    $minutes -= $hours * 60;
+
+    my $days = int($hours / 24);
+    return (3,$seconds,$minutes,$hours,0) if (!$days);
+    $hours -= $days * 24;
+
+    return (4,$seconds,$minutes,$hours,$days);
+    
 }
 
 

@@ -50,11 +50,9 @@ sub ParseSpalnOutput;
 sub FinalFileCheck;
 
 # Timing stuff (for debugging)
-my $GlobalTimer;
-my $TimerOutf;
-sub StartTimer;
-sub GetElapsedTime;
-sub ReportTimer;
+my $GenewiseTimer;
+my $GenewiseTimerOutf;
+sub ReportGenewiseTimer;
 
 # Original Spaln parsing code
 sub OPSO_ParseSpalnOutput;
@@ -98,6 +96,10 @@ my %Opts     = %{$opts_ref};
 # As you'd expect, we want to know what there is to know about our proteins
 my $species_dirname = ConfirmDirectory($ARGV[0]);
 my $seq_dirname = ConfirmDirectory($species_dirname.'seqs');
+
+# Are we doing general timing analysis?
+my $global_timing = $Opts{time};
+my $TotalRuntime = StartTimer();
 
 # Are we doing serious timing analysis?
 my $gene_timing = $Opts{genetiming};
@@ -521,7 +523,7 @@ sub UseFastMap
     my $gene = $1;
 
     # Initialize timing file for this gene, if appropriate
-    open($TimerOutf,'>>',$timing_dirname.$gene.'.q2.out') if ($gene_timing);
+    open($GenewiseTimerOutf,'>>',$timing_dirname.$gene.'.q2.out') if ($gene_timing);
     
     # Before we get into the mapping business, let's load in the protein sequences,
     # since they might have something to say about how we build our graph...
@@ -554,7 +556,7 @@ sub UseFastMap
 	    print $BlatFile "\n" if (scalar(@Seq) % 60);
 	    print $BlatFile "\n";
 	}
-	close($TimerOutf) if ($gene_timing); 
+	close($GenewiseTimerOutf) if ($gene_timing); 
 	return;
     }
 
@@ -587,7 +589,7 @@ sub UseFastMap
 
 
     # We'll want to know how long FastMap2 and ExonWeaver take to complete
-    $GlobalTimer = StartTimer() if ($gene_timing);
+    $GenewiseTimer = StartTimer() if ($gene_timing);
     
 
     # Now we can go chromosome-by-chromosome and try to build the
@@ -729,7 +731,7 @@ sub UseFastMap
     
 
     # Record how much time we spent on FastMap2+ExonWeaver
-    ReportTimer($GlobalTimer,'FastMap2+ExonWeaver') if ($gene_timing);
+    ReportGenewiseTimer($GenewiseTimer,'FastMap2+ExonWeaver') if ($gene_timing);
 
     
     # We'll save removing the nucleotide file until the end, in case we end up
@@ -742,7 +744,7 @@ sub UseFastMap
 
 
     # How long do we spend checking for full maps?
-    $GlobalTimer = StartTimer() if ($gene_timing);
+    $GenewiseTimer = StartTimer() if ($gene_timing);
     
     
     # First off, we'll see which sequences have full-protein mappings and
@@ -793,7 +795,7 @@ sub UseFastMap
 
     # How long did it take to decide if we liked any of the Mirage-toolkit-based
     # mappings?
-    ReportTimer($GlobalTimer,'Full-FastMap2-Map-Check') if ($gene_timing);
+    ReportGenewiseTimer($GenewiseTimer,'Full-FastMap2-Map-Check') if ($gene_timing);
     
 
     # If we don't have any full maps, we'll end up punting to BLAT.
@@ -1030,7 +1032,7 @@ sub UseFastMap
 
 	
 	# Let's time how long we spend on the spaln searching
-	$GlobalTimer = StartTimer() if ($gene_timing);
+	$GenewiseTimer = StartTimer() if ($gene_timing);
 
 	
 	# Do that nasty Spaln searchin'!
@@ -1073,7 +1075,7 @@ sub UseFastMap
 
 
 	# How long did we spend on handling Spalny stuff?
-	ReportTimer($GlobalTimer,'Trying-Spaln') if ($gene_timing);
+	ReportGenewiseTimer($GenewiseTimer,'Trying-Spaln') if ($gene_timing);
 	
 
     }
@@ -1104,7 +1106,7 @@ sub UseFastMap
     }
     if (-e $nucl_fname) { RunSystemCommand("rm \"$nucl_fname\""); }
 
-    close($TimerOutf) if ($gene_timing);
+    close($GenewiseTimerOutf) if ($gene_timing);
 
 }
 
@@ -2896,7 +2898,7 @@ sub GenBlatMaps
 	close($inf);
 
 	# Initialize timing for this gene (or maybe re-open... who knows?)
-	open($TimerOutf,'>>',$timing_dirname.$gene.'.q2.out') if ($gene_timing);
+	open($GenewiseTimerOutf,'>>',$timing_dirname.$gene.'.q2.out') if ($gene_timing);
 
 	# Now we can go sequence-by-sequence (again, treating partials specially)
 	# looking for a full mapping.
@@ -2917,7 +2919,7 @@ sub GenBlatMaps
 		$seqname =~ s/\-partial$//;
 
 		# How expensive is 'filling?'
-		$GlobalTimer = StartTimer() if ($gene_timing);
+		$GenewiseTimer = StartTimer() if ($gene_timing);
 
 		# Has BLAT given us the power to fill in the gaps in this sequence?
 		my $seq = $Seqs{$seqname};
@@ -2932,17 +2934,17 @@ sub GenBlatMaps
 		$FullMaps[++$i] = 0 if ($FullMaps[$i]);
 		$num_full_maps++; # This won't increment otherwise
 
-		ReportTimer($GlobalTimer,'Attempt-Blat-Fill') if ($gene_timing);
+		ReportGenewiseTimer($GenewiseTimer,'Attempt-Blat-Fill') if ($gene_timing);
 		
 	    } else {
 
-		$GlobalTimer = StartTimer() if ($gene_timing);
+		$GenewiseTimer = StartTimer() if ($gene_timing);
 		
 		# Dive right on in with Spaln!
 		my $seq = $Seqs{$seqname};
 		$FullMaps[$i] = BlatToSpalnSearch1($seqname,$seq,\@BlatHits);
 
-		ReportTimer($GlobalTimer,'Blat-To-Spaln') if ($gene_timing);
+		ReportGenewiseTimer($GenewiseTimer,'Blat-To-Spaln') if ($gene_timing);
 
 	    }
 
@@ -2951,7 +2953,7 @@ sub GenBlatMaps
 
 	}
 
-	close($TimerOutf) if ($gene_timing);
+	close($GenewiseTimerOutf) if ($gene_timing);
 
 	# Regardless of whether or not we found anything, we're done with this gene!
 	$genes_completed++;
@@ -5139,38 +5141,16 @@ sub FinalFileCheck
 
 
 
-
-
 #########################################################################
 #
-#  Function Name: StartTimer
+#  Function Name: ReportGenewiseTimer
 #
-sub StartTimer
-{
-    return [Time::HiRes::gettimeofday()];
-}
-
-#########################################################################
-#
-#  Function Name: GetElapsedTime
-#
-sub GetElapsedTime
-{
-    my $timer = shift;
-    my $time_in_seconds = Time::HiRes::tv_interval($timer);
-    return $time_in_seconds;
-}
-
-#########################################################################
-#
-#  Function Name: ReportTimer
-#
-sub ReportTimer
+sub ReportGenewiseTimer
 {
     my $timer = shift;
     my $segment = shift;
     my $time_in_seconds = GetElapsedTime($timer);
-    print $TimerOutf "$segment: $time_in_seconds\n";
+    print $GenewiseTimerOutf "$segment: $time_in_seconds\n";
 }
 
 
