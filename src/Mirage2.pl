@@ -265,11 +265,8 @@ for (my $i=0; $i<$num_species-1; $i++) {
     if ($timing) {
 	my $nw_timing_str
 	    = SecondsToSMHDString(GetElapsedTime($NWTimer));
-	my $species_timing_str
-	    = SecondsToSMHDString(GetElapsedTime($SpeciesTimer));
 	ClearProgress();
 	print "    - Unmapped Seq Ali : $nw_timing_str\n";
-	print "  + Total Intraspecies : $species_timing_str\n";
     }
 
 
@@ -277,6 +274,12 @@ for (my $i=0; $i<$num_species-1; $i++) {
     ClearProgress();
     print "\n" if ($timing);
     print "  Intra-species alignment complete for $Species[$i]\n";
+
+    if ($timing) {
+	my $species_timing_str
+	    = SecondsToSMHDString(GetElapsedTime($SpeciesTimer));
+	print "  + Total Intraspecies Alignment Time : $species_timing_str\n";
+    }
 
 }
 
@@ -343,7 +346,7 @@ system("rm -rf \"$progress_dirname\" \&");
 
 # WE DID IT!
 ClearProgress();
-print "\n  Mirage complete: Results in $ResultsDir\n";
+print "\n  Mirage complete; results in $ResultsDir\n";
 
 # Last chance to get timing data
 if ($timing) {
