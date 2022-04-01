@@ -211,6 +211,7 @@ for (my $i=0; $i<$num_species-1; $i++) {
 	my $quilter_timing_str
 	    = SecondsToSMHDString(GetElapsedTime($QuilterTimer));
 	ClearProgress();
+	print "\n";
 	print "  $Species[$i]\n";
 	print "    - Trans. Mapping   : $quilter_timing_str\n";
     }
@@ -267,6 +268,7 @@ for (my $i=0; $i<$num_species-1; $i++) {
 
     # Species[i] over and out!
     ClearProgress();
+    print "\n" if ($timing);
     print "  Intra-species alignment complete for $Species[$i]\n";
 
 }
@@ -295,16 +297,17 @@ my $AliMergeTimer = StartTimer();
 # Perform a most unnatural merging of alignments! (interspecies -- scandalous!)
 MergeAlignments(\@Species,\%SpeciesDir,\@MergeOrder,\@AllGenes,\@OrigSeqNames);
 
-# Even though there'll be a few moments for cleanup, who says we can't pop
-# some champagne bottles?
-print "  + Inter-species alignment complete\n";
-
 # Slap that stop-watch!
 if ($timing) {
     my $ali_merge_timing_str = SecondsToSMHDString(GetElapsedTime($AliMergeTimer));
     ClearProgress();
-    print "  Interspecies Alignment: $ali_merge_timing_str\n";
+    print "\n  Interspecies Alignment: $ali_merge_timing_str\n";
 }
+
+# Even though there'll be a few moments for cleanup, who says we can't pop
+# some champagne bottles?
+print "  + Inter-species alignment complete\n";
+print "\n" if ($timing);
 
 
 # For a touch of cleanup, get rid of our species-specific protein databases
@@ -331,18 +334,19 @@ EvaluateMissDir($misses_dirname);
 # No more progress to be made!
 system("rm -rf \"$progress_dirname\" \&");
 
+# WE DID IT!
+ClearProgress();
+print "\n  Mirage complete: Results in $ResultsDir\n";
+
 # Last chance to get timing data
 if ($timing) {
     my $total_runtime_str = SecondsToSMHDString(GetElapsedTime($MirageTimer));
     ClearProgress();
-    print "  Total Mirage Runtime: $total_runtime_str\n";
+    print "  Total Runtime  : $total_runtime_str\n";
 }
 
-# WE DID IT!
-ClearProgress();
-print "\n  Mirage complete: Results in $ResultsDir\n\n";
-
 # NOICE!
+print "\n";
 1;
 
 
