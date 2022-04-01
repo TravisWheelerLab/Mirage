@@ -289,7 +289,10 @@ sub SecondsToSMHD
 {
     my $total_seconds = shift;
 
-    my $seconds = int($total_seconds * 100) / 100.0;
+    my $seconds = $total_seconds;
+    if ($seconds =~ /^(\d+\.\d\d)/) {
+	$seconds = $1;
+    }
 
     my $minutes = int($seconds / 60);
     return (1,$seconds,0,0,0) if (!$minutes);
