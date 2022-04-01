@@ -104,7 +104,7 @@ my $TotalRuntime = StartTimer();
 # Are we doing serious timing analysis?
 my $gene_timing = $Opts{genetiming};
 my $timing_dirname;
-$timing_dirname = ConfirmDirectory($species_dirname.'quilter-timing') if ($gene_timing);
+$timing_dirname = ConfirmDirectory($species_dirname.'timing') if ($gene_timing);
 
 # As you'd expect, next up is confirming the genome
 my $genome = ConfirmFile($ARGV[1]);
@@ -523,7 +523,7 @@ sub UseFastMap
     my $gene = $1;
 
     # Initialize timing file for this gene, if appropriate
-    open($GenewiseTimerOutf,'>>',$timing_dirname.$gene.'.q2.out') if ($gene_timing);
+    open($GenewiseTimerOutf,'>>',$timing_dirname.$gene.'.quilter.out') if ($gene_timing);
     
     # Before we get into the mapping business, let's load in the protein sequences,
     # since they might have something to say about how we build our graph...
@@ -2898,7 +2898,7 @@ sub GenBlatMaps
 	close($inf);
 
 	# Initialize timing for this gene (or maybe re-open... who knows?)
-	open($GenewiseTimerOutf,'>>',$timing_dirname.$gene.'.q2.out') if ($gene_timing);
+	open($GenewiseTimerOutf,'>>',$timing_dirname.$gene.'.quilter.out') if ($gene_timing);
 
 	# Now we can go sequence-by-sequence (again, treating partials specially)
 	# looking for a full mapping.

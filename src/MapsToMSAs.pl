@@ -50,8 +50,7 @@ my $timing_outf;
 if (scalar(@ARGV) > 1) {
     if ($ARGV[0] =~ /genetiming/) {
 	$dirname =~ /^(.+)seqs\/$/;
-	$timing_dirname = $1.'maps-to-msas-timing/';
-	CreateDirectory($timing_dirname);
+	$timing_dirname = ConfirmDirectory($1.'timing');
 	$gene_timing = 1;
     }
 }
@@ -92,7 +91,7 @@ while ($tg_line = <$ThreadGuide>) {
 
     # Looks like we're doing *something* with this gene, so let's get timing!
     my $GeneTimer = StartTimer();
-    $timing_outf  = OpenOutputFile($timing_dirname.$gene.'.out');
+    $timing_outf  = OpenOutputFile($timing_dirname.$gene.'.maps-to-msas.out');
 
     # Grab the input files
     my $mapfname = $dirname.$gene.'.quilter.out';
