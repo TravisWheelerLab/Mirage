@@ -1917,7 +1917,7 @@ sub ReportGranularQuilterTiming
 	$line =~ s/\n|\r//g;
 	next if (!$line);
 
-	$line =~ /^(.+\:) (\d+)$/;
+	$line =~ /^(.*\:) (\S+)$/;
 	my $component = $1;
 	my $seconds = $2;
 

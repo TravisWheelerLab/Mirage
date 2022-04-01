@@ -2788,7 +2788,7 @@ sub RunBlatOnFileSet
     # Wanna know how long that took?
     if ($coarse_timing) {
 	my $blat_time = GetElapsedTime($BlatTimer);
-	print $coarse_timing_outf "BLAT Runtime      : $blat_time\n";
+	print $coarse_timing_outf "BLAT Runtime         : $blat_time\n";
     }
 
     # Once that's all over with, we can go ahead and clear the cumulative file
