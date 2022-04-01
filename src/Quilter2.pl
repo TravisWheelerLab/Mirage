@@ -218,7 +218,7 @@ FinalFileCheck($seq_dirname,$num_cpus);
 
 
 # Wrap up any timing, and move on!
-close($coarse_timing_outf) if ($course_timing);
+close($coarse_timing_outf) if ($coarse_timing);
 
 
 1;
