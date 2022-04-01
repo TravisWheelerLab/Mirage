@@ -269,7 +269,7 @@ for (my $i=0; $i<$num_species-1; $i++) {
 	    = SecondsToSMHDString(GetElapsedTime($SpeciesTimer));
 	ClearProgress();
 	print "    - Unmapped Seq Ali : $nw_timing_str\n";
-	print "    + Total Runtime    : $species_timing_str\n";
+	print "    + Intraspecies Tot : $species_timing_str\n";
     }
 
 
