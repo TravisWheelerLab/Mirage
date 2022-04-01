@@ -104,7 +104,7 @@ my $TotalRuntime = StartTimer();
 # Are we doing serious timing analysis?
 my $gene_timing = $Opts{genetiming};
 my $timing_dirname;
-$timing_dirname = ConfirmDirectory($species_dirname.'timing') if ($gene_timing);
+$timing_dirname = ConfirmDirectory($species_dirname.'quilter-timing') if ($gene_timing);
 
 # As you'd expect, next up is confirming the genome
 my $genome = ConfirmFile($ARGV[1]);

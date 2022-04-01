@@ -87,19 +87,6 @@ my $multi_seq_nw = $Dependencies{'multiseqnw'};
 my $final_msa    = $Dependencies{'finalmsa'};
 
 
-# Where we'll be storing timing information
-my $StartTime = [Time::HiRes::gettimeofday()];
-my $IntervalStart;
-my $IntervalEnd;
-my $FinalTime;
-my @QuilterTimeStats;
-my @MapsToMSAsTimeStats;
-my $MultiSeqNWTime;
-my $AvgNWTime;
-my $TotalRuntime;
-my $defaultcpus = 2;
-
-
 # Read in user arguments
 my $optsRef = ParseArgs();
 my %Options = %{$optsRef};
@@ -111,7 +98,7 @@ my $SpeciesGuide    = ConfirmFile($ARGV[1]);
 my $ResultsDir      = $Options{outdirname};
 my $verbose         = $Options{verbose};
 my $num_cpus        = $Options{cpus};
-my $timed           = $Options{time};
+my $timing          = $Options{time};
 my $stack_arfs      = $Options{stackarfs};
 my $forcecompile    = $Options{forcecompile};  # Hidden
 my $cleanMSA        = $Options{cleanmsa};      # Hidden
@@ -120,6 +107,9 @@ my $track_spaln     = $Options{trackspaln};    # Hidden
 my $gene_timing     = $Options{genetiming};    # Hidden
 my $max_spaln_nucls = $Options{maxspalnnucls}; # Hidden
 
+
+# Things have officially kicked off, so start timing
+my $MirageTimer = StartTimer();
 
 # Verify that we have all the files we need on-hand
 #CheckSourceFiles($forcecompile);
@@ -181,6 +171,8 @@ for (my $i=0; $i<$num_species-1; $i++) {
     # Did we discover that this species wasn't actually present?
     next if (!$SpeciesDir{$Species[$i]});
 
+    my $SpeciesTimer = StartTimer();
+
     my $species_dirname = $SpeciesDir{$Species[$i]};
     my $species_seqdir  = $species_dirname.'seqs/';
 
@@ -188,13 +180,11 @@ for (my $i=0; $i<$num_species-1; $i++) {
     #  Q U I L T E R
     #
 
-    # Start a timer for Quilter
-    $IntervalStart = [Time::HiRes::gettimeofday()];
-
     # Start assembling that command!
     my $QuilterCmd = $quilter;
 
-    # OPT: Collect detailed gene timing data
+    # OPT: Collect timing data, with varying granularity
+    $QuilterCmd = $QuilterCmd.' --time' if ($timing);
     $QuilterCmd = $QuilterCmd.' --genetiming' if ($gene_timing);
 
     # OPT: Manually set cap on nucleotide sequence length for spaln search
@@ -210,30 +200,50 @@ for (my $i=0; $i<$num_species-1; $i++) {
     # KEY 3: GTF index (special case: - for "Just use BLAT")
     $QuilterCmd = $QuilterCmd.' '.$GTFs[$i];
 
+    # Start timing Quilter specifically
+    my $QuilterTimer = StartTimer();
+
     # Make that daaaaaang call.
     RunSystemCommand($QuilterCmd);
 
-    # Figure out how much time that took and record it
-    $QuilterTimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
+    # If we're timing, let's see how long Quilter took
+    if ($timing) {
+	my $quilter_timing_str
+	    = SecondsToSMHDString(GetElapsedTime($QuilterTimer));
+	ClearProgress();
+	print "  $Species[$i]\n";
+	print "    - Trans. Mapping   : $quilter_timing_str\n";
+    }
+    
 
     #
     #  M A P s   t o   M S A s
     #
 
     # Now we want to check how long it takes to run MapsToMSAs
-    $IntervalStart = [Time::HiRes::gettimeofday()];
+    my $MapsToMSAsTimer = StartTimer();
 
-    # As easy as it gets!
-    my $MapsToMSAsCmd = $maps_to_msas.' '.$species_seqdir;
+    # Construct the command (typically just the executable and the sequence directory).
+    my $MapsToMSAsCmd = $maps_to_msas;
+    $MapsToMSAsCmd = $MapsToMSAsCmd.' --genetiming' if ($gene_timing);
+    $MapsToMSAsCmd = $MapsToMSAsCmd.' '.$species_seqdir;
 
     # Rock 'n' roll 'n' align!
     RunSystemCommand($MapsToMSAsCmd);
 
     # Knock it off with that darn timing!
-    $MapsToMSAsTimeStats[$i] = Time::HiRes::tv_interval($IntervalStart);
+    if ($timing) {
+	my $maps2msas_timing_str
+	    = SecondsToSMHDString(GetElapsedTime($MapsToMSAsTimer));
+	ClearProgress();
+	print "    - Mappings -> MSAs : $maps2msas_timing_str\n";
+    }
 
     
     #  M u l t i S e q N W
+
+    # Time NW-style alignment (intra-species)
+    my $NWTimer = StartTimer();
 
     # Align any sequences that didn't fully map by getting all Needleman-Wunsch-y
     my $missesbygene_ref
@@ -243,31 +253,58 @@ for (my $i=0; $i<$num_species-1; $i++) {
     # #SaveTheMappings #MappingsArePeopleToo!
     SaveSpeciesMappings($species_dirname,\@OrigSeqNames);
 
+    # How'd we do?
+    if ($timing) {
+	my $nw_timing_str
+	    = SecondsToSMHDString(GetElapsedTime($NWTimer));
+	my $species_timing_str
+	    = SecondsToSMHDString(GetElapsedTime($SpeciesTimer));
+	ClearProgress();
+	print "    - Unmapped Seq Ali : $nw_timing_str\n";
+	print "    + Total Runtime    : $species_timing_str\n";
+    }
+
+
     # Species[i] over and out!
     ClearProgress();
-    print "  + Intra-species alignment complete for $Species[$i]\n";
+    print "  Intra-species alignment complete for $Species[$i]\n";
 
 }
 
 
 # HOLY COW! You just made a heckin' ton of MSAs!
 # But don't forget about the 'Misc' sequences...
-AlignMiscSeqs($SpeciesDir{'Misc'}) if ($misc_seqs);
+if ($misc_seqs) {
 
+    my $MiscTimer = StartTimer();
+
+    AlignMiscSeqs($SpeciesDir{'Misc'});
+
+    if ($timing) {
+	my $misc_timing_str
+	    = SecondsToSMHDString(GetElapsedTime($MiscTimer));
+	print "  Alignment of Species without Genomes: $misc_timing_str\n";
+    }
+
+}
 
 # We're now going to track how long the whole final-MSA-generating
 # part of the program takes
-$IntervalStart = [Time::HiRes::gettimeofday()];
+my $AliMergeTimer = StartTimer();
 
 # Perform a most unnatural merging of alignments! (interspecies -- scandalous!)
 MergeAlignments(\@Species,\%SpeciesDir,\@MergeOrder,\@AllGenes,\@OrigSeqNames);
 
-# Slap that stop-watch!
-$TotalRuntime = Time::HiRes::tv_interval($StartTime);
-
 # Even though there'll be a few moments for cleanup, who says we can't pop
 # some champagne bottles?
 print "  + Inter-species alignment complete\n";
+
+# Slap that stop-watch!
+if ($timing) {
+    my $ali_merge_timing_str = SecondsToSMHDString(GetElapsedTime($AliMergeTimer));
+    ClearProgress();
+    print "  Interspecies Alignment: $ali_merge_timing_str\n";
+}
 
 
 # For a touch of cleanup, get rid of our species-specific protein databases
@@ -294,9 +331,11 @@ EvaluateMissDir($misses_dirname);
 # No more progress to be made!
 system("rm -rf \"$progress_dirname\" \&");
 
-# If we've been collecting timing data, now's the time to let it loose
-if ($timed) {
-    PrintTimingInfo(\@QuilterTimeStats,\@MapsToMSAsTimeStats,\@Species,$num_species-1,$TotalRuntime);
+# Last chance to get timing data
+if ($timing) {
+    my $total_runtime_str = SecondsToSMHDString(GetElapsedTime($MirageTimer));
+    ClearProgress();
+    print "  Total Mirage Runtime: $total_runtime_str\n";
 }
 
 # WE DID IT!
@@ -443,7 +482,7 @@ sub ParseArgs
 {
 
     my %Options = ( 
-	cpus => $defaultcpus,
+	cpus => 2,
 	outdirname => 'Mirage-Results',
 	cleanmsa => 1,
 	maxspalnnucls => 0,
@@ -1533,6 +1572,8 @@ sub AlignMiscSeqs
     my $dirname = shift;
     $dirname = $dirname.'seqs/';
 
+    DispProgMirage('misc-ali');
+
     # We'll make a hash of all sequence names by gene, so we can take advantage
     # of the infrastructure of 'AlignUnmappedSeqs'
     my %SeqsByGene;
@@ -1581,6 +1622,8 @@ sub AlignMiscSeqs
 
     # Takin' advantage!
     AlignUnmappedSeqs(\%SeqsByGene,$dirname);
+
+    ClearProgress();
     
 }
 

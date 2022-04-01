@@ -21,7 +21,7 @@ sub DispProgMapsToMSAs;
 # Note that we go with a fairly large number to try to get at least one line of
 # text-wrap. NEVERMIND, that causes the carriage-return to effectively work as a
 # newline.
-my $DispProg_line_len = 100;
+my $DispProg_line_len = 80;
 
 # Variables that we'll want to have access to
 my $DispProg_species;
@@ -183,6 +183,10 @@ sub DispProgMirage
 	} else {
 	    $status = $status."Preparing to join unmapped sequences to $DispProg_species MSAs";
 	}
+
+    } elsif ($part eq 'misc-ali') {
+
+	$status = $status."Aligning sequences belonging to species without genomes";
 	
     } elsif ($part eq 'msnw-loop') {
 

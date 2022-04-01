@@ -22,6 +22,7 @@ sub CreateDirectory;
 sub StartTimer;
 sub GetElapsedTime;
 sub SecondsToSMHD;
+sub SecondsToSMHDString;
 
 # More bio-specific functions
 sub FindDependencies;
@@ -306,6 +307,31 @@ sub SecondsToSMHD
     
 }
 
+
+###################################################################
+#
+#  FUNCTION:  SecondsToSMHDString
+#
+sub SecondsToSMHDString
+{
+    my $total_seconds = shift;
+    
+    my ($units_of_interest,$seconds,$minutes,$hours,$days)
+	= SecondsToSMHD($total_seconds);
+
+    my $string = $seconds.'s';
+    return $string if ($units_of_interest == 1);
+    
+    $string = $minutes.'m '.$string;
+    return $string if ($units_of_interest == 2);
+    
+    $string = $hours.'h '.$string;
+    return $string if ($units_of_interest == 3);
+    
+    $string = $days.'d '.$string;
+    return $string;
+    
+}
 
 
 ########################################################################
