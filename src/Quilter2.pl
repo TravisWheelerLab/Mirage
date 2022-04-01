@@ -98,13 +98,18 @@ my $species_dirname = ConfirmDirectory($ARGV[0]);
 my $seq_dirname = ConfirmDirectory($species_dirname.'seqs');
 
 # Are we doing general timing analysis?
-my $global_timing = $Opts{time};
-my $TotalRuntime = StartTimer();
+my $coarse_timing = $Opts{time};
+my $coarse_timing_outf;
+if ($coarse_timing) {
+    $coarse_timing_outf = OpenOutputFile($species_dirname.'quilter-timing.out');
+}
 
 # Are we doing serious timing analysis?
 my $gene_timing = $Opts{genetiming};
 my $timing_dirname;
-$timing_dirname = ConfirmDirectory($species_dirname.'timing') if ($gene_timing);
+if ($gene_timing) {
+    $timing_dirname = ConfirmDirectory($species_dirname.'timing');
+}
 
 # As you'd expect, next up is confirming the genome
 my $genome = ConfirmFile($ARGV[1]);
@@ -148,6 +153,8 @@ my $blat_naming;
 my @BlatFileNames;
 if ($gtfname ne '-') {
 
+    my $FM2Timer = StartTimer();
+    
     UseGTF($seq_dirname,$genome,$gtfname,$num_cpus,\%Opts);
 
     # Each process MIGHT have left us with a blat file if it had
@@ -156,6 +163,11 @@ if ($gtfname ne '-') {
 	my $blatfname = $seq_dirname.$i.'.blat.fa';
 	next if (!(-e $blatfname));
 	push(@BlatFileNames,$blatfname);
+    }
+
+    if ($coarse_timing) {
+	my $fm2time = GetElapsedTime($FM2Timer);
+	print $coarse_timing_outf "GTF-Informed Mapping : $fm2time\n";
     }
 
     # We're running our BLAT search using the sequence names as the way
@@ -204,6 +216,9 @@ if (scalar(@BlatFileNames)) {
 # sorted)
 FinalFileCheck($seq_dirname,$num_cpus);
 
+
+# Wrap up any timing, and move on!
+close($coarse_timing_outf) if ($course_timing);
 
 
 1;
@@ -2760,12 +2775,21 @@ sub RunBlatOnFileSet
     my $blat_outfname = $cum_blat_fname;
     $blat_outfname =~ s/\.fa$/\.out/;
 
+    # Let's see how long BLAT takes...
+    my $BlatTimer = StartTimer();
+
     # Assemble and run the BLAT command!
     my $blat_cmd  = $blat.' -tileSize=7 -minIdentity=90 -maxIntron=1';
     $blat_cmd     = $blat_cmd.' -t=dnax -q=prot -out=blast8 -minScore=40';
     $blat_cmd     = $blat_cmd.' 1>/dev/null 2>&1';
     $blat_cmd     = $blat_cmd.' '.$genome.' '.$cum_blat_fname.' '.$blat_outfname;
     RunSystemCommand($blat_cmd);
+
+    # Wanna know how long that took?
+    if ($coarse_timing) {
+	my $blat_time = GetElapsedTime($BlatTimer);
+	print $coarse_timing_outf "BLAT Runtime      : $blat_time\n";
+    }
 
     # Once that's all over with, we can go ahead and clear the cumulative file
     RunSystemCommand("rm \"$cum_blat_fname\"");
@@ -2800,6 +2824,9 @@ sub GenBlatMaps
     my @BlatGeneList = keys %BlatGenes;
     my $num_blat_genes = scalar(@BlatGeneList);
     $num_cpus = Min($num_cpus,$num_blat_genes);
+
+    # If we're timing, then we're timing
+    my $BlatToSpalnTimer = StartTimer();
 
     # Spin off all our happy friends!
     my $threadID = SpawnProcesses($num_cpus);
@@ -2983,6 +3010,12 @@ sub GenBlatMaps
     # Friend time has come to its conclusion -- everyone goes home except the master
     if ($threadID) { exit(0); }
     while (wait() != -1) {}
+
+    # Wrap up timing and report
+    if ($coarse_timing) {
+	my $blat_to_spaln_time = GetElapsedTime($BlatToSpalnTimer);
+	print $coarse_timing_outf "BLAT+Spaln Mapping   : $blat_to_spaln_time\n";
+    }
 
     # I think... we're done?!?!?!?
     

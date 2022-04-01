@@ -45,12 +45,12 @@ my $dirname = ConfirmDirectory($ARGV[scalar(@ARGV)-1]);
 # Currently, we just have one (hidden) option to gather gene-specific timing
 # data, so let's be a tad lazy for argument parsing
 my $gene_timing = 0;
-my $timing_dirname;
+my $timing_dirname = $dirname;
 my $timing_outf;
 if (scalar(@ARGV) > 1) {
     if ($ARGV[0] =~ /genetiming/) {
-	$dirname =~ /^(.+)seqs\/$/;
-	$timing_dirname = ConfirmDirectory($1.'timing');
+	$timing_dirname =~ s/seqs\/?$/timing/;
+	$timing_dirname = ConfirmDirectory($timing_dirname);
 	$gene_timing = 1;
     }
 }

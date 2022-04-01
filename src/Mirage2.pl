@@ -45,6 +45,7 @@ sub AlignMiscSeqs;
 sub MergeAlignments;
 sub FinalizeIntraSpeciesMSA;
 sub EvaluateMissDir;
+sub ReportGranularQuilterTiming;
 sub PrintTimingInfo;
 sub FormatTimeString;
 
@@ -208,12 +209,18 @@ for (my $i=0; $i<$num_species-1; $i++) {
 
     # If we're timing, let's see how long Quilter took
     if ($timing) {
+
 	my $quilter_timing_str
 	    = SecondsToSMHDString(GetElapsedTime($QuilterTimer));
 	ClearProgress();
 	print "\n";
 	print "  $Species[$i]\n";
 	print "    - Trans. Mapping   : $quilter_timing_str\n";
+
+	my $quilter_timer_fname = $species_dirname.'quilter-timing.out';
+	ReportGranularQuilterTiming($quilter_timer_fname);
+	RunSystemCommand("rm $quilter_timer_fname");
+
     }
     
 
@@ -1898,78 +1905,28 @@ sub EvaluateMissDir
 
 ########################################################################
 #
-#  Function: PrintTimingInfo
+#  Function: ReportGranularQuilterTiming
 #
-sub PrintTimingInfo
+sub ReportGranularQuilterTiming
 {
-    my $q_ts_ref = shift;
-    my $mtm_ts_ref = shift;
-    my $species_ref = shift;
-    my $num_species = shift;
-    my $total_runtime = shift;
+    my $fname = shift;
 
-    my @QuilterTimeStats = @{$q_ts_ref};
-    my @MapsToMSAsTimeStats = @{$mtm_ts_ref};
-    my @Species = @{$species_ref};
+    my $inf = OpenInputFile($fname);
+    while (my $line = <$inf>) {
 
-    print "\n";
-    print "  Timing Data\n";
-    print "  -----------\n";
-    print "\n";
+	$line =~ s/\n|\r//g;
+	next if (!$line);
 
-    for (my $i=0; $i<$num_species; $i++) {
+	$line =~ /^(.+\:) (\d+)$/;
+	my $component = $1;
+	my $seconds = $2;
 
-	my $q_time = FormatTimeString($QuilterTimeStats[$i]);
-	my $mtm_time = FormatTimeString($MapsToMSAsTimeStats[$i]);
-
-	my $species = $Species[$i];
-	if ($species =~ /^([a-z])/) {
-	    my $first_char = uc($1);
-	    $species =~ s/^[a-z]/$first_char/;
-	}
-	
-	print " + $species\n";
-	print "   Quilter (Mapping) : $q_time\n";
-	print "   Mappings To MSAs  : $mtm_time\n";
-	print "\n";
+	my $timing_str = SecondsToSMHDString($seconds);
+	print "      - $component $timing_str\n";
 
     }
+    close($inf);
 
-    $total_runtime = FormatTimeString($total_runtime);
-    print "\n Total Runtime: $total_runtime\n\n";
-    
-}
-
-
-
-
-
-########################################################################
-#
-#  Function: FormatTimeString
-#
-sub FormatTimeString
-{
-    my $seconds = shift;
-
-    return " 0 s " if (!$seconds);
-    
-    $seconds = int($seconds);
-    
-    my $hours = int($seconds / 3600);
-    $seconds -= $hours * 3600;
-
-    my $minutes = int($seconds / 60);
-    $seconds -= $minutes * 60;
-
-    # We'll go in descending order because we want to make sure that if we're
-    # in a situation where there are hours we also capture the lesser increments,
-    # even if one or both are zero
-    my $string;
-    if    ($hours)   { return " $hours hrs  $minutes mins  $seconds s"; }
-    elsif ($minutes) { return             " $minutes mins  $seconds s"; }
-    else             { return                            " $seconds s"; }
-    
 }
 
 
