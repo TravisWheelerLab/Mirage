@@ -862,153 +862,11 @@ sub UseFastMap
 		$FullMaps[$i] = ExtractCanonXWMap($top_chr_fname,$seq_len,
 						  $SeqNames[$i],$top_chr);
 	    }
-	    next;
-	    #
-	    #
-	    #
-	    # * * * * * * * * START UNUSED CODE BLOCK * * * * * * * * *
-	    #
-	    # NOTE: The above 'next' is essentially a way to block out the below code,
-	    #       at least for now.  I might re-activate it at some point, but I
-	    #       want to switch over to a different approach (without losing the
-	    #       currently available infrastructure)
-	    #
-	    #} elsif ($top_chr_fname) {
-	    if (!$FullMaps[$i] && $top_chr_fname) {
-		
-		$top_chr_fname =~ s/\\\(/\(/g;
-		$top_chr_fname =~ s/\\\)/\)/g;
 
-		# We know this sequence is at least partially hitting to the
-		# expected chromosome.  We'll see if we can use SPALN to find
-		# putative exons to fill in the gaps in the 
-		my ($max_exon_str,$max_amino_str,$max_hits_str) =
-		    FindMaximalXWHitSet($SpliceGraphs[$i],$top_chr_fname);
-
-		# We can easily build up a set of ranges of that we'll need to fill in,
-		# knowing where we have solid hits to the top chromosome.
-		my ($gap_starts_ref,$gap_ends_ref)
-		    = GetAminoHitGaps($max_amino_str,length($Seqs[$i]));
-		my @GapStarts = @{$gap_starts_ref};
-		my @GapEnds   = @{$gap_ends_ref};
-
-		# Before we get too excited about the possibility of trans splicing,
-		# let's consider whether the gaps we're seeing are due to unindexed
-		# exons that we could detect with Spaln.
-		#
-		# The biggest nuisance with this is that we're going to need to rip
-		# SPALN putative exon ranges, but then plug them into a new ExonWeaver
-		# run, since we want clean splice boundary delineation between our
-		# exons.
-		#
-		$FullMaps[$i] =
-		    AttemptSpalnFill($top_chr_fname,$max_hits_str,\@GapStarts,\@GapEnds,
-				     $Seqs[$i],$SeqNames[$i],$genome,$gene_fname);
-
-		# At this point, if we still don't have a full mapping, it seems like
-		# something nonstandard could be going on, so we'll quickly check if
-		# the full set of hits (across chromosomes) could be useful...
-		if (!$FullMaps[$i]) {
-		    $FullMaps[$i] =
-			AttemptChimericXWMap($XWInputNames[$i],$SpliceGraphs[$i],
-					     $top_chr_fname,$max_exon_str,\@GapStarts,
-					     \@GapEnds,$Seqs[$i],$SeqNames[$i],
-					     $gene_fname);
-		}
-		
-		# At this point, we either have a full hit or we don't, as is the way
-		# of logic.
-		#
-		# If we don't have a full mapping, we'll do some prep work for BLAT.
-		# In addition to writing out the full sequence, we'll also put out
-		# the parts of the sequence that correspond to the gaps left by our
-		# partially mapping.
-		#
-		if (!$FullMaps[$i]) {
-
-		    # First, write out the full sequence...
-		    print $BlatFile ">$gene\|$SeqNames[$i]\n";
-		    my @Seq = split(//,$Seqs[$i]);
-		    for (my $j=0; $j<scalar(@Seq); $j++) {
-			print $BlatFile "$Seq[$j]";
-			print $BlatFile "\n" if (($j+1) % 60 == 0);
-		    }
-		    print $BlatFile "\n" if (scalar(@Seq) % 60);
-		    print $BlatFile "\n";
-
-		    # Next up, write out our Sequence McNuggets
-		    for (my $gap_id=0; $gap_id<scalar(@GapStarts)-1; $gap_id++) {
-			my $start_amino = $GapStarts[$gap_id];
-			my $end_amino = $GapEnds[$gap_id];
-			my $part_name = $SeqNames[$i].'s'.$start_amino.'e'.$end_amino;
-			print $BlatFile ">$gene\|$part_name\n";
-			for (my $j=0; $j<=$end_amino-$start_amino; $j++) {
-			    print $BlatFile "$Seq[$j+$start_amino]";
-			    print $BlatFile "\n" if (($j+1) % 60 == 0);
-			}
-			print $BlatFile "\n" if (($end_amino-$start_amino+1) % 60);
-			print $BlatFile "\n";
-		    }
-
-		    # We'll want to hold onto our maximal hits in a special file
-		    # (or, if not special, at least one that won't be destroyed)
-		    # so let's go ahead and make that.
-		    #my $max_hits_fname = $top_chr_fname;
-		    #$max_hits_fname =~ s/\.weaver\.out$/\-partial\.weaver\.out/;
-		    #RecordMaximalHits($top_chr_fname,$max_hits_fname,$max_hits_str);
-		    #
-		    # ACTUALLY, let's only hold onto the sequences we'd feed into
-		    # ExonWeaver -- this could be optimized, but I'm pretty sure we'd
-		    # see diminishing returns...
-		    my $top_xwinfname = $top_chr_fname;
-		    $top_xwinfname =~ s/\.out$/\.in/;
-		    SaveTopXWInputs($top_xwinfname);
-		    
-		}
-
-		# As a last little step, we'll create a separate file with just the
-		# maximal hits to reference after BLAT.
-
-
-	    } else {
-
-		# Alas, this string appears to be a misfit :'(
-		# Let's see if BLAT+SPALN can help out at all
-		print $BlatFile ">$gene\|$SeqNames[$i]\n";
-		my @Seq = split(//,$Seqs[$i]);
-		for (my $j=0; $j<scalar(@Seq); $j++) {
-		    print $BlatFile "$Seq[$j]";
-		    print $BlatFile "\n" if (($j+1) % 60 == 0);
-		}
-		print $BlatFile "\n" if (scalar(@Seq) % 60);
-		print $BlatFile "\n";
-
-	    }
-	    #
-	    #
-	    #
-	    # * * * * * * * * * END UNUSED CODE BLOCK * * * * * * * * * *
-	    #
 	}
 
-	# HERE'S SOME MORE UNUSED CODE
-    #} else {
-	#
-	## Straightforward copy of our sequences into the BLAT file.
-	## The only minor change is that we're going to change the names
-	## to be gene|seqname
-	#for (my $i=0; $i<$num_seqs; $i++) {
-	    #print $BlatFile ">$gene\|$SeqNames[$i]\n";
-	    #my @Seq = split(//,$Seqs[$i]);
-	    #for (my $j=0; $j<scalar(@Seq); $j++) {
-		#print $BlatFile "$Seq[$j]";
-		#print $BlatFile "\n" if (($j+1) % 60 == 0);
-	    #}
-	    #print $BlatFile "\n" if (scalar(@Seq) % 60 != 0);
-	    #print $BlatFile "\n";
-	#}
-
     }
+    
 
     # If we have any unmapped sequences, we'll extract them from the protein
     # sequence file (into individual files) and perform a Spaln search (informed
@@ -1629,7 +1487,7 @@ sub ExtractCanonXWMap
 	# Now run until the end of the exon (either the end of the sequence or the
 	# splice signal characters
 	while ($scan < scalar(@Nucls) && $Nucls[$scan] eq uc($Nucls[$scan])) {
-	    if ($Trans[$scan] =~ /[A-Z]/) {
+	    if ($Prot[$scan] =~ /[A-Z]/) {
 		$hitstr = $hitstr.$nucl_pos.',';
 	    }
 	    $nucl_pos += $strand;
