@@ -305,8 +305,14 @@ while ($tg_line = <$ThreadGuide>) {
     #       MSA, which can cause infinite looping in this function -- not a
     #       functional construction!
     #
+    my $OutputTimer = StartTimer();
     my $outfname = $dirname.$gene.'.afa';
     WriteMSAToFile(\@MSA,\@SeqNames,\@OrigSeqs,$num_seqs,$msa_len,$outfname);
+
+    if ($gene_timing) {
+	my $output_time = GetElapsedTime($OutputTimer);
+	print $timing_outf "Writing MSA to File: $output_time\n";
+    }
 
     # Gene completed!
     $genes_completed++;
@@ -915,7 +921,7 @@ sub ConvertToOrigSeqs
 	my $seq_pos = 0;
 	my $msa_pos = 0;
 	while ($seq_pos < $seq_len) {
-	    if ($MSA[$i][$msa_pos] && $MSA[$i][$msa_pos] =~ /[A-Za-z]/) {
+	    if ($MSA[$i][$msa_pos] =~ /[A-Za-z]/) {
 		$MSA[$i][$msa_pos] = $Seq[$seq_pos++];
 	    }
 	    $msa_pos++;

@@ -277,6 +277,9 @@ sub GetElapsedTime
 {
     my $timer = shift;
     my $time_in_seconds = Time::HiRes::tv_interval($timer);
+    if ($time_in_seconds =~ /^(\d+\.\d\d)/) {
+	return $1;
+    }
     return $time_in_seconds;
 }
 
@@ -290,9 +293,6 @@ sub SecondsToSMHD
     my $total_seconds = shift;
 
     my $seconds = $total_seconds;
-    if ($seconds =~ /^(\d+\.\d\d)/) {
-	$seconds = $1;
-    }
 
     my $minutes = int($seconds / 60);
     return (1,$seconds,0,0,0) if (!$minutes);
