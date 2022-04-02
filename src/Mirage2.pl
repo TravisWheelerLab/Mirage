@@ -316,7 +316,9 @@ if ($timing) {
 
 # Even though there'll be a few moments for cleanup, who says we can't pop
 # some champagne bottles?
-print "  + Inter-species alignment complete\n";
+print "  ";
+print "+ " if ($timing);
+print "Inter-species alignment complete\n";
 print "\n" if ($timing);
 
 
