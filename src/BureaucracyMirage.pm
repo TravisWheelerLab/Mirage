@@ -4,7 +4,6 @@
 use warnings;
 use strict;
 use POSIX;
-use Time::HiRes;
 
 # Very general functions
 sub Max;
@@ -19,10 +18,6 @@ sub OpenOutputFile;
 sub ConfirmDirectory;
 sub OpenDirectory;
 sub CreateDirectory;
-sub StartTimer;
-sub GetElapsedTime;
-sub SecondsToSMHD;
-sub SecondsToSMHDString;
 
 # More bio-specific functions
 sub FindDependencies;
@@ -258,83 +253,6 @@ sub CreateDirectory
     return ConfirmDirectory($dirname);
 }
 
-
-###################################################################
-#
-#  FUNCTION:  StartTimer
-#
-sub StartTimer
-{
-    return [Time::HiRes::gettimeofday()];
-}
-
-
-###################################################################
-#
-#  FUNCTION:  GetElapsedTime
-#
-sub GetElapsedTime
-{
-    my $timer = shift;
-    my $time_in_seconds = Time::HiRes::tv_interval($timer);
-    if ($time_in_seconds =~ /^(\d+\.\d\d)/) {
-	return $1;
-    }
-    return $time_in_seconds;
-}
-
-
-###################################################################
-#
-#  FUNCTION:  SecondsToSMHD
-#
-sub SecondsToSMHD
-{
-    my $total_seconds = shift;
-
-    my $seconds = $total_seconds;
-
-    my $minutes = int($seconds / 60);
-    return (1,$seconds,0,0,0) if (!$minutes);
-    $seconds -= $minutes * 60;
-
-    my $hours = int($minutes / 60);
-    return (2,$seconds,$minutes,0,0) if (!$hours);
-    $minutes -= $hours * 60;
-
-    my $days = int($hours / 24);
-    return (3,$seconds,$minutes,$hours,0) if (!$days);
-    $hours -= $days * 24;
-
-    return (4,$seconds,$minutes,$hours,$days);
-    
-}
-
-
-###################################################################
-#
-#  FUNCTION:  SecondsToSMHDString
-#
-sub SecondsToSMHDString
-{
-    my $total_seconds = shift;
-    
-    my ($units_of_interest,$seconds,$minutes,$hours,$days)
-	= SecondsToSMHD($total_seconds);
-
-    my $string = $seconds.'s';
-    return $string if ($units_of_interest == 1);
-    
-    $string = $minutes.'m '.$string;
-    return $string if ($units_of_interest == 2);
-    
-    $string = $hours.'h '.$string;
-    return $string if ($units_of_interest == 3);
-    
-    $string = $days.'d '.$string;
-    return $string;
-    
-}
 
 
 ########################################################################
