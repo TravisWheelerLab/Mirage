@@ -37,8 +37,24 @@ sub CheckColumnProfile;  # Build a profile of an MSA column
 if (@ARGV < 1) { die "\n  USAGE:  ./MapsToMSAs.pl [SpeciesMSAs/species/seqs]\n\n"; }
 
 
+
 # We should be able to work entirely from the directory with Quilter output
-my $dirname = ConfirmDirectory($ARGV[0]);
+my $dirname = ConfirmDirectory($ARGV[scalar(@ARGV)-1]);
+
+
+# Currently, we just have one (hidden) option to gather gene-specific timing
+# data, so let's be a tad lazy for argument parsing
+my $gene_timing = 0;
+my $timing_dirname = $dirname;
+my $timing_outf;
+if (scalar(@ARGV) > 1) {
+    if ($ARGV[0] =~ /genetiming/) {
+	$timing_dirname =~ s/seqs\/?$/timing/;
+	$timing_dirname = ConfirmDirectory($timing_dirname);
+	$gene_timing = 1;
+    }
+}
+
 
 # Let's figure out what our species' name is
 $dirname =~ /\/([^\/]+)\/seqs\/$/;
@@ -73,6 +89,11 @@ while ($tg_line = <$ThreadGuide>) {
 
     next if ($req_thread != $threadID);
 
+    # Looks like we're doing *something* with this gene, so let's get timing!
+    my $GeneTimer = StartTimer();
+    $timing_outf  = OpenOutputFile($timing_dirname.$gene.'.maps-to-msas.out');
+
+    # Grab the input files
     my $mapfname = $dirname.$gene.'.quilter.out';
     my $seqfname = $dirname.$gene.'.fa';
 
@@ -112,18 +133,30 @@ while ($tg_line = <$ThreadGuide>) {
     }
     close($SeqFile);
 
+    
     # If there isn't a mapping file, then we write out the whole family
     # as unmapped.
     if (!(-s $mapfname)) {
+
 	my $missf = OpenOutputFile($dirname.$gene.'.misses');
 	foreach my $seqname (@SeqNames) {
 	    print $missf "$gene $seqname: Unmapped\n";
 	}
 	close($missf);
+
+	# Catch this in the timing
+	my $gene_time = GetElapsedTime($GeneTimer);
+	print $timing_outf "Discovering no mapping file : $gene_time\n";
+	close($timing_outf);
+	
 	next;
+	
     }
 
-    # Next up, read in the mappings from our mapping file
+    
+    my $InputParsingTimer = StartTimer();
+
+    # Now we'll read in the mappings from our mapping file
     my $MapFile = OpenInputFile($mapfname);
     my %Mapping;
     my @Unmapped;
@@ -231,16 +264,33 @@ while ($tg_line = <$ThreadGuide>) {
 	close($MissFile);
     }
 
+    if ($gene_timing) {
+	my $input_parsing_time = GetElapsedTime($InputParsingTimer);
+	print $timing_outf "Input parsing: $input_parsing_time\n";
+    }
+
     # Did this entire family miss? That would make me very sad :(
     $num_seqs = $num_mapped;
-    next if ($num_seqs == 0);
+    if ($num_seqs == 0) {
+	close($timing_outf);
+	next;
+    }
 
 
+    # Onwards! Time to actually generate an MSA!
+    my $MSAGenTimer = StartTimer();
+    
     my ($msa_ref,$msa_len,$arfs_ref)
 	= ComposeMSA(\%Mapping,$num_seqs,$revcomp,\@SeqLengths
 		     ,$gene); # DEBUGGING
     my @MSA  = @{$msa_ref};
     my @ARFs = @{$arfs_ref};
+
+    if ($gene_timing) {
+	my $msa_gen_time = GetElapsedTime($MSAGenTimer);
+	print $timing_outf "MSA Generation: $msa_gen_time\n";
+    }
+    
 
     # If we had any ARFs, record them to our ARF file
     for (my $i=0; $i<$num_seqs; $i++) {
@@ -255,12 +305,24 @@ while ($tg_line = <$ThreadGuide>) {
     #       MSA, which can cause infinite looping in this function -- not a
     #       functional construction!
     #
+    my $OutputTimer = StartTimer();
     my $outfname = $dirname.$gene.'.afa';
     WriteMSAToFile(\@MSA,\@SeqNames,\@OrigSeqs,$num_seqs,$msa_len,$outfname);
+
+    if ($gene_timing) {
+	my $output_time = GetElapsedTime($OutputTimer);
+	print $timing_outf "Writing MSA to File: $output_time\n";
+    }
 
     # Gene completed!
     $genes_completed++;
     DispProgMapsToMSAs('aligning|'.$threadID.'|'.$genes_completed);
+
+    if ($gene_timing) {
+	my $gene_time = GetElapsedTime($GeneTimer);
+	print $timing_outf "Total MapsToMSAs Time: $gene_time\n";
+	close($timing_outf);
+    }
     
 }
 
@@ -859,7 +921,7 @@ sub ConvertToOrigSeqs
 	my $seq_pos = 0;
 	my $msa_pos = 0;
 	while ($seq_pos < $seq_len) {
-	    if ($MSA[$i][$msa_pos] && $MSA[$i][$msa_pos] =~ /[A-Za-z]/) {
+	    if ($MSA[$i][$msa_pos] =~ /[A-Za-z]/) {
 		$MSA[$i][$msa_pos] = $Seq[$seq_pos++];
 	    }
 	    $msa_pos++;

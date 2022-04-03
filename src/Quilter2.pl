@@ -38,7 +38,9 @@ sub RecordMaximalHits;
 sub RunBlatOnFileSet;
 sub GenBlatMaps;
 sub AttemptBlatFill;
-sub BlatToSpalnSearch;
+sub BlatToSpalnSearch2; # Alt.  B2S search -- less processing (for better, or worse?)
+sub BlatToSpalnSearch1; # Orig. B2S search -- groups amino acids on the front end 
+sub CullBlatHits;
 sub GetSpalnSfetchRanges;
 sub SpalnSearch;
 sub ClusterNuclRanges;
@@ -46,6 +48,11 @@ sub AdjustNuclCoord;
 sub ParseBlatLine;
 sub ParseSpalnOutput;
 sub FinalFileCheck;
+
+# Timing stuff (for debugging)
+my $GenewiseTimer;
+my $GenewiseTimerOutf;
+sub ReportGenewiseTimer;
 
 # Original Spaln parsing code
 sub OPSO_ParseSpalnOutput;
@@ -90,6 +97,20 @@ my %Opts     = %{$opts_ref};
 my $species_dirname = ConfirmDirectory($ARGV[0]);
 my $seq_dirname = ConfirmDirectory($species_dirname.'seqs');
 
+# Are we doing general timing analysis?
+my $coarse_timing = $Opts{time};
+my $coarse_timing_outf;
+if ($coarse_timing) {
+    $coarse_timing_outf = OpenOutputFile($species_dirname.'quilter-timing.out');
+}
+
+# Are we doing serious timing analysis?
+my $gene_timing = $Opts{genetiming};
+my $timing_dirname;
+if ($gene_timing) {
+    $timing_dirname = ConfirmDirectory($species_dirname.'timing');
+}
+
 # As you'd expect, next up is confirming the genome
 my $genome = ConfirmFile($ARGV[1]);
 
@@ -103,6 +124,13 @@ my $gtfname = $ARGV[2];
 #       for splice site signal (-yy=8 -> -yy=4).
 my $spaln_opts = ' -Q3 -O1 -S1 -ya3 -yz4 -yy4 ';
 $spaln = $spaln.$spaln_opts;
+
+# Capping the length of nucleotide sequence that we feed into spaln
+my $max_spaln_nucls = $Opts{maxspalnnucls};
+
+# I'm also going to make a global variable for the maximum number of Blat hits
+# that we allow before we cull to a set number per chromosome.
+my $MaxBlatHits = 5000;
 
 # How many CPUs do we intend to use?
 my $ThreadGuide = OpenInputFile($seq_dirname.'Thread-Guide');
@@ -125,6 +153,8 @@ my $blat_naming;
 my @BlatFileNames;
 if ($gtfname ne '-') {
 
+    my $FM2Timer = StartTimer();
+    
     UseGTF($seq_dirname,$genome,$gtfname,$num_cpus,\%Opts);
 
     # Each process MIGHT have left us with a blat file if it had
@@ -133,6 +163,11 @@ if ($gtfname ne '-') {
 	my $blatfname = $seq_dirname.$i.'.blat.fa';
 	next if (!(-e $blatfname));
 	push(@BlatFileNames,$blatfname);
+    }
+
+    if ($coarse_timing) {
+	my $fm2time = GetElapsedTime($FM2Timer);
+	print $coarse_timing_outf "GTF-Informed Mapping : $fm2time\n";
     }
 
     # We're running our BLAT search using the sequence names as the way
@@ -182,6 +217,9 @@ if (scalar(@BlatFileNames)) {
 FinalFileCheck($seq_dirname,$num_cpus);
 
 
+# Wrap up any timing, and move on!
+close($coarse_timing_outf) if ($coarse_timing);
+
 
 1;
 
@@ -215,16 +253,21 @@ sub PrintUsage
 #
 sub ParseArgs
 {
-    my %Options;
+    my %Options = (
+	maxspalnnucls => 10000000, # 10 Mb as our standard cutoff
+	);
+    
     &GetOptions(
 	\%Options,
 	"help",
 	"v",
 	"time",
+	"genetiming", # Hidden (detailed timing output)
+	"maxspalnnucls=i"
 	) || die "\n  ERROR:  Failed to parse Quilter2 commandline arguments\n\n";
 
     if ($Options{help}) { PrintUsage(1); }
-    
+
     return \%Options;
 }
 
@@ -321,7 +364,6 @@ sub UseGTF
 	# Report your progress
 	$genes_completed++;
 	DispProgQuilter('fm2|'.$threadID.'|'.$genes_completed);
-
 	
     }
 
@@ -495,6 +537,9 @@ sub UseFastMap
     $gene_fname =~ /\/([^\/]+)\.fa$/;
     my $gene = $1;
 
+    # Initialize timing file for this gene, if appropriate
+    open($GenewiseTimerOutf,'>>',$timing_dirname.$gene.'.quilter.out') if ($gene_timing);
+    
     # Before we get into the mapping business, let's load in the protein sequences,
     # since they might have something to say about how we build our graph...
     my $GeneFile = OpenInputFile($gene_fname);
@@ -526,6 +571,7 @@ sub UseFastMap
 	    print $BlatFile "\n" if (scalar(@Seq) % 60);
 	    print $BlatFile "\n";
 	}
+	close($GenewiseTimerOutf) if ($gene_timing); 
 	return;
     }
 
@@ -555,6 +601,11 @@ sub UseFastMap
 	$XWInputNames[$i] = 0;
 	$SpliceGraphs[$i] = 0;
     }
+
+
+    # We'll want to know how long FastMap2 and ExonWeaver take to complete
+    $GenewiseTimer = StartTimer() if ($gene_timing);
+    
 
     # Now we can go chromosome-by-chromosome and try to build the
     # best splice graph for our sequences we can on a single chromosome
@@ -644,27 +695,12 @@ sub UseFastMap
 	}
 
 	# Extract the appropriate genomic region for our search
-	RunSystemCommand($sfetch." -range $search_start\.\.$search_end \"$genome\" \"$chr\" > \"$nucl_fname\"");
+	my $sfetch_cmd = $sfetch." -range $search_start\.\.$search_end \"$genome\" \"$chr\" > \"$nucl_fname\"";
+	RunSystemCommand($sfetch_cmd);
 
 	# It's... FASTMAP2 TIME!
-	my $mapcmd = $fastmap2." \"$gene_fname\" $num_seqs \"$nucl_fname\" $exon_list_str";
-
-	
-	################################################################
-	#
-	# It's... JUST GATHERING TIMING DATA!
-	#
-	#$mapcmd = $mapcmd.' 1>/dev/null';
-	#my $starttime = [Time::HiRes::gettimeofday()];
-	#RunSystemCommand($mapcmd);
-	#my $runtime = Time::HiRes::tv_interval($starttime);
-	#return $runtime;
-	#
-	# It's... A TEST TO SEE IF BLOCK-Y FASTMAP IS TOO SLOW!
-	#
-	################################################################
-
-	my $hitref = ParseFastMapOutput($mapcmd,$num_seqs,$ChrSizes{$chr});
+	my $map_cmd = $fastmap2." \"$gene_fname\" $num_seqs \"$nucl_fname\" $exon_list_str";
+	my $hitref  = ParseFastMapOutput($map_cmd,$num_seqs,$ChrSizes{$chr});
 
 	# We now have an array with the hits for each sequence stored in
 	# an &-separated list.  These hits are in |-separated format,
@@ -707,7 +743,12 @@ sub UseFastMap
 	    }
 	}
     }
+    
 
+    # Record how much time we spent on FastMap2+ExonWeaver
+    ReportGenewiseTimer($GenewiseTimer,'FastMap2+ExonWeaver') if ($gene_timing);
+
+    
     # We'll save removing the nucleotide file until the end, in case we end up
     # reusing the file name for SPALN-assisted search
     
@@ -716,6 +757,10 @@ sub UseFastMap
     # which we can read in to check for full-protein splicings (or else to see if
     # there's at least agreement on some canonical exons...)
 
+
+    # How long do we spend checking for full maps?
+    $GenewiseTimer = StartTimer() if ($gene_timing);
+    
     
     # First off, we'll see which sequences have full-protein mappings and
     # record the mapped chromosomes, so we can determine a canonical
@@ -761,6 +806,12 @@ sub UseFastMap
 	    $top_chr_mapcount = $FullMapsByChr{$chr};
 	}
     }
+
+
+    # How long did it take to decide if we liked any of the Mirage-toolkit-based
+    # mappings?
+    ReportGenewiseTimer($GenewiseTimer,'Full-FastMap2-Map-Check') if ($gene_timing);
+    
 
     # If we don't have any full maps, we'll end up punting to BLAT.
     # Otherwise, let's kick off the mapping parsery!
@@ -811,153 +862,11 @@ sub UseFastMap
 		$FullMaps[$i] = ExtractCanonXWMap($top_chr_fname,$seq_len,
 						  $SeqNames[$i],$top_chr);
 	    }
-	    next;
-	    #
-	    #
-	    #
-	    # * * * * * * * * START UNUSED CODE BLOCK * * * * * * * * *
-	    #
-	    # NOTE: The above 'next' is essentially a way to block out the below code,
-	    #       at least for now.  I might re-activate it at some point, but I
-	    #       want to switch over to a different approach (without losing the
-	    #       currently available infrastructure)
-	    #
-	    #} elsif ($top_chr_fname) {
-	    if (!$FullMaps[$i] && $top_chr_fname) {
-		
-		$top_chr_fname =~ s/\\\(/\(/g;
-		$top_chr_fname =~ s/\\\)/\)/g;
 
-		# We know this sequence is at least partially hitting to the
-		# expected chromosome.  We'll see if we can use SPALN to find
-		# putative exons to fill in the gaps in the 
-		my ($max_exon_str,$max_amino_str,$max_hits_str) =
-		    FindMaximalXWHitSet($SpliceGraphs[$i],$top_chr_fname);
-
-		# We can easily build up a set of ranges of that we'll need to fill in,
-		# knowing where we have solid hits to the top chromosome.
-		my ($gap_starts_ref,$gap_ends_ref)
-		    = GetAminoHitGaps($max_amino_str,length($Seqs[$i]));
-		my @GapStarts = @{$gap_starts_ref};
-		my @GapEnds   = @{$gap_ends_ref};
-
-		# Before we get too excited about the possibility of trans splicing,
-		# let's consider whether the gaps we're seeing are due to unindexed
-		# exons that we could detect with Spaln.
-		#
-		# The biggest nuisance with this is that we're going to need to rip
-		# SPALN putative exon ranges, but then plug them into a new ExonWeaver
-		# run, since we want clean splice boundary delineation between our
-		# exons.
-		#
-		$FullMaps[$i] =
-		    AttemptSpalnFill($top_chr_fname,$max_hits_str,\@GapStarts,\@GapEnds,
-				     $Seqs[$i],$SeqNames[$i],$genome,$gene_fname);
-
-		# At this point, if we still don't have a full mapping, it seems like
-		# something nonstandard could be going on, so we'll quickly check if
-		# the full set of hits (across chromosomes) could be useful...
-		if (!$FullMaps[$i]) {
-		    $FullMaps[$i] =
-			AttemptChimericXWMap($XWInputNames[$i],$SpliceGraphs[$i],
-					     $top_chr_fname,$max_exon_str,\@GapStarts,
-					     \@GapEnds,$Seqs[$i],$SeqNames[$i],
-					     $gene_fname);
-		}
-		
-		# At this point, we either have a full hit or we don't, as is the way
-		# of logic.
-		#
-		# If we don't have a full mapping, we'll do some prep work for BLAT.
-		# In addition to writing out the full sequence, we'll also put out
-		# the parts of the sequence that correspond to the gaps left by our
-		# partially mapping.
-		#
-		if (!$FullMaps[$i]) {
-
-		    # First, write out the full sequence...
-		    print $BlatFile ">$gene\|$SeqNames[$i]\n";
-		    my @Seq = split(//,$Seqs[$i]);
-		    for (my $j=0; $j<scalar(@Seq); $j++) {
-			print $BlatFile "$Seq[$j]";
-			print $BlatFile "\n" if (($j+1) % 60 == 0);
-		    }
-		    print $BlatFile "\n" if (scalar(@Seq) % 60);
-		    print $BlatFile "\n";
-
-		    # Next up, write out our Sequence McNuggets
-		    for (my $gap_id=0; $gap_id<scalar(@GapStarts)-1; $gap_id++) {
-			my $start_amino = $GapStarts[$gap_id];
-			my $end_amino = $GapEnds[$gap_id];
-			my $part_name = $SeqNames[$i].'s'.$start_amino.'e'.$end_amino;
-			print $BlatFile ">$gene\|$part_name\n";
-			for (my $j=0; $j<=$end_amino-$start_amino; $j++) {
-			    print $BlatFile "$Seq[$j+$start_amino]";
-			    print $BlatFile "\n" if (($j+1) % 60 == 0);
-			}
-			print $BlatFile "\n" if (($end_amino-$start_amino+1) % 60);
-			print $BlatFile "\n";
-		    }
-
-		    # We'll want to hold onto our maximal hits in a special file
-		    # (or, if not special, at least one that won't be destroyed)
-		    # so let's go ahead and make that.
-		    #my $max_hits_fname = $top_chr_fname;
-		    #$max_hits_fname =~ s/\.weaver\.out$/\-partial\.weaver\.out/;
-		    #RecordMaximalHits($top_chr_fname,$max_hits_fname,$max_hits_str);
-		    #
-		    # ACTUALLY, let's only hold onto the sequences we'd feed into
-		    # ExonWeaver -- this could be optimized, but I'm pretty sure we'd
-		    # see diminishing returns...
-		    my $top_xwinfname = $top_chr_fname;
-		    $top_xwinfname =~ s/\.out$/\.in/;
-		    SaveTopXWInputs($top_xwinfname);
-		    
-		}
-
-		# As a last little step, we'll create a separate file with just the
-		# maximal hits to reference after BLAT.
-
-
-	    } else {
-
-		# Alas, this string appears to be a misfit :'(
-		# Let's see if BLAT+SPALN can help out at all
-		print $BlatFile ">$gene\|$SeqNames[$i]\n";
-		my @Seq = split(//,$Seqs[$i]);
-		for (my $j=0; $j<scalar(@Seq); $j++) {
-		    print $BlatFile "$Seq[$j]";
-		    print $BlatFile "\n" if (($j+1) % 60 == 0);
-		}
-		print $BlatFile "\n" if (scalar(@Seq) % 60);
-		print $BlatFile "\n";
-
-	    }
-	    #
-	    #
-	    #
-	    # * * * * * * * * * END UNUSED CODE BLOCK * * * * * * * * * *
-	    #
 	}
 
-	# HERE'S SOME MORE UNUSED CODE
-    #} else {
-	#
-	## Straightforward copy of our sequences into the BLAT file.
-	## The only minor change is that we're going to change the names
-	## to be gene|seqname
-	#for (my $i=0; $i<$num_seqs; $i++) {
-	    #print $BlatFile ">$gene\|$SeqNames[$i]\n";
-	    #my @Seq = split(//,$Seqs[$i]);
-	    #for (my $j=0; $j<scalar(@Seq); $j++) {
-		#print $BlatFile "$Seq[$j]";
-		#print $BlatFile "\n" if (($j+1) % 60 == 0);
-	    #}
-	    #print $BlatFile "\n" if (scalar(@Seq) % 60 != 0);
-	    #print $BlatFile "\n";
-	#}
-
     }
+    
 
     # If we have any unmapped sequences, we'll extract them from the protein
     # sequence file (into individual files) and perform a Spaln search (informed
@@ -994,6 +903,11 @@ sub UseFastMap
 	    
 	}
 
+	
+	# Let's time how long we spend on the spaln searching
+	$GenewiseTimer = StartTimer() if ($gene_timing);
+
+	
 	# Do that nasty Spaln searchin'!
 	my ($spaln_hits_ref,$spaln_pcts_id_ref)
 	    = SpalnSearch(\@UnmappedSeqNames,\@UnmappedSeqs,\@ProtFnames,
@@ -1032,6 +946,11 @@ sub UseFastMap
 	    
 	}
 
+
+	# How long did we spend on handling Spalny stuff?
+	ReportGenewiseTimer($GenewiseTimer,'Trying-Spaln') if ($gene_timing);
+	
+
     }
 
     # We can at least say that we got one sequence to fully map, so let's pop
@@ -1059,6 +978,8 @@ sub UseFastMap
 	}
     }
     if (-e $nucl_fname) { RunSystemCommand("rm \"$nucl_fname\""); }
+
+    close($GenewiseTimerOutf) if ($gene_timing);
 
 }
 
@@ -1229,6 +1150,47 @@ sub GenSpliceGraph
     # Break the hit string into its individual hits
     my @Hits     = split(/\&/,$hitstr);
     my $num_hits = scalar(@Hits);
+
+    # If we have more than 2500 hits we'll pare down to that number
+    my $max_xw_hits = 2500;
+    if ($num_hits > $max_xw_hits) {
+
+	my %ScoreDensityToHitID;
+	for (my $hit_id = 1; $hit_id <= $num_hits; $hit_id++) {
+
+	    my @HitData = split(/\|/,$Hits[$hit_id-1]);
+
+	    my $hit_score = $HitData[6] + 0.0;
+	    my $hit_length = $HitData[1] - $HitData[0] + 1.0;
+	    my $score_dens = $hit_score / $hit_length;
+
+	    if ($ScoreDensityToHitID{$score_dens}) {		
+		$ScoreDensityToHitID{$score_dens} = $ScoreDensityToHitID{$score_dens}.'|'.$hit_id;
+	    } else {
+		$ScoreDensityToHitID{$score_dens} = $hit_id;
+	    }
+	    
+	}
+	my @SortedScoreDensities = sort {$b <=> $a} keys %ScoreDensityToHitID;
+
+	my @ReducedHitIDs;
+	my $score_dens_id = 0;
+	while (scalar(@ReducedHitIDs) < $max_xw_hits) {
+	    foreach my $hit_id (split(/\|/,$ScoreDensityToHitID{$SortedScoreDensities[$score_dens_id++]})) {
+		$hit_id--;
+		push(@ReducedHitIDs,$hit_id);
+	    }	    
+	}
+
+	my @ReducedHits;
+	foreach my $hit_id (sort @ReducedHitIDs) {
+	    push(@ReducedHits,$Hits[$hit_id]);
+	}
+
+	@Hits = @ReducedHits;
+	$num_hits = scalar(@Hits);
+	
+    }
 
     # Now we can prep a lil' file for ExonWeaver
     my $weaver_in = $gene_fname;
@@ -1525,7 +1487,7 @@ sub ExtractCanonXWMap
 	# Now run until the end of the exon (either the end of the sequence or the
 	# splice signal characters
 	while ($scan < scalar(@Nucls) && $Nucls[$scan] eq uc($Nucls[$scan])) {
-	    if ($Trans[$scan] =~ /[A-Z]/) {
+	    if ($Prot[$scan] =~ /[A-Z]/) {
 		$hitstr = $hitstr.$nucl_pos.',';
 	    }
 	    $nucl_pos += $strand;
@@ -1721,12 +1683,12 @@ sub AttemptSpalnFill
 
 	# OOOOhhOhoHohoh! Looks like we might have a coding region!
 	# Time to see if FastMap can help us out with the specifics...
-	my $mapcmd = $fastmap2." \"$temp_fname\" 1 \"$nucl_fname\"";
+	my $map_cmd = $fastmap2." \"$temp_fname\" 1 \"$nucl_fname\"";
 	foreach my $coord_pair (split(/\,/,$coordlist_str)) {
 	    $coord_pair =~ /^(\d+)\.\.(\d+)$/;
-	    $mapcmd = $mapcmd.' '.$1.' '.$2;
+	    $map_cmd = $map_cmd.' '.$1.' '.$2;
 	}
-	my $hitref  = ParseFastMapOutput($mapcmd,1);
+	my $hitref  = ParseFastMapOutput($map_cmd,1);
 	my @SeqHits = @{$hitref};
 	next if (!$SeqHits[0]);
 
@@ -2671,12 +2633,21 @@ sub RunBlatOnFileSet
     my $blat_outfname = $cum_blat_fname;
     $blat_outfname =~ s/\.fa$/\.out/;
 
+    # Let's see how long BLAT takes...
+    my $BlatTimer = StartTimer();
+
     # Assemble and run the BLAT command!
     my $blat_cmd  = $blat.' -tileSize=7 -minIdentity=90 -maxIntron=1';
     $blat_cmd     = $blat_cmd.' -t=dnax -q=prot -out=blast8 -minScore=40';
     $blat_cmd     = $blat_cmd.' 1>/dev/null 2>&1';
     $blat_cmd     = $blat_cmd.' '.$genome.' '.$cum_blat_fname.' '.$blat_outfname;
     RunSystemCommand($blat_cmd);
+
+    # Wanna know how long that took?
+    if ($coarse_timing) {
+	my $blat_time = GetElapsedTime($BlatTimer);
+	print $coarse_timing_outf "BLAT Runtime         : $blat_time\n";
+    }
 
     # Once that's all over with, we can go ahead and clear the cumulative file
     RunSystemCommand("rm \"$cum_blat_fname\"");
@@ -2711,6 +2682,9 @@ sub GenBlatMaps
     my @BlatGeneList = keys %BlatGenes;
     my $num_blat_genes = scalar(@BlatGeneList);
     $num_cpus = Min($num_cpus,$num_blat_genes);
+
+    # If we're timing, then we're timing
+    my $BlatToSpalnTimer = StartTimer();
 
     # Spin off all our happy friends!
     my $threadID = SpawnProcesses($num_cpus);
@@ -2808,6 +2782,9 @@ sub GenBlatMaps
 	}
 	close($inf);
 
+	# Initialize timing for this gene (or maybe re-open... who knows?)
+	open($GenewiseTimerOutf,'>>',$timing_dirname.$gene.'.quilter.out') if ($gene_timing);
+
 	# Now we can go sequence-by-sequence (again, treating partials specially)
 	# looking for a full mapping.
 	# We'll want to see partials before treating the full sequence, so we'll
@@ -2826,6 +2803,9 @@ sub GenBlatMaps
 		# Revert to the original sequence name
 		$seqname =~ s/\-partial$//;
 
+		# How expensive is 'filling?'
+		$GenewiseTimer = StartTimer() if ($gene_timing);
+
 		# Has BLAT given us the power to fill in the gaps in this sequence?
 		my $seq = $Seqs{$seqname};
 		$FullMaps[$i] = AttemptBlatFill($seqname,$seq,\@BlatHits);
@@ -2838,12 +2818,18 @@ sub GenBlatMaps
 		#       the non-partial work... BUT THIS MIGHT BE SOMETHING TO CHANGE
 		$FullMaps[++$i] = 0 if ($FullMaps[$i]);
 		$num_full_maps++; # This won't increment otherwise
+
+		ReportGenewiseTimer($GenewiseTimer,'Attempt-Blat-Fill') if ($gene_timing);
 		
 	    } else {
 
+		$GenewiseTimer = StartTimer() if ($gene_timing);
+		
 		# Dive right on in with Spaln!
 		my $seq = $Seqs{$seqname};
-		$FullMaps[$i] = BlatToSpalnSearch($seqname,$seq,\@BlatHits);
+		$FullMaps[$i] = BlatToSpalnSearch1($seqname,$seq,\@BlatHits);
+
+		ReportGenewiseTimer($GenewiseTimer,'Blat-To-Spaln') if ($gene_timing);
 
 	    }
 
@@ -2851,6 +2837,8 @@ sub GenBlatMaps
 	    $num_full_maps++ if ($FullMaps[$i]);
 
 	}
+
+	close($GenewiseTimerOutf) if ($gene_timing);
 
 	# Regardless of whether or not we found anything, we're done with this gene!
 	$genes_completed++;
@@ -2880,6 +2868,12 @@ sub GenBlatMaps
     # Friend time has come to its conclusion -- everyone goes home except the master
     if ($threadID) { exit(0); }
     while (wait() != -1) {}
+
+    # Wrap up timing and report
+    if ($coarse_timing) {
+	my $blat_to_spaln_time = GetElapsedTime($BlatToSpalnTimer);
+	print $coarse_timing_outf "BLAT+Spaln Mapping   : $blat_to_spaln_time\n";
+    }
 
     # I think... we're done?!?!?!?
     
@@ -3105,9 +3099,528 @@ sub AttemptBlatFill
 
 ############################################################
 #
-#  Function: BlatToSpalnSearch
+#  Function: BlatToSpalnSearch2
 #
-sub BlatToSpalnSearch
+sub BlatToSpalnSearch2
+{
+    my $seqname = shift;
+    my $seq_str = shift;
+    my $blathits_ref = shift;
+
+    my @BlatHits = @{$blathits_ref};
+    my $num_blat_hits = scalar(@BlatHits);
+
+    # If we have too many Blat hits, cull to a maximum number per chromosome
+    if ($num_blat_hits > $MaxBlatHits) {
+	$blathits_ref = CullBlatHits(\@BlatHits);
+	@BlatHits = @{$blathits_ref};
+	$num_blat_hits = scalar(@BlatHits);
+    }
+    
+    # We'll go ahead and kick things off by making a file with the protein sequence
+    my $prot_fname = $seq_dirname.$seqname.'.blat2spaln.prot.in';
+    my $ProtFile = OpenOutputFile($prot_fname);
+    print $ProtFile ">$seqname\n";
+    my @Seq = split(//,$seq_str);
+    for (my $i=0; $i<scalar(@Seq); $i++) {
+	print $ProtFile "$Seq[$i]";
+	print $ProtFile "\n" if (($i+1) % 60 == 0);
+    }
+    print $ProtFile "\n";
+    close($ProtFile);
+
+    
+    # Because our search function needs a list of protein sequences to search,
+    # we have to do this dumb stuff
+    my @ProtFnames;
+    push(@ProtFnames,$prot_fname);
+    my @SeqNames;
+    push(@SeqNames,$seqname);
+    my @SeqStrs;
+    push(@SeqStrs,$seq_str);
+
+
+    # Our first task will be coming up with the list of chromosomes that we hit
+    # to, and what ranges on those chromosomes are relevant, both in terms of
+    # nucleotides and amino acids.
+    my %ChrToNuclRanges;
+    my %ChrToAminoRanges;
+    my @AllHitsByAminoStarts;
+    foreach my $blat_hit (@BlatHits) {
+
+	$blat_hit =~ /^\-\s+(.*)$/;
+	my ($chr,$amino_start,$amino_end,$nucl_start,$nucl_end,$score)
+	    = ParseBlatLine($1);
+
+	# We'll want to know if we're in revcomp-land
+	# NOTE that we're going to force nucl_start < nucl_end, for ease of sorting 
+	if ($nucl_start > $nucl_end) {
+	    $chr = $chr.'-';
+	    my $tmp = $nucl_start;
+	    $nucl_start = $nucl_end;
+	    $nucl_end = $tmp;
+	} else {
+	    $chr = $chr.'+';
+	}
+
+	# Have we seen this chromosome before?
+	if ($ChrToNuclRanges{$chr}) {
+
+	    # Now for the fun stuff!
+
+	    # First off, we need to maintain a list of ranges on the chromosome
+	    # where we have hits.
+	    my @NuclRanges = split(/\|/,$ChrToNuclRanges{$chr});
+	    my $range_id = 0;
+	    my $range_placed = 0;
+	    my $range_str = '';
+	    while ($range_id < scalar(@NuclRanges)) {
+		
+		$NuclRanges[$range_id] =~ /^(\d+)\.\.(\d+)$/;
+		my $range_start = $1;
+		my $range_end = $2;
+
+		if ($nucl_start <= $range_start) {
+
+		    if ($nucl_end < $range_start) {
+			$range_str = $range_str.'|'.$nucl_start.'..'.$nucl_end.'|'.$range_start.'..'.$range_end;
+		    } else {
+			$range_end = Max($range_end,$nucl_end);
+			$range_str = $range_str.'|'.$nucl_start.'..'.$range_end;
+		    }
+		    $range_placed = 1;
+
+		} elsif ($nucl_start <= $range_end) {
+
+		    $range_end = Max($range_end,$nucl_end);
+		    $range_str = $range_str.'|'.$range_start.'..'.$range_end;
+		    $range_placed = 1;
+
+		} else {
+
+		    $range_str = $range_str.'|'.$range_start.'..'.$range_end;
+		    
+		}
+
+		$range_id++;
+		last if ($range_placed);
+		
+	    }
+
+	    while ($range_id < scalar(@NuclRanges)) {
+		$range_str = $range_str.'|'.$NuclRanges[$range_id];
+		$range_id++;
+	    }
+
+	    $range_str = $range_str.'|'.$nucl_start.'..'.$nucl_end if (!$range_placed);
+	    $range_str =~ s/^\|//;
+
+	    $ChrToNuclRanges{$chr} = $range_str;
+	    
+
+	    # Second, let's get the list of ranges on the amino acid sequence
+	    # that have been covered by this chromosome
+	    my @AminoRanges = split(/\|/,$ChrToAminoRanges{$chr});
+	    $range_id = 0;
+	    $range_placed = 0;
+	    $range_str = '';
+	    while ($range_id < scalar(@AminoRanges)) {
+		
+		$AminoRanges[$range_id] =~ /^(\d+)\.\.(\d+)$/;
+		my $range_start = $1;
+		my $range_end = $2;
+
+		if ($amino_start <= $range_start) {
+
+		    if ($amino_end < $range_start) {
+			$range_str = $range_str.'|'.$amino_start.'..'.$amino_end.'|'.$range_start.'..'.$range_end;
+		    } else {
+			$range_end = Max($range_end,$amino_end);
+			$range_str = $range_str.'|'.$amino_start.'..'.$range_end;
+		    }
+		    $range_placed = 1;
+
+		} elsif ($amino_start <= $range_end) {
+
+		    $range_end = Max($range_end,$amino_end);
+		    $range_str = $range_str.'|'.$range_start.'..'.$range_end;
+		    $range_placed = 1;
+
+		} else {
+
+		    $range_str = $range_str.'|'.$range_start.'..'.$range_end;
+		    
+		}
+
+		$range_id++;
+		last if ($range_placed);
+		
+	    }
+
+	    while ($range_id < scalar(@AminoRanges)) {
+		$range_str = $range_str.'|'.$AminoRanges[$range_id];
+		$range_id++;
+	    }
+
+	    $range_str = $range_str.'|'.$amino_start.'..'.$amino_end if (!$range_placed);
+	    $range_str =~ s/^\|//;
+
+	    $ChrToAminoRanges{$chr} = $range_str;
+
+	    
+	} else {
+
+	    $ChrToNuclRanges{$chr} = $nucl_start.'..'.$nucl_end;
+	    $ChrToAminoRanges{$chr} = $amino_start.'..'.$amino_end;
+
+	}
+
+
+	# Before we move onto our next hit, we'll need to add this to our giant
+	# start-amino-ordered list of hits.
+	my $big_hit_str = $amino_start.'..'.$amino_end.'/'.$chr.':'.$nucl_start.'..'.$nucl_end;
+	my $placed = 0;
+	for (my $i=0; $i<scalar(@AllHitsByAminoStarts); $i++) {
+	    $AllHitsByAminoStarts[$i] =~ /^(\d+)\./;
+	    if ($amino_start <= $1) {
+		splice(@AllHitsByAminoStarts,$i,0,$big_hit_str);
+		$placed = 1;
+		last;
+	    }
+	}
+	
+	push(@AllHitsByAminoStarts,$big_hit_str) if (!$placed);
+	    
+
+    }
+
+
+    # Awesome!
+    
+    # Next up, we'll cluster our nucleotide ranges so that if any ranges are
+    # closer than a preset distance (Blat-called intron) we'll merge them together.
+    #
+    # We'll also do a quick computation of proteoform coverage of each
+    # collection of Blat hits (by chromosome)
+    #
+    my $max_blat_intron = 500000; # 500Kb
+    my %ChrToProtCoverage;
+    my %CoverageToChrs;
+    foreach my $chr (keys %ChrToNuclRanges) {
+
+	my @NuclRanges = split(/\|/,$ChrToNuclRanges{$chr});
+
+	# Before we get to merging, we'll pull in a 15Kb window around
+	# our current list of 'exons'
+	my $true_chr = $chr;
+	$true_chr =~ s/\S$//;
+	my $chr_len = $ChrSizes{$true_chr};
+	for (my $i=0; $i<scalar(@NuclRanges); $i++) {
+	    $NuclRanges[$i] =~ /^(\d+)\.\.(\d+)$/;
+	    my $start = Max(1,$1-15000);
+	    my $end = Min($chr_len,$2+15000);
+	    $NuclRanges[$i] = $start.'..'.$end;
+	}
+
+	
+	# Merging Blat's 'exons'
+	$NuclRanges[0] =~ /^(\d+)\.\.(\d+)$/;
+	my $range_str = $1.'..';
+	my $range_end = $2;
+	for (my $i=1; $i<scalar(@NuclRanges); $i++) {
+
+	    $NuclRanges[$i] =~ /^(\d+)\.\.(\d+)$/;
+	    my $next_start = $1;
+	    my $next_end = $2;
+
+	    if ($next_start - $range_end > $max_blat_intron) {
+		$range_str = $range_str.$range_end.'|'.$next_start.'..';
+	    }
+	    $range_end = $next_end;
+	    
+	}
+
+	$range_str = $range_str.$range_end;
+
+	# Before we record the final chromosome ranges, we'll correct ourselves
+	# vis-a-vis revcompiness
+	if ($chr =~ /\-$/) {
+	    @NuclRanges = split(/\|/,$range_str);
+	    $range_str = '';
+	    foreach my $range (@NuclRanges) {
+		$range =~ /^(\d+)\.\.(\d+)$/;
+		$range_str = $2.'..'.$1.'|'.$range_str;
+	    }
+	    $range_str =~ s/\|$//;
+	}
+	
+	$ChrToNuclRanges{$chr} = $range_str;
+
+	
+	# And now the amino coverage
+	my $covered_aminos = 0;
+	foreach my $amino_range (split(/\|/,$ChrToAminoRanges{$chr})) {
+	    $amino_range =~ /^(\d+)\.\.(\d+)$/;
+	    $covered_aminos += ($2-$1)+1;
+	}
+
+	my $coverage = int(1000.0 * $covered_aminos / length($seq_str)) / 10.0;
+	$ChrToProtCoverage{$chr} = $coverage;
+
+	if ($CoverageToChrs{$coverage}) {
+	    $CoverageToChrs{$coverage} = $CoverageToChrs{$coverage}.'|'.$chr;
+	} else {
+	    $CoverageToChrs{$coverage} = $chr;
+	}
+	
+    }
+
+
+    # Before we get searching, we'll set the ground rule that we won't pull
+    # in more than 20Mb
+    my $max_spaln_nucls = 20000000;
+
+    
+
+    ##########################
+    #                        #
+    #    S E A R C H    1    #
+    #                        #
+    ##########################
+
+    
+
+    # We'll sort our chromosomes according to coverage, so as to prioritize
+    # our best candidates.
+    my @CoverageSortedChrs;
+    foreach my $coverage (sort {$b <=> $a} keys %CoverageToChrs) {
+	foreach my $chr (split(/\|/,$CoverageToChrs{$coverage})) {
+	    push(@CoverageSortedChrs,$chr);
+	}
+    }
+    my $search_1_min_coverage = 70.0;
+
+    
+    my @SpalnHitStrs;
+    my @SpalnPctsID;
+    my $num_spaln_hits = 0;
+    my $best_spaln_hit = 0;
+    foreach my $chr (@CoverageSortedChrs) {
+
+	last if ($ChrToProtCoverage{$chr} < $search_1_min_coverage);
+
+	my @SpalnStarts;
+	my @SpalnEnds;
+	my @SpalnChrs;
+	my $total_nucls = 0;
+	foreach my $range (split(/\|/,$ChrToNuclRanges{$chr})) {
+
+	    push(@SpalnChrs,$chr);
+
+	    $range =~ /^(\d+)\.\.(\d+)$/;
+	    push(@SpalnStarts,$1);
+	    push(@SpalnEnds,$2);
+	    $total_nucls += abs($2-$1);
+
+	}
+
+	next if ($total_nucls > $max_spaln_nucls);
+
+	my ($hit_strs_ref,$hit_pcts_ref)
+	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs,90.0);
+
+	# We're only going to hang onto the best Spaln output for this search
+	my $hit_str = @{$hit_strs_ref}[0];
+	my $hit_pct = @{$hit_pcts_ref}[0];
+	push(@SpalnHitStrs,$hit_str);
+	push(@SpalnPctsID,$hit_str);
+
+	if ($SpalnPctsID[$best_spaln_hit] < $hit_pct) {
+	    $best_spaln_hit = $num_spaln_hits;
+	}
+
+	$num_spaln_hits++;
+	
+    }
+
+    # Did we get lucky-ish with our first search?
+    if ($num_spaln_hits) {
+	RunSystemCommand("rm \"$prot_fname\"");
+	return $SpalnHitStrs[$best_spaln_hit];
+    }
+    
+
+    
+
+    ##########################
+    #                        #
+    #    S E A R C H    2    #
+    #                        #
+    ##########################
+
+
+
+    # In the event that we didn't have a good Spaln hit that met our standards
+    # for biological consistency (i.e., non-chimeric encoding), we'll perform
+    # a search that allows for chimeric events.
+
+    # The main trick is coming up with the right chimeric nucleotide sequence.
+    # To do this, we'll run through our big list of hits (organized by amino
+    # starts), joining any instances where overlapping aminos also overlap on the
+    # genome
+    my @ReducedHitsByAminoStarts;
+    my $hit_id = 0;
+    while ($hit_id < $num_blat_hits) {
+
+	my $current_hit = $AllHitsByAminoStarts[$hit_id];
+	if ($current_hit eq '-') {
+	    $hit_id++;
+	    next;
+	}
+
+	$current_hit =~ /^(\d+)\.\.(\d+)\/(\S+)\:(\d+)\.\.(\d+)$/;
+	my $amino_start = $1;
+	my $amino_end = $2;
+	my $chr = $3;
+	my $nucl_start = $4;
+	my $nucl_end = $5;
+
+	for (my $scan_id=$hit_id+1; $scan_id<$num_blat_hits; $scan_id++) {
+
+	    next if ($AllHitsByAminoStarts[$scan_id] eq '-');
+
+	    $AllHitsByAminoStarts[$scan_id] =~ /^(\d+)\.\.(\d+)\/(\S+)\:(\d+)\.\.(\d+)$/;
+	    my $scan_amino_start = $1;
+	    my $scan_amino_end = $2;
+	    my $scan_chr = $3;
+	    my $scan_nucl_start = $4;
+	    my $scan_nucl_end = $5;
+
+	    next if ($scan_chr ne $chr);
+	    last if ($scan_amino_start > $amino_end+2); # A bit o' grace
+
+	    # This is a hit to the same chromosome / portion of the protein!
+	    # Is it biologically consistent with these being the same exon?
+
+	    my $join_exons = 0;
+	    if ($chr =~ /\-$/) {
+
+		# This is weird because we're sticking with forced 'start<end'
+		# even though we're doing exon positioning logic...
+
+		# Biological Consistency 1: Not a move backwards (revcomp-ily)
+		next if ($nucl_end < $scan_nucl_start);
+
+		# Biological Consistency 2: Reasonable distance
+		next if ($nucl_start - $scan_nucl_end > 1000);
+
+		# Sure, you can be exon buddies!
+		$join_exons = 1;
+		
+	    } else {
+
+		# Biological Consistency 1: Not a move backwards
+		next if ($nucl_start > $scan_nucl_end);
+
+		# Biological Consistency 2: Reasonable distance
+		next if ($scan_nucl_start - $nucl_end > 1000);
+
+		# Pair 'em!
+		$join_exons = 1;
+
+	    }
+
+	    if ($join_exons) {
+		# Good enough for government splicing!
+		$amino_end = Max($amino_end,$scan_amino_end);
+		$nucl_start = Min($nucl_start,$scan_nucl_start);
+		$nucl_end = Max($nucl_end,$scan_nucl_end);
+		$AllHitsByAminoStarts[$scan_id] = '-';
+	    }
+
+	    # NOTE: We allow this to continue even if we didn't join a hit to our
+	    #       current chromosome because there might be a pathological ordering
+	    #       of the hits in Blat output that would interpolate a slightly
+	    #       overlapping chromosomal-rearrangement-exon in between as-expected
+	    #       exons.
+
+	}
+
+	# Pull in a lil' extra
+	my $true_chr = $chr;
+	$true_chr =~ s/\S$//;
+	$nucl_start = Max(1,$nucl_start-15000);
+	$nucl_end = Min($ChrSizes{$true_chr},$nucl_end+15000);
+
+	$current_hit = $amino_start.'..'.$amino_end.'/'.$chr.':'.$nucl_start.'..'.$nucl_end;
+	push(@ReducedHitsByAminoStarts,$current_hit);
+
+	$hit_id++;
+	
+    }
+
+    # Now that we have our set of reduced hits, we can compile the nucleotide runs
+    # that we want to search in.
+
+    my @SpalnStarts;
+    my @SpalnEnds;
+    my @SpalnChrs;
+    my $total_nucls = 0;
+    foreach my $reduced_hit (@ReducedHitsByAminoStarts) {
+
+	$reduced_hit =~ /\/(\S+)\:(\d+)\.\.(\d+)$/;
+	my $chr = $1;
+	my $nucl_start = $2;
+	my $nucl_end = $3;
+
+	if ($chr =~ /\-$/) {
+	    my $tmp = $nucl_start;
+	    $nucl_start = $nucl_end;
+	    $nucl_end = $tmp;
+	}
+
+	push(@SpalnStarts,$nucl_start);
+	push(@SpalnEnds,$nucl_end);
+	push(@SpalnChrs,$chr);
+
+	$total_nucls += abs($nucl_end-$nucl_start);
+	
+    }
+
+    my $hit_str;
+    my $hit_pct = 0;
+    if ($total_nucls < 2 * $max_spaln_nucls) {
+
+	my ($hit_strs_ref,$hit_pcts_ref)
+	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs,90.0);
+
+	# We're only going to hang onto the best Spaln output for this search
+	$hit_str = @{$hit_strs_ref}[0];
+	$hit_pct = @{$hit_pcts_ref}[0];
+
+    }
+
+    
+    # However this breaks, it breaks with you in the bin!
+    RunSystemCommand("rm \"$prot_fname\"");
+
+    # And that's all there is!
+    return 0 if (!$hit_pct); # Breaking bad  :(
+    return $hit_str;         # Breaking good :D
+    
+}
+
+
+
+
+
+
+
+############################################################
+#
+#  Function: BlatToSpalnSearch1
+#
+sub BlatToSpalnSearch1
 {
     my $seqname = shift;
     my $seq_str = shift;
@@ -3115,6 +3628,12 @@ sub BlatToSpalnSearch
 
     my @BlatHits = @{$blathits_ref};
 
+    # If we have too many Blat hits, cull to a maximum number per chromosome
+    if (scalar(@BlatHits) > $MaxBlatHits) {
+	$blathits_ref = CullBlatHits(\@BlatHits);
+	@BlatHits = @{$blathits_ref};
+    }
+    
     # We'll go ahead and kick things off by making a file with the protein sequence
     my $prot_fname = $seq_dirname.$seqname.'.blat2spaln.prot.in';
     my $ProtFile = OpenOutputFile($prot_fname);
@@ -3331,23 +3850,51 @@ sub BlatToSpalnSearch
     }
 
 
-    
+    # We'll sort the chromosomes according to coverage (lazy implementation)
+    my %CoverageToChr;
+    foreach my $chr (keys %CoverageByChr) {
+	my $coverage = $CoverageByChr{$chr};
+	if ($CoverageToChr{$coverage}) {
+	    $CoverageToChr{$coverage} = $CoverageToChr{$coverage}.'|'.$chr;
+	} else {
+	    $CoverageToChr{$coverage} = $chr;
+	}
+    }
 
+    # I'm going to limit our searching to the top 5 chromosomes,
+    # because the likelihood of our best hit coming from a non-top-5
+    # chromosome seems vanishingly low.
+    # Of course, if there's a tie for coverage that pushes us past
+    # 5, we'll include more (rather than arbitrarily enforcing the
+    # cutoff that would be imposed by perl's "foreach").
+    my $max_search_chrs = 5;
+    my @ChrsByCoverage;
+    foreach my $coverage (sort {$b <=> $a} keys %CoverageToChr) {
+	foreach my $chr (split(/\|/,$CoverageToChr{$coverage})) {
+	    push(@ChrsByCoverage,$chr);
+	}
+	last if (scalar(@ChrsByCoverage) >= $max_search_chrs);
+    }
+
+
+    
+    
     ##########################
     #                        #
     #    S E A R C H    1    #
     #                        #
     ##########################
+
     
     
     # Swell! Now we'll go through each of our chromosomes, and any that have more
     # than 75% coverage will be Spalned
     my $top_pct_id  = 0;
     my $top_hit_str = 0;
-    foreach my $chr (keys %CoverageByChr) {
+    foreach my $chr (@ChrsByCoverage) {
 
 	# Do you have solid coverage?
-	next if ($CoverageByChr{$chr} < 3 * $seq_len / 4);
+	next if (4 * $CoverageByChr{$chr} < 3 * $seq_len);
 
 	# Woot! So, if your coverage is so great, where's it coming from?
 	my @RangeStarts;
@@ -3374,8 +3921,8 @@ sub BlatToSpalnSearch
 	my @SpalnStarts = @{$starts_ref};
 	my @SpalnEnds   = @{$ends_ref};
 	
-	# We won't do a search that would require pulling in >15Mb
-	next if ($sum_len > 15000000);
+	# Skip this search if we've exceeded our sequence length cap
+	next if ($sum_len > $max_spaln_nucls);
 
 	# Because we're using a function that plays friendly with a multiple-chromosome
 	# version of this index building, we'll need to note the chromosomes for each
@@ -3395,7 +3942,13 @@ sub BlatToSpalnSearch
 	if ($hit_pct_id > $top_pct_id) {
 	    $top_pct_id  = $hit_pct_id;
 	    $top_hit_str = $hit_str;
+	} elsif ($top_pct_id) {
+	    # If there's already been a good hit and a darkhorse chromosome hasn't
+	    # overtaken it, let's just go with our first choice
+	    RunSystemCommand("rm \"$prot_fname\"");
+	    return $top_hit_str;
 	}
+	
     }
 
     # Any chance we got a hit on easy mode?
@@ -3405,19 +3958,23 @@ sub BlatToSpalnSearch
     }
 
 
+
+    
     ##########################
     #                        #
     #    S E A R C H    2    #
     #                        #
     ##########################
+
+
     
     # Alright, we've tried the 'standard' approach to splicing -- now let's see if
     # there's anything out-of-order, but just on a chromosomal level...
-    foreach my $chr (keys %CoverageByChr) {
+    foreach my $chr (@ChrsByCoverage) {
 
 	# Do you have solid coverage?
-	next if ($CoverageByChr{$chr} < 3 * $seq_len / 4);
-
+	next if (4 * $CoverageByChr{$chr} < 3 * $seq_len);
+	
 	# Woot! So, if your coverage is so great, where's it coming from?
 	my @RangeStarts;
 	my @RangeEnds;
@@ -3446,8 +4003,8 @@ sub BlatToSpalnSearch
 	my @SpalnStarts = @{$starts_ref};
 	my @SpalnEnds   = @{$ends_ref};
 
-	# We still won't do a search that would require pulling in >15Mb
-	next if ($sum_len > 15000000);
+	# Skip this search if we've exceeded our sequence length cap
+	next if ($sum_len > $max_spaln_nucls);
 
 	my @SpalnChrs;
 	for (my $i=0; $i<$num_ranges; $i++) {
@@ -3464,6 +4021,11 @@ sub BlatToSpalnSearch
 	if ($hit_pct_id > $top_pct_id) {
 	    $top_pct_id  = $hit_pct_id;
 	    $top_hit_str = $hit_str;
+	} elsif ($top_pct_id) {
+	    # Once again, if we had a winner who wasn't bested, then let's trust
+	    # our collective guts.
+	    RunSystemCommand("rm \"$prot_fname\"");
+	    return $top_hit_str;
 	}
 
     }
@@ -3476,11 +4038,15 @@ sub BlatToSpalnSearch
     }
 
 
+
+    
     ##########################
     #                        #
     #    S E A R C H    3    #
     #                        #
     ##########################
+
+
     
     # Hmmmmm.....
     # Alright, let's go wild 'n' crazy and see if we can jumble our chromosomes
@@ -3541,6 +4107,46 @@ sub BlatToSpalnSearch
     
 }
 
+
+
+
+
+
+############################################################
+#
+#  Function: CullBlatHits
+#
+sub CullBlatHits
+{
+    my $blathits_ref = shift;
+
+    my $max_chr_hits = 100;
+
+    my @BlatHits;
+    my %HitsPerChr;
+    foreach my $hit (@{$blathits_ref}) {
+
+	$hit =~ /^\-\s+(.*)$/;
+	my ($chr,$amino_start,$amino_end,$nucl_start,$nucl_end,$score)
+	    = ParseBlatLine($1);
+
+	if ($nucl_start > $nucl_end) {
+	    $chr = $chr.'[revcomp]';
+	}
+
+	if (!$HitsPerChr{$chr}) {
+	    push(@BlatHits,$hit);
+	    $HitsPerChr{$chr}=1;
+	} elsif ($HitsPerChr{$chr} < $max_chr_hits) {
+	    push(@BlatHits,$hit);
+	    $HitsPerChr{$chr}++;	    
+	}
+	
+    }
+
+    return \@BlatHits;
+    
+}
 
 
 
@@ -4424,6 +5030,19 @@ sub FinalFileCheck
 
 
 
+
+
+#########################################################################
+#
+#  Function Name: ReportGenewiseTimer
+#
+sub ReportGenewiseTimer
+{
+    my $timer = shift;
+    my $segment = shift;
+    my $time_in_seconds = GetElapsedTime($timer);
+    print $GenewiseTimerOutf "$segment: $time_in_seconds\n";
+}
 
 
 #
