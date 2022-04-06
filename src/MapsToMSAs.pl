@@ -844,9 +844,10 @@ sub ComposeMSA
     #
     my @Disagreements = ();
     if ($num_seqs > 1) {
-	my ($msa_ref,$DisagreementsRef,$msa_len) = MinorClean(\@MSA,$num_seqs,$msa_len);
+	my ($msa_ref,$DisagreementsRef,$new_len) = MinorClean(\@MSA,$num_seqs,$msa_len);
 	@MSA = @{$msa_ref};
 	@Disagreements = @{$DisagreementsRef};
+	$msa_len = $new_len;
     }
 
 
