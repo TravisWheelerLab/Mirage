@@ -843,12 +843,10 @@ sub ComposeMSA
     # for this gene family.
     #
     my @Disagreements = ();
-    my $final_len = $msa_len;
     if ($num_seqs > 1) {
-	my ($msa_ref,$DisagreementsRef,$tmp_len) = MinorClean(\@MSA,$num_seqs,$msa_len);
+	my ($msa_ref,$DisagreementsRef,$msa_len) = MinorClean(\@MSA,$num_seqs,$msa_len);
 	@MSA = @{$msa_ref};
 	@Disagreements = @{$DisagreementsRef};
-	$final_len = $tmp_len;
     }
 
 
