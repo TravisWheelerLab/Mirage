@@ -3249,7 +3249,7 @@ sub LocalMatchMismatchAli
     # Determine the "score contribution" for each cell
     my @TraceScore;
     $TraceScore[0] = 0;
-    my $key_pos; # Where do we pass through [max_i][max_j]?
+    my $key_pos = 0; # Where do we pass through [max_i][max_j]?
     for (my $pos=1; $pos<$trace_len; $pos++) {
 
 	# Knock this check out first
