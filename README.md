@@ -72,11 +72,19 @@ For example, the following is a valid sequence name entry:
 ```
 
 Alternatively, protein sequences can be named following UniProt conventions,
-where the `OS` and `GN` fields signify species and gene family:
+where Mirage looks to the contents of the `OS` and `GN` fields to recognize the
+sequence's species and gene family:
 
 ```
->sp|Q5VST9|OBSCN_HUMAN Obscurin OS=Homo_sapiens OX=9606 GN=OBSCN PE=1 SV=3
+>sp|Q5VST9_iso1|OBSCN_HUMAN Obscurin OS=Homo_sapiens OX=9606 GN=OBSCN PE=1 SV=3
 ```
+
+Because the simplified Mirage naming convention and the UniProt convention both
+incorporate a triple of |-separated fields, it is critical to preserve the `OS`
+and `GN` fields in sequences intended to be parsed under the UniProt convention.
+In the above example, removing those fields would cause Mirage to mistakenly
+identify the sequence as belonging to a species named 'sp' and a gene family
+named 'Q5VST9_iso1.'
 
 
 **Species Guide File**
