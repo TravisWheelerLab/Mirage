@@ -3786,14 +3786,39 @@ sub GetMapSummaryStats
 	    # We can now consider searches within this exon range by order
 	    # of target species.
 	    foreach my $target_species (sort keys %MapsByTargetSpecies) {
-		
+
 		my @MapsToSpecies = split(/\&/,$MapsByTargetSpecies{$target_species});
 		
 		# We'll go ahead and grab the region of the target species' genome that
 		# was mapped to (should be consistent...)
 		$MapsToSpecies[0] =~ /^[^\|]+\|([^\|]+)\|/;
 		my $target_species_region = $1;
+
+		# Write to this species' .bed file roight quicke!
+		open(my $TargetBed,'>>',$outdirname.$target_species.'.bed');
+
+		$target_species_region =~ /([^\:]+)\:(\d+)\.\.(\d+)/;
+		my $chr = $1;
+		my $start = $2;
+		my $end = $3;
+
+		my $strand = '+';
+		if ($chr =~ /\[revcomp\]/) {
+		    $chr =~ s/\[revcomp\]//;
+		    my $tmp = $start;
+		    $start = $end;
+		    $end = $tmp;
+		    $strand = '-';
+		}
 		
+		my $bed_name = $gene.'-exon';
+		$bed_name = $bed_name.'s' if ($exon_range =~ /\.\./);
+		$bed_name = $bed_name.'_'.$exon_range;
+
+		print $TargetBed "$chr $start $end $bed_name 0 $strand\n";
+		close($TargetBed);
+
+		# Bed time is over -- back to work!
 		my $num_maps_to_species = scalar(@MapsToSpecies);
 		
 		# As is customary in this region, we must declare the number of mappings
