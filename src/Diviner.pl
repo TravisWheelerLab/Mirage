@@ -3892,7 +3892,7 @@ sub GetMapSummaryStats
     # Now we'll run through each of our target species and give a little bit of info.
     foreach my $species (keys %TargetSpeciesToSuggested) {
 
-	$outf = OpenOutputFile($outdirname.$species.'-summary.out');
+	$outf = OpenOutputFile($outdirname.$species.'.overview.out');
 
 	my $num_suggested_exons = $TargetSpeciesToSuggested{$species};
 	my $num_annotated_exons = 0;
