@@ -1667,23 +1667,24 @@ sub FindGhostExons
 
 	my @SearchRanges = split(/\|/,$TargetSpeciesRange[$q]);
 
-	# If we're at either terminii of our sequence, pull in an extra 20k (or as
+	# If we're at either terminii of our sequence, pull in an extra 100k (or as
 	# much as we can)
+	my $terminal_search_dist = 100000;
 	if ($SearchRanges[0] =~ /\:(\d+)/) {
 	    my $seq_start = $1;
 	    if ($revcomp) {
-		$SearchRanges[0] = Min($seq_start+20000,$ChrLensBySpecies{$target_species.'|'.$chr});		
+		$SearchRanges[0] = Min($seq_start+$terminal_search_dist,$ChrLensBySpecies{$target_species.'|'.$chr});		
 	    } else {
-		$SearchRanges[0] = Max($seq_start-20000,1);
+		$SearchRanges[0] = Max($seq_start-$terminal_search_dist,1);
 	    }
 	}
 	
 	if ($SearchRanges[1] =~ /\:(\d+)/) {
 	    my $seq_end = $1;
 	    if ($revcomp) {
-		$SearchRanges[1] = Max($seq_end-20000,1);
+		$SearchRanges[1] = Max($seq_end-$terminal_search_dist,1);
 	    } else {
-		$SearchRanges[1] = Min($seq_end+20000,$ChrLensBySpecies{$target_species.'|'.$chr});
+		$SearchRanges[1] = Min($seq_end+$terminal_search_dist,$ChrLensBySpecies{$target_species.'|'.$chr});
 	    }
 	}
 
