@@ -1667,9 +1667,9 @@ sub FindGhostExons
 
 	my @SearchRanges = split(/\|/,$TargetSpeciesRange[$q]);
 
-	# If we're at either terminii of our sequence, pull in an extra 100k (or as
+	# If we're at either terminii of our sequence, pull in an extra 25k (or as
 	# much as we can)
-	my $terminal_search_dist = 100000;
+	my $terminal_search_dist = 25000;
 	if ($SearchRanges[0] =~ /\:(\d+)/) {
 	    my $seq_start = $1;
 	    if ($revcomp) {
