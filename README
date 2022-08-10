@@ -199,12 +199,10 @@
           you're in a compute environment where you don't have permission
 	  to change /usr/include.  To get around BLAT make issues, you
 	  can use the binary located at 'dependencies/x86_64-blat-binary'
-	  Simply perform the following:
+	  Simply perform the following (from the 'mirage' directory):
 
-               % cd dependencies
-	       % (rm -rf blat)  <- if a failed build left a 'blat' directory
-	       % mkdir blat
-	       % mkdir blat/bin
-	       % cp x86_64-blat-binary blat/bin/blat
+               % mkdir build/blat
+	       % mkdir build/blat/bin
+	       % cp dependencies/x86_64-blat-binary build/blat/bin/blat
 
 
