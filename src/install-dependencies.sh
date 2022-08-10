@@ -68,6 +68,8 @@ confirm_file_exists $BLAT_TAR
 confirm_file_exists $SPALN_TAR
 confirm_file_exists $TBLASTN_TAR
 
+BUILD_DIR=build
+
 # Because we want to be sure that everything we're testing has been
 # unpacked and setup in this specific environment
 rm -rf $TEST_DIR
@@ -208,6 +210,8 @@ check_sfetch '-range 13000..38000' chr1 $DNA2_NAME $SP2_GENE2_DNA_NAME   # test 
 check_sfetch '-range 24000..1000'  chr2 $DNA2_NAME $SP2_GENE3_DNA_NAME   # test 18
 check_sfetch '-range 13000..64500' chr1 $DNA3_NAME $SP3_GENE23_DNA_NAME  # test 19
 
+mv -f $HSI_DIR $BUILD_DIR/$HSI_BASE
+
 
 
 # SPALN
@@ -238,6 +242,36 @@ check_spaln $AA2_NAME $SP2_GENE2_DNA_NAME sp2.g2.spaln.out    # test 22
 check_spaln $AA2_NAME $SP2_GENE3_DNA_NAME sp2.g3.spaln.out    # test 23
 check_spaln $AA3_NAME $SP3_GENE23_DNA_NAME sp3.g23.spaln.out  # test 24
 
+mv -f $SPALN_DIR $BUILD_DIR/$SPALN_BASE
+
+
+
+# TBLASTN
+tar -xf $TBLASTN_TAR -C $DEPS_DIR
+TBLASTN=$TBLASTN_DIR/tblastn.linux.x86_64
+check_tblastn()
+{
+    DNA_NAME=$1
+    AMINO_NAME=$2
+    OUT_FILE_NAME=$3
+
+    DNA_INPUT=$INPUTS_DIR/$DNA_NAME
+    AMINO_INPUT=$INPUTS_DIR/$AMINO_NAME
+    OBSERVED_FILE=$OBS_OUTPUTS_DIR/$OUT_FILE_NAME
+    EXPECTED_FILE=$EXP_OUTPUTS_DIR/$OUT_FILE_NAME
+
+    report_test_start tblastn
+    $TBLASTN -outfmt 6 -subject $DNA_INPUT -query $AMINO_INPUT -out $OBSERVED_FILE 1>/dev/null
+    confirm_identical_files $OBSERVED_FILE $EXPECTED_FILE tblastn
+    echo ' passed'
+}
+LOCAL_TEST_NUM=1
+check_tblastn $DNA1_NAME $AA1_NAME sp1.tblastn.out  # test 28
+check_tblastn $DNA2_NAME $AA2_NAME sp2.tblastn.out  # test 29
+check_tblastn $DNA3_NAME $AA3_NAME sp3.tblastn.out  # test 30
+
+mv -f $TBLASTN_DIR $BUILD_DIR/$TBLASTN_BASE
+
 
 
 # BLAT
@@ -267,42 +301,13 @@ check_blat $DNA1_NAME $AA1_NAME sp1.blat.out  # test 25
 check_blat $DNA2_NAME $AA2_NAME sp2.blat.out  # test 26
 check_blat $DNA3_NAME $AA3_NAME sp3.blat.out  # test 27
 
-
-# TBLASTN
-tar -xf $TBLASTN_TAR -C $DEPS_DIR
-TBLASTN=$TBLASTN_DIR/tblastn.linux.x86_64
-check_tblastn()
-{
-    DNA_NAME=$1
-    AMINO_NAME=$2
-    OUT_FILE_NAME=$3
-
-    DNA_INPUT=$INPUTS_DIR/$DNA_NAME
-    AMINO_INPUT=$INPUTS_DIR/$AMINO_NAME
-    OBSERVED_FILE=$OBS_OUTPUTS_DIR/$OUT_FILE_NAME
-    EXPECTED_FILE=$EXP_OUTPUTS_DIR/$OUT_FILE_NAME
-
-    report_test_start tblastn
-    $TBLASTN -outfmt 6 -subject $DNA_INPUT -query $AMINO_INPUT -out $OBSERVED_FILE 1>/dev/null
-    confirm_identical_files $OBSERVED_FILE $EXPECTED_FILE tblastn
-    echo ' passed'
-}
-LOCAL_TEST_NUM=1
-check_tblastn $DNA1_NAME $AA1_NAME sp1.tblastn.out  # test 28
-check_tblastn $DNA2_NAME $AA2_NAME sp2.tblastn.out  # test 29
-check_tblastn $DNA3_NAME $AA3_NAME sp3.tblastn.out  # test 30
-
-
-#
-BUILD_DIR=build
-mv -f $HSI_DIR $BUILD_DIR/$HSI_BASE
 mv -f $BLAT_DIR $BUILD_DIR/$BLAT_BASE
-mv -f $SPALN_DIR $BUILD_DIR/$SPALN_BASE
-mv -f $TBLASTN_DIR $BUILD_DIR/$TBLASTN_BASE
+
 
 
 # Cleanup
 rm -rf $TEST_DIR
 echo "    All dependencies passed!"
+
 
 # END OF SCRIPT
