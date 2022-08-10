@@ -12,6 +12,7 @@
   5. About
   6. Source Files
   7. Included Directories
+     - Using the BLAT binary instead of compiling from source
 
 
 
@@ -194,6 +195,18 @@
 
     A program used to perform extremely fast translated local mapping.
 
+    NOTE: BLAT's library requirements can be annoying to work around if
+          you're in a compute environment where you don't have permission
+	  to change /usr/include.  To get around BLAT make issues, you
+	  can use the binary located at 'dependencies/x86_64-blat-binary'
+	  Simply perform the following:
+
+                    % cd dependencies
+		    % mkdir blat
+		    % mkdir blat/bin
+		    % mv x86_64-blat-binary blat/bin/blat
+
+          
 
 
 
