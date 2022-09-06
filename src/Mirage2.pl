@@ -44,6 +44,7 @@ sub AlignUnmappedSeqs;
 sub AlignMiscSeqs;
 sub MergeAlignments;
 sub FinalizeIntraSpeciesMSA;
+sub ReorganizeResultsForMapping;
 sub EvaluateMissDir;
 sub ReportGranularQuilterTiming;
 sub PrintTimingInfo;
@@ -100,7 +101,8 @@ my $ResultsDir      = $Options{outdirname};
 my $verbose         = $Options{verbose};
 my $num_cpus        = $Options{cpus};
 my $timing          = $Options{time};
-my $stack_arfs      = $Options{stackarfs};
+my $only_map        = $Options{onlymap};
+my $stack_arfs      = $Options{stackarfs};     # Hidden
 my $forcecompile    = $Options{forcecompile};  # Hidden
 my $cleanMSA        = $Options{cleanmsa};      # Hidden
 my $just_spaln      = $Options{justspaln};     # Hidden
@@ -222,6 +224,20 @@ for (my $i=0; $i<$num_species-1; $i++) {
 	RunSystemCommand("rm $quilter_timer_fname");
 
     }
+
+
+    # If we're only mapping, skip all that MSA business!
+    if ($only_map) {
+	ClearProgress();
+	if ($timing) {
+	    my $species_timing_str
+		= SecondsToSMHDString(GetElapsedTime($SpeciesTimer));
+	    print "\n  + Mapping Time for $Species[$i] : $species_timing_str\n";
+	} else {
+	    print "  Mapping complete for $Species[$i]\n";
+	}
+	next;
+    }
     
 
     #
@@ -284,42 +300,66 @@ for (my $i=0; $i<$num_species-1; $i++) {
 }
 
 
-# HOLY COW! You just made a heckin' ton of MSAs!
-# But don't forget about the 'Misc' sequences...
-if ($misc_seqs) {
 
-    my $MiscTimer = StartTimer();
+# Are we only mapping?
+if ($only_map) {
 
-    AlignMiscSeqs($SpeciesDir{'Misc'});
+    ReorganizeResultsForMapping();
+    
+} else {
 
+    # NOPE! We're aligning, dude!
+
+    # But don't you dare forget about the 'Misc' sequences...
+    if ($misc_seqs) {
+
+	my $MiscTimer = StartTimer();
+
+	AlignMiscSeqs($SpeciesDir{'Misc'});
+	
+	if ($timing) {
+	    my $misc_timing_str
+		= SecondsToSMHDString(GetElapsedTime($MiscTimer));
+	    print "  Alignment of Species without Genomes: $misc_timing_str\n";
+	}
+
+    }
+
+    
+    # We're now going to track how long the whole final-MSA-generating
+    # part of the program takes
+    my $AliMergeTimer = StartTimer();
+
+    # Perform a most unnatural merging of alignments! (interspecies -- scandalous!)
+    MergeAlignments(\@Species,\%SpeciesDir,\@MergeOrder,\@AllGenes,\@OrigSeqNames);
+
+    # Slap that stop-watch!
     if ($timing) {
-	my $misc_timing_str
-	    = SecondsToSMHDString(GetElapsedTime($MiscTimer));
-	print "  Alignment of Species without Genomes: $misc_timing_str\n";
+	my $ali_merge_timing_str = SecondsToSMHDString(GetElapsedTime($AliMergeTimer));
+	ClearProgress();
+	print "\n  Interspecies Alignment: $ali_merge_timing_str\n";
+    }
+
+    
+    # Even though there'll be a few moments for cleanup, who says we can't pop
+    # some champagne bottles?
+    print "  ";
+    print "+ " if ($timing);
+    print "Inter-species alignment complete\n";
+    print "\n" if ($timing);
+
+    
+    # If there weren't any genomeless sequences, we can clear out the Misc dir
+    if (!$misc_seqs) {
+	my $miscdir = $SpeciesDir{'Misc'};
+	RunSystemCommand("rm -rf \"$miscdir\" \&");
     }
 
 }
 
-# We're now going to track how long the whole final-MSA-generating
-# part of the program takes
-my $AliMergeTimer = StartTimer();
 
-# Perform a most unnatural merging of alignments! (interspecies -- scandalous!)
-MergeAlignments(\@Species,\%SpeciesDir,\@MergeOrder,\@AllGenes,\@OrigSeqNames);
 
-# Slap that stop-watch!
-if ($timing) {
-    my $ali_merge_timing_str = SecondsToSMHDString(GetElapsedTime($AliMergeTimer));
-    ClearProgress();
-    print "\n  Interspecies Alignment: $ali_merge_timing_str\n";
-}
-
-# Even though there'll be a few moments for cleanup, who says we can't pop
-# some champagne bottles?
-print "  ";
-print "+ " if ($timing);
-print "Inter-species alignment complete\n";
-print "\n" if ($timing);
+# Time for the end-of-execution mop-up!
 
 
 # For a touch of cleanup, get rid of our species-specific protein databases
@@ -327,28 +367,21 @@ for (my $i=0; $i<$num_species; $i++) {
     my $seqdirname = $SpeciesDir{$Species[$i]}.'seqs/';
     RunSystemCommand("rm -rf \"$seqdirname\" \&");
 }
-
-# We'll also clear out the alias and name guide files
+    
+# We'll also want to clear out the alias and name guide files
 RunSystemCommand("rm \"$seqnamefname\"");
 my $aliasfname = $ResultsDir.'gene-aliases';
 RunSystemCommand("rm \"$aliasfname\"") if (-e $aliasfname);
 
-# If there weren't any genomeless sequences, we can clear out the Misc dir
-if (!$misc_seqs) {
-    my $miscdir = $SpeciesDir{'Misc'};
-    RunSystemCommand("rm -rf \"$miscdir\" \&");
-}
 
 # Check whether we actually had any mapping misses to report -- if not,
 # celebrate by burning the miss directory to the ground
 EvaluateMissDir($misses_dirname);
 
+
 # No more progress to be made!
 system("rm -rf \"$progress_dirname\" \&");
 
-# WE DID IT!
-ClearProgress();
-print "\n  Mirage complete; results in $ResultsDir\n";
 
 # Last chance to get timing data
 if ($timing) {
@@ -357,10 +390,15 @@ if ($timing) {
     print "  Total Runtime  : $total_runtime_str\n";
 }
 
-# NOICE!
-print "\n";
-1;
 
+# WE DID IT!
+ClearProgress();
+print "\n  Mirage complete; results in $ResultsDir\n\n";
+
+
+####  NOICE!
+1; #  NOICE!
+####  NOICE!
 
 
 
@@ -393,7 +431,7 @@ print "\n";
 sub PrintUsage
 {
     print "\n\n";
-    print " MIRAGE : Multiple-sequence Isoform Alignment Tool Guided by Exon Boundaries ($mirage_version)\n\n";
+    print " Mirage2: Multiple-sequence Isoform Alignment Tool Guided by Exon Boundaries ($mirage_version)\n\n";
     print " USAGE  : mirage [OPT.s] <Isoform DB>  <Species Guide>                                  \n\n";
     print " ARG.s  : <IsoformDB>     : A FASTA-formatted protein database, with the following      \n";
     print "                            naming convention:                                          \n\n";
@@ -408,6 +446,7 @@ sub PrintUsage
     print " OPT.s  : --help      : More detailed help.                                             \n";
     print "          --verbose   : Verbose output.                                                 \n";
     print "          --time      : Print timing data to stdout at end of program                   \n";
+    print "          --onlymap   : Stop after producing protein-to-genome mappings                 \n";
     print "          -outdirname : Specify output directory name.                                  \n";
     print "          -cpus       : Specify number of CPU cores (default: 2)                        \n";
     die "\n\n";
@@ -427,47 +466,48 @@ sub PrintUsage
 sub DetailedUsage
 {
     print "\n\n";
-    print " .-======-+--=-----------------=----=--=--------------=---------=---------------. \n";
-    print " | MIRAGE :  Multiple-sequence Isoform Alignment Tool Guided by Exon Boundaries | \n";
-    print " '-======-+--=-----------------=----=--=--------------=---------=---------------' \n";
+    print " .-=======-+--=-----------------=----=--=--------------=---------=-------------------.  \n";
+    print " | Mirage2 :  Multiple-sequence Isoform Alignment Tool Guided by Exon Boundaries (2) |  \n";
+    print " '-=======-+--=-----------------=----=--=--------------=---------=-------------------'  \n";
     print "  $mirage_version\n";
-    print "                                                                                  \n";
-    print "    USAGE :  mirage  [OPT.s]  <Isoform DB>  <Species Guide>                       \n";
-    print "                                                                                  \n";
-    print "                                                                                  \n";
-    print "    ARG.s :  Isoform DB    : A FASTA-formatted protein database using the         \n";
-    print "                             following sequence naming convention:                \n";
-    print "                                                                                  \n";
-    print "                             >gene_name|protein_name|species|seqID|groupID        \n";
-    print "                                                                                  \n";
-    print "             Species Guide : A simple file indicating, for each species being     \n";
-    print "                             searched on, the location of a FASTA-formatted       \n";
-    print "                             genome for that species and a .gtf index file        \n";
-    print "                             corresponding to that species and genome.            \n";
-    print "                                                                                  \n";
-    print "                             The filenames should be paths to the files from      \n";
-    print "                             the directory containing MIRAGE.pl and must be       \n";
-    print "                             separated by whitespace.                             \n";
-    print "                                                                                  \n";
-    print "                             Required order:   species, genome, index file        \n";
-    print "                                                                                  \n";
-    print "                               EXAMPLE:                                           \n";
-    print "                             .------------------------------------------------.   \n";
-    print "                             | human  ~/data/HumanGenome.fa  ~/data/human.gtf |   \n";
-    print "                             | mouse  ~/data/MouseGenome.fa  ~/data/mouse.gtf |   \n";
-    print "                             | ...                                            |   \n";
-    print "                             '------------------------------------------------'   \n";
-    print "                                                                                  \n";
-    print "                             Species are introduced into the final genewise MSAs  \n";
-    print "                             in the order that they are listed in the species     \n";
-    print "                             guide.  It is recommended that similar species are   \n";
-    print "                             grouped together for optimal alignments.             \n";
-    print "                                                                                  \n";
-    print "                                                                                  \n";
-    print "    OPT.s :  --verbose            : Verbose output                                \n";
-    print "             --time               : Print timing data to stdout at end of program \n";
-    print "             -outdirname <string> : Specify ouptut directory name                 \n";
-    print "             -cpus <int>          : Specify number of CPU cores (default: 2)      \n";
+    print "                                                                                   \n";
+    print "    USAGE :  mirage  [OPT.s]  <Isoform DB>  <Species Guide>                        \n";
+    print "                                                                                   \n";
+    print "                                                                                   \n";
+    print "    ARG.s :  Isoform DB    : A FASTA-formatted protein database using the          \n";
+    print "                             following sequence naming convention:                 \n";
+    print "                                                                                   \n";
+    print "                             >gene_name|protein_name|species|seqID|groupID         \n";
+    print "                                                                                   \n";
+    print "             Species Guide : A simple file indicating, for each species being      \n";
+    print "                             searched on, the location of a FASTA-formatted        \n";
+    print "                             genome for that species and a .gtf index file         \n";
+    print "                             corresponding to that species and genome.             \n";
+    print "                                                                                   \n";
+    print "                             The filenames should be paths to the files from       \n";
+    print "                             the directory containing MIRAGE.pl and must be        \n";
+    print "                             separated by whitespace.                              \n";
+    print "                                                                                   \n";
+    print "                             Required order:   species, genome, index file         \n";
+    print "                                                                                   \n";
+    print "                               EXAMPLE:                                            \n";
+    print "                             .------------------------------------------------.    \n";
+    print "                             | human  ~/data/HumanGenome.fa  ~/data/human.gtf |    \n";
+    print "                             | mouse  ~/data/MouseGenome.fa  ~/data/mouse.gtf |    \n";
+    print "                             | ...                                            |    \n";
+    print "                             '------------------------------------------------'    \n";
+    print "                                                                                   \n";
+    print "                             Species are introduced into the final genewise MSAs   \n";
+    print "                             in the order that they are listed in the species      \n";
+    print "                             guide.  It is recommended that similar species are    \n";
+    print "                             grouped together for optimal alignments.              \n";
+    print "                                                                                   \n";
+    print "                                                                                   \n";
+    print "    OPT.s :  --verbose            : Verbose output                                 \n";
+    print "             --time               : Print timing data to stdout at end of program  \n";
+    print "             --onlymap            : Stop after producing protein-to-genome mappings\n";
+    print "             -outdirname <string> : Specify ouptut directory name                  \n";
+    print "             -cpus <int>          : Specify number of CPU cores (default: 2)       \n";
     die "\n\n\n";
 }
 
@@ -513,7 +553,8 @@ sub ParseArgs
 	"verbose",
 	"cpus=i",
 	"time",
-	"stackarfs",
+	"onlymap",
+	"stackarfs",       # Hidden
 	"forcecompile",    # Hidden
 	"cleanmsa=i",      # Hidden
 	"justspaln",       # Hidden
@@ -1874,6 +1915,70 @@ sub FinalizeIntraSpeciesMSA
     close($outf);
     close($inf);
     
+}
+
+
+
+
+
+
+########################################################################
+#
+#  Function: ReorganizeResultsForMapping
+#
+sub ReorganizeResultsForMapping
+{
+    
+    my $mapping_dirname = CreateDirectory($ResultsDir.'Mappings-by-Gene');
+    
+    # We'll want to swap over from our MSA-focused subdirectory organization to
+    # something a little friendlier for interrogating mapping results
+    my %GenesToMapFiles;
+    for (my $i=0; $i<$num_species-1; $i++) {
+
+	next if (!$SpeciesDir{$Species[$i]});
+
+	my $species_map_dirname = $SpeciesDir{$Species[$i]}.'mappings/';
+	next if (!(-d $species_map_dirname));
+
+	my $SpeciesMapDir = OpenDirectory($species_map_dirname);
+	while (my $mapfname = readdir($SpeciesMapDir)) {
+
+	    if ($mapfname =~ /(\S+)\.out$/) {
+
+		my $gene = $1;
+		$mapfname = $species_map_dirname.$mapfname;
+		
+		if ($GenesToMapFiles{$gene}) {
+		    $GenesToMapFiles{$gene} = $GenesToMapFiles{$gene}.'|'.$mapfname;
+		} else {
+		    $GenesToMapFiles{$gene} = $mapfname;
+		}
+		
+	    }
+	}
+	closedir($SpeciesMapDir);
+	
+    }
+
+    foreach my $gene (keys %GenesToMapFiles) {
+
+	my $gene_dirname = CreateDirectory($mapping_dirname.$gene);
+
+	foreach my $in_mapfname (split(/\|/,$GenesToMapFiles{$gene})) {
+
+	    $in_mapfname =~ /\/([^\/]+)\/mappings/;
+	    my $species = $1;
+
+	    my $out_mapfname = $gene_dirname.$species.'.'.$gene.'.mapping';
+	    RunSystemCommand("mv \"$in_mapfname\" \"$out_mapfname\"");
+	    
+	}
+	
+    }
+
+    RunSystemCommand("rm -rf \"AllSpeciesDir\" \&");
+
 }
 
 
