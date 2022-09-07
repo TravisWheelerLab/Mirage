@@ -1977,7 +1977,7 @@ sub ReorganizeResultsForMapping
 	
     }
 
-    RunSystemCommand("rm -rf \"AllSpeciesDir\" \&");
+    RunSystemCommand("rm -rf \"$AllSpeciesDir\" \&");
 
 }
 
