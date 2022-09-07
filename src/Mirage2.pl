@@ -226,20 +226,6 @@ for (my $i=0; $i<$num_species-1; $i++) {
     }
 
 
-    # If we're only mapping, skip all that MSA business!
-    if ($only_map) {
-	ClearProgress();
-	if ($timing) {
-	    my $species_timing_str
-		= SecondsToSMHDString(GetElapsedTime($SpeciesTimer));
-	    print "\n  + Mapping Time for $Species[$i] : $species_timing_str\n";
-	} else {
-	    print "  Mapping complete for $Species[$i]\n";
-	}
-	next;
-    }
-    
-
     #
     #  M A P s   t o   M S A s
     #
@@ -254,6 +240,25 @@ for (my $i=0; $i<$num_species-1; $i++) {
 
     # Rock 'n' roll 'n' align!
     RunSystemCommand($MapsToMSAsCmd);
+
+
+    # NOTE: Because some key data management the takes place in
+    # MapsToMSAs, we'll run it even in the case that we're just
+    # generating our mappings.  Luckily, this is a really fast step
+    # in the program, so we shouldn't be hurting on account of the
+    # unnecessary extra work...
+    if ($only_map) {
+	ClearProgress();
+	if ($timing) {
+	    my $species_timing_str
+		= SecondsToSMHDString(GetElapsedTime($SpeciesTimer));
+	    print "\n  + Mapping Time for $Species[$i] : $species_timing_str\n";
+	} else {
+	    print "  Mapping complete for $Species[$i]\n";
+	}
+	next;
+    }
+    
 
     # Knock it off with that darn timing!
     if ($timing) {
