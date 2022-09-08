@@ -21,7 +21,7 @@ sub DispProgMapsToMSAs;
 # Note that we go with a fairly large number to try to get at least one line of
 # text-wrap. NEVERMIND, that causes the carriage-return to effectively work as a
 # newline.
-my $DispProg_line_len = 80;
+my $DispProg_line_len = 90;
 
 # Variables that we'll want to have access to
 my $DispProg_species;
