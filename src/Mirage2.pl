@@ -101,7 +101,7 @@ my $ResultsDir      = $Options{outdirname};
 my $verbose         = $Options{verbose};
 my $num_cpus        = $Options{cpus};
 my $timing          = $Options{time};
-my $only_map        = $Options{only-map};
+my $only_map        = $Options{onlymap};
 my $stack_arfs      = $Options{stackarfs};     # Hidden
 my $forcecompile    = $Options{forcecompile};  # Hidden
 my $cleanMSA        = $Options{cleanmsa};      # Hidden
@@ -451,7 +451,7 @@ sub PrintUsage
     print " OPT.s  : --help      : More detailed help.                                             \n";
     print "          --verbose   : Verbose output.                                                 \n";
     print "          --time      : Print timing data to stdout at end of program                   \n";
-    print "          --only-map  : Stop after producing protein-to-genome mappings                 \n";
+    print "          --onlymap   : Stop after producing protein-to-genome mappings                 \n";
     print "          -outdirname : Specify output directory name.                                  \n";
     print "          -cpus       : Specify number of CPU cores (default: 2)                        \n";
     die "\n\n";
@@ -510,7 +510,7 @@ sub DetailedUsage
     print "                                                                                   \n";
     print "    OPT.s :  --verbose            : Verbose output                                 \n";
     print "             --time               : Print timing data to stdout at end of program  \n";
-    print "             --only-map           : Stop after producing protein-to-genome mappings\n";
+    print "             --onlymap            : Stop after producing protein-to-genome mappings\n";
     print "             -outdirname <string> : Specify ouptut directory name                  \n";
     print "             -cpus <int>          : Specify number of CPU cores (default: 2)       \n";
     die "\n\n\n";
@@ -558,7 +558,7 @@ sub ParseArgs
 	"verbose",
 	"cpus=i",
 	"time",
-	"only-map",
+	"onlymap",
 	"stackarfs",       # Hidden
 	"forcecompile",    # Hidden
 	"cleanmsa=i",      # Hidden
