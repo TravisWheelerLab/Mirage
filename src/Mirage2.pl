@@ -102,6 +102,7 @@ my $verbose         = $Options{verbose};
 my $num_cpus        = $Options{cpus};
 my $timing          = $Options{time};
 my $only_map        = $Options{onlymap};
+my $blatoff         = $Options{blatoff};
 my $stack_arfs      = $Options{stackarfs};     # Hidden
 my $forcecompile    = $Options{forcecompile};  # Hidden
 my $cleanMSA        = $Options{cleanmsa};      # Hidden
@@ -189,6 +190,9 @@ for (my $i=0; $i<$num_species-1; $i++) {
     # OPT: Collect timing data, with varying granularity
     $QuilterCmd = $QuilterCmd.' --time' if ($timing);
     $QuilterCmd = $QuilterCmd.' --genetiming' if ($gene_timing);
+
+    # OPT: Turn off BLAT for faster runtime
+    $QuilterCmd = $QuilterCmd.' --blatoff' if ($blat_off);
 
     # OPT: Manually set cap on nucleotide sequence length for spaln search
     $QuilterCmd = $QuilterCmd.' -maxspalnnucls='.$max_spaln_nucls
@@ -559,6 +563,7 @@ sub ParseArgs
 	"cpus=i",
 	"time",
 	"onlymap",
+	"blatoff",
 	"stackarfs",       # Hidden
 	"forcecompile",    # Hidden
 	"cleanmsa=i",      # Hidden

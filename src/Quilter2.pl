@@ -132,6 +132,9 @@ my $max_spaln_nucls = $Opts{maxspalnnucls};
 # that we allow before we cull to a set number per chromosome.
 my $MaxBlatHits = 5000;
 
+# Of course, that variable won't do much for us if we aren't running Blat...
+my $blat_off = $Opts{blatoff};
+
 # How many CPUs do we intend to use?
 my $ThreadGuide = OpenInputFile($seq_dirname.'Thread-Guide');
 my $num_cpus = <$ThreadGuide>;
@@ -174,7 +177,7 @@ if ($gtfname ne '-') {
     # to derive gene family membership, and you're powerless to stop it.
     $blat_naming = 'seqname';
 
-} else {
+} elsif (!$blat_off) {
 
     # We'll need to put all of the files that we want to use in our
     # BLAT search into a list, because that's what I've decided we
@@ -194,7 +197,7 @@ if ($gtfname ne '-') {
 
 
 # If we have any sequences to run BLAT on, we'd better get to it!
-if (scalar(@BlatFileNames)) {
+if (!$blat_off && scalar(@BlatFileNames)) {
     
     my ($blat_outfname,$blat_nameguide_ref,$blat_genes_ref)
 	= RunBlatOnFileSet(\@BlatFileNames,$genome,$blat_naming);
@@ -205,7 +208,7 @@ if (scalar(@BlatFileNames)) {
     # telling us!
     GenBlatMaps($blat_outfname,\%BlatNameGuide,\%BlatGenes,$num_cpus);
 
-    # Cleanup on line 161! << CRITICAL: KEEP THIS LINE NUMBER CORRECT, FOR JOKE
+    # Cleanup on line 211! << CRITICAL: KEEP THIS LINE NUMBER CORRECT, FOR JOKE
     RunSystemCommand("rm \"$blat_outfname\"");
 
 }
@@ -262,6 +265,7 @@ sub ParseArgs
 	"help",
 	"v",
 	"time",
+	"blatoff",
 	"genetiming", # Hidden (detailed timing output)
 	"maxspalnnucls=i"
 	) || die "\n  ERROR:  Failed to parse Quilter2 commandline arguments\n\n";
