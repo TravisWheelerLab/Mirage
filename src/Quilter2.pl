@@ -9,8 +9,8 @@ use lib dirname (__FILE__);
 use Cwd;
 
 # YUCKITY YUCK YUCK
-sub GetThisDir { my $lib = $0; $lib =~ s/\/Quilter2.pl$//; return $lib; }
-use lib GetThisDir();
+sub GetScriptDir { return '.' if ($0 !~ /\//); $0 =~ /^(.+)\/[^\/]+$/; return $1; }
+use lib GetScriptDir();
 use BureaucracyMirage;
 use DisplayProgress;
 

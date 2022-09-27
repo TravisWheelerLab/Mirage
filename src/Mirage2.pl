@@ -21,8 +21,8 @@ use POSIX;
 use Cwd;
 
 # YUCK
-sub GetThisDir { my $lib = $0; $lib =~ s/\/Mirage2.pl$//; return $lib; }
-use lib GetThisDir();
+sub GetScriptDir { return '.' if ($0 !~ /\//); $0 =~ /^(.+)\/[^\/]+$/; return $1; }
+use lib GetScriptDir();
 use BureaucracyMirage;
 use DisplayProgress;
 
