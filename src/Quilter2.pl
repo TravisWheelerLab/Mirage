@@ -3432,7 +3432,7 @@ sub BlatToSpalnSearch2
 
 	next if ($total_nucls > $max_spaln_nucls);
 
-	my ($hit_strs_ref,$hit_pcts_ref)
+	my ($hit_strs_ref,$hit_pcts_ref,$chimeric_hit_ref)
 	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs,90.0);
 
 	# We're only going to hang onto the best Spaln output for this search
@@ -3597,7 +3597,7 @@ sub BlatToSpalnSearch2
     my $hit_pct = 0;
     if ($total_nucls < 2 * $max_spaln_nucls) {
 
-	my ($hit_strs_ref,$hit_pcts_ref)
+	my ($hit_strs_ref,$hit_pcts_ref,$chimeric_hit_ref)
 	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs,90.0);
 
 	# We're only going to hang onto the best Spaln output for this search
@@ -3939,7 +3939,7 @@ sub BlatToSpalnSearch1
 	}
 
 	# Let's see what we see!
-	my ($hit_strs_ref,$hit_pcts_id_ref)
+	my ($hit_strs_ref,$hit_pcts_id_ref,$chimeric_hit_ref)
 	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs,90.0);
 	my $hit_str = @{$hit_strs_ref}[0];
 	my $hit_pct_id = @{$hit_pcts_id_ref}[0];
@@ -4018,7 +4018,7 @@ sub BlatToSpalnSearch1
 	}
 
 	# Let's try this again!
-	my ($hit_strs_ref,$hit_pcts_id_ref)
+	my ($hit_strs_ref,$hit_pcts_id_ref,$chimeric_hit_ref)
 	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs,90.0);
 	my $hit_str = @{$hit_strs_ref}[0];
 	my $hit_pct_id = @{$hit_pcts_id_ref}[0];
@@ -4099,7 +4099,7 @@ sub BlatToSpalnSearch1
     }
 
     # Last call for Spaln-ohol!
-    my ($hit_strs_ref,$hit_pcts_id_ref)
+    my ($hit_strs_ref,$hit_pcts_id_ref,$chimeric_hit_ref)
 	= SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@RangeStarts,\@RangeEnds,\@RangeChrs,75.0);
     my $hit_str = @{$hit_strs_ref}[0];
     my $hit_pct_id = @{$hit_pcts_id_ref}[0];
