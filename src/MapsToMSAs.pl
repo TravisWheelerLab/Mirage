@@ -234,6 +234,7 @@ while ($tg_line = <$ThreadGuide>) {
 	    $line = <$MapFile>;
 	    next if ($chr ne $canon_chr);
 
+	    $line =~ s/\n|\r//g;
 	    foreach my $map_pos (split(/\,/,$line)) {
 		my $entry = $seq_id.':'.$SeqChars[$seq_pos];
 		if ($Mapping{$map_pos}) {
