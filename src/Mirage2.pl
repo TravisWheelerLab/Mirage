@@ -313,8 +313,37 @@ for (my $i=0; $i<$num_species-1; $i++) {
 # Are we only mapping?
 if ($only_map) {
 
-    ReorganizeResultsForMapping();
-    
+    # We'll need to be able to associate sequence IDs with names
+    my $SeqNameFile = OpenInputFile($seqnamef);
+    my %SeqIDsToNames;
+    while (my $line = <$SeqNameFile>) {
+	if ($line =~ /^(\d+)\:\s*(\S.+\S)\s*$/) {
+	    my $seq_id = $1;
+	    my $seq_name = $2;
+	    $SeqIDsToNames{$seq_id} = $seq_name;
+	}
+    }
+    close($SeqNameFile);
+
+    # Make our mapping data output directory
+    my $mapdirname = CreateDirectory($ResultsDir.'Mappings-by-Gene');
+
+    # Move things over by species
+    for (my $species_id=0; $species_id < $num_species-1; $species_id++) {
+
+	my $species = $Species[$species_id];
+
+	next if (!$SpeciesDir{$species});
+	next if (!(-d $SpeciesDir{$species}.'seqs'));
+
+	ReorganizeResultsForMapping($species,$SpeciesDir{$species}.'seqs/',$mapdirname,
+				    \%SeqIDsToNames);
+
+    }
+
+    # No more need for 'Species-MSAs'!
+    RunSystemCommand("rm -rf \"$AllSpeciesDir\" \&");
+
 } else {
 
     # NOPE! We're aligning, dude!
@@ -374,9 +403,10 @@ if ($only_map) {
 # For a touch of cleanup, get rid of our species-specific protein databases
 for (my $i=0; $i<$num_species; $i++) {
     my $seqdirname = $SpeciesDir{$Species[$i]}.'seqs/';
-    RunSystemCommand("rm -rf \"$seqdirname\" \&");
+    RunSystemCommand("rm -rf \"$seqdirname\"");
 }
-    
+
+
 # We'll also want to clear out the alias and name guide files
 RunSystemCommand("rm \"$seqnamefname\"");
 my $aliasfname = $ResultsDir.'gene-aliases';
@@ -1938,56 +1968,137 @@ sub FinalizeIntraSpeciesMSA
 #
 sub ReorganizeResultsForMapping
 {
-    
-    my $mapping_dirname = CreateDirectory($ResultsDir.'Mappings-by-Gene');
-    
-    # We'll want to swap over from our MSA-focused subdirectory organization to
-    # something a little friendlier for interrogating mapping results
+    my $species = shift;
+    my $species_data_dirname = shift;
+    my $outdir_name = shift;
+    my $seq_ids_to_names_ref = shift;
+
+    my %SeqIDsToNames = %{$seq_ids_to_names_ref};
+
     my %GenesToMapFiles;
-    for (my $i=0; $i<$num_species-1; $i++) {
+    my $SpeciesDataDir = OpenDirectory($species_data_dirname);
+    while (my $fname = readdir($SpeciesDataDir)) {
 
-	next if (!$SpeciesDir{$Species[$i]});
+	next if ($fname !~ /^(\S+)\.quilter\.out$/);
+	my $gene = $1;
 
-	my $species_map_dirname = $SpeciesDir{$Species[$i]}.'mappings/';
-	next if (!(-d $species_map_dirname));
+	$GenesToMapFiles{$gene} = $species_data_dirname.$fname;
+	
+    }
+    my @SpeciesGeneList = keys %GenesToMapFiles;
+    my $num_species_genes = scalar(@SpeciesGeneList);
 
-	my $SpeciesMapDir = OpenDirectory($species_map_dirname);
-	while (my $mapfname = readdir($SpeciesMapDir)) {
+    my $num_reorg_cpus = Min($num_cpus,$num_species_genes);
+    my $thread_id = SpawnProcesses($num_reorg_cpus);
 
-	    if ($mapfname =~ /(\S+)\.out$/) {
+    my $AllThreadMissesFile = OpenOutputFile($species_data_dirname.$thread_id.'-misses');
 
-		my $gene = $1;
-		$mapfname = $species_map_dirname.$mapfname;
-		
-		if ($GenesToMapFiles{$gene}) {
-		    $GenesToMapFiles{$gene} = $GenesToMapFiles{$gene}.'|'.$mapfname;
+    my $start_gene_id = $thread_id * int($num_species_genes / $num_reorg_cpus);
+    my $end_gene_id = ($thread_id + 1) * int($num_species_genes / $num_reorg_cpus);
+    $end_gene_id = $num_species_genes if ($thread_id == $num_reorg_cpus-1);
+
+    for (my $gene_id = $start_gene_id; $gene_id < $end_gene_id; $gene_id++) {
+
+	my $gene = $SpeciesGeneList[$gene_id];
+
+	my $gene_dirname = $outdir_name.$gene.'/';
+	if (!(-d $gene_dirname)) {
+	    CreateDirectory($gene_dirname);
+	}
+
+	my $map_outfile_name = $gene_dirname.$species.'.mappings';
+	my $MapOutFile = OpenOutputFile($map_outfile_name);
+	my $num_maps = 0;
+
+	my $miss_outfile_name = $gene_dirname.$species.'.misses';
+	my $MissOutFile = OpenOutputFile($miss_outfile_name);
+	my $num_misses = 0;
+	
+	my $MapInFile = OpenInputFile($GenesToMapFiles{$gene});
+	while (my $line = <$MapInFile>) {
+
+	    $line =~ s/\n|\r//g;
+
+	    if ($line =~ /Sequence ID\: (\d+)/) {
+
+		my $seq_name = $SeqIDsToNames{$1};
+
+		$line = <$MapInFile>;
+		$line =~ s/\n|\r//g;
+
+		if ($line =~ /Unmapped/) {
+		    print $MissOutFile "$seq_name\n";
+		    print $AllThreadMissesFile "$seq_name\n";
+		    $line = <$MapInFile>; # Eat the empty line
 		} else {
-		    $GenesToMapFiles{$gene} = $mapfname;
+		    print $MapOutFile "Sequence ID: $seq_name\n";
+		    print $MapOutFile "$line\n";
 		}
 		
+	    } else {
+
+		print $MapOutFile "$line\n";
+
 	    }
-	}
-	closedir($SpeciesMapDir);
-	
-    }
-
-    foreach my $gene (keys %GenesToMapFiles) {
-
-	my $gene_dirname = CreateDirectory($mapping_dirname.$gene);
-
-	foreach my $in_mapfname (split(/\|/,$GenesToMapFiles{$gene})) {
-
-	    $in_mapfname =~ /\/([^\/]+)\/mappings/;
-	    my $species = $1;
-
-	    my $out_mapfname = $gene_dirname.$species.'.'.$gene.'.mapping';
-	    RunSystemCommand("mv \"$in_mapfname\" \"$out_mapfname\"");
 	    
 	}
-	
+	close($MapInFile);
+
+	close($MapOutFile);
+	RunSystemCommand("rm -rf $map_outfile_name") if (!$num_maps);
+
+	close($MissOutFile);
+	RunSystemCommand("rm -rf $miss_outfile_name") if (!$num_misses);
+
     }
 
-    RunSystemCommand("rm -rf \"$AllSpeciesDir\" \&");
+    close($AllThreadMissesFile);
+    
+    if ($thread_id) { exit(0); }
+    while (wait() != -1) {}
+
+    my $all_species_misses_fname = $misses_dirname.$species.'.misses';
+
+    for (my $cpu_check_id = 0; $cpu_check_id < $num_cpus; $cpu_check_id++) {
+
+	if (-e $species_data_dirname.$cpu_check_id.'-misses') {
+	    my $cpu_misses_fname = $species_data_dirname.$cpu_check_id.'-misses';
+	    RunSystemCommand("cat $cpu_misses_fname >> $all_species_misses_fname");
+	}
+	
+	my $arf_filename = $species_data_dirname.$cpu_check_id.'-ARFs';
+	next if (!(-e $arf_filename));
+
+	my $ARFFile = OpenInputFile($arf_filename);
+	while (my $line = <$ARFFile>) {
+
+	    if ($line =~ /^(\d+)\s+ARFs?\:(\S+)/) {
+
+		my $seq_name = SeqIDsToNames{$1};
+		my $arf_coords = $2;
+
+		$seq_name =~ /^[^\|]+\|([^\|]+)\|/;
+		my @SeqGeneList = split(/\//,$1);
+		my $gene = $SeqGeneList[0];
+		
+		open(my $ARFOutFile,'>>',$outdir_name.$gene.'/'.$species.'.alt-reading-frames')
+		    || die "\n  ERROR:  Failed to open file to write ARF data out for gene '$gene'\n\n";
+		print $ARFOutFile "$seq_name\n";
+		print $ARFOutFile "- Amino acids $arf_coords identified as ";
+		if ($arf_coords =~ /\,/) {
+		    print $ARFOutFile "alternative reading frames";
+		} else {
+		    print $ARFOutFile "an alternative reading frame";
+		}
+		print $ARFOutFile "\n\n";
+		close($ARFOutFile);
+
+	    }
+	    
+	}
+	close($ARFFile);
+
+    }
 
 }
 
