@@ -314,7 +314,7 @@ for (my $i=0; $i<$num_species-1; $i++) {
 if ($only_map) {
 
     # We'll need to be able to associate sequence IDs with names
-    my $SeqNameFile = OpenInputFile($seqnamef);
+    my $SeqNameFile = OpenInputFile($seqnamefname);
     my %SeqIDsToNames;
     while (my $line = <$SeqNameFile>) {
 	if ($line =~ /^(\d+)\:\s*(\S.+\S)\s*$/) {
