@@ -2074,7 +2074,7 @@ sub ReorganizeResultsForMapping
 
 	    if ($line =~ /^(\d+)\s+ARFs?\:(\S+)/) {
 
-		my $seq_name = SeqIDsToNames{$1};
+		my $seq_name = $SeqIDsToNames{$1};
 		my $arf_coords = $2;
 
 		$seq_name =~ /^[^\|]+\|([^\|]+)\|/;
