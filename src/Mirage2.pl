@@ -2047,10 +2047,10 @@ sub ReorganizeResultsForMapping
 	close($MapInFile);
 
 	close($MapOutFile);
-	RunSystemCommand("rm -rf $map_outfile_name") if (!$num_maps);
+	RunSystemCommand("rm -rf \"$map_outfile_name\"") if (!$num_maps);
 
 	close($MissOutFile);
-	RunSystemCommand("rm -rf $miss_outfile_name") if (!$num_misses);
+	RunSystemCommand("rm -rf \"$miss_outfile_name\"") if (!$num_misses);
 
     }
 
