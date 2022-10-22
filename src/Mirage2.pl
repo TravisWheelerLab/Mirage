@@ -2030,9 +2030,11 @@ sub ReorganizeResultsForMapping
 		    print $MissOutFile "$seq_name\n";
 		    print $AllThreadMissesFile "$seq_name\n";
 		    $line = <$MapInFile>; # Eat the empty line
+		    $num_misses++;
 		} else {
 		    print $MapOutFile "Sequence ID: $seq_name\n";
 		    print $MapOutFile "$line\n";
+		    $num_maps++;
 		}
 		
 	    } else {
