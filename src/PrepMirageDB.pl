@@ -5,8 +5,8 @@ use POSIX;
 
 
 # We'll need bureaucratic powers
-sub GetSrcDir { my $lib = $0; $lib =~ s/PrepMirageDB.pl$/src/; return $lib; }
-use lib GetSrcDir();
+sub GetScriptDir { return '.' if ($0 !~ /\//); $0 =~ /^(.+)\/[^\/]+$/; return $1; }
+use lib GetScriptDir();
 use BureaucracyMirage;
 
 

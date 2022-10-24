@@ -7,8 +7,8 @@ use Getopt::Long;
 use Time::HiRes;
 
 # Now tell me, who are you?
-sub GetThisDir { my $lib = $0; $lib =~ s/\/Bazaar.pl$//; return $lib; }
-use lib GetThisDir();
+sub GetScriptDir { return '.' if ($0 !~ /\//); $0 =~ /^(.+)\/[^\/]+$/; return $1; }
+use lib GetScriptDir();
 use BureaucracyMirage;
 use DisplayProgress;
 

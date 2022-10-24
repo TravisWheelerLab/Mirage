@@ -9,8 +9,8 @@ use lib dirname (__FILE__);
 use Cwd;
 
 # YUCKITY YUCK YUCK
-sub GetThisDir { my $lib = $0; $lib =~ s/\/Quilter2.pl$//; return $lib; }
-use lib GetThisDir();
+sub GetScriptDir { return '.' if ($0 !~ /\//); $0 =~ /^(.+)\/[^\/]+$/; return $1; }
+use lib GetScriptDir();
 use BureaucracyMirage;
 use DisplayProgress;
 
@@ -132,6 +132,9 @@ my $max_spaln_nucls = $Opts{maxspalnnucls};
 # that we allow before we cull to a set number per chromosome.
 my $MaxBlatHits = 5000;
 
+# Of course, that variable won't do much for us if we aren't running Blat...
+my $blat_off = $Opts{blatoff};
+
 # How many CPUs do we intend to use?
 my $ThreadGuide = OpenInputFile($seq_dirname.'Thread-Guide');
 my $num_cpus = <$ThreadGuide>;
@@ -174,7 +177,7 @@ if ($gtfname ne '-') {
     # to derive gene family membership, and you're powerless to stop it.
     $blat_naming = 'seqname';
 
-} else {
+} elsif (!$blat_off) {
 
     # We'll need to put all of the files that we want to use in our
     # BLAT search into a list, because that's what I've decided we
@@ -194,7 +197,7 @@ if ($gtfname ne '-') {
 
 
 # If we have any sequences to run BLAT on, we'd better get to it!
-if (scalar(@BlatFileNames)) {
+if (!$blat_off && scalar(@BlatFileNames)) {
     
     my ($blat_outfname,$blat_nameguide_ref,$blat_genes_ref)
 	= RunBlatOnFileSet(\@BlatFileNames,$genome,$blat_naming);
@@ -205,7 +208,7 @@ if (scalar(@BlatFileNames)) {
     # telling us!
     GenBlatMaps($blat_outfname,\%BlatNameGuide,\%BlatGenes,$num_cpus);
 
-    # Cleanup on line 161! << CRITICAL: KEEP THIS LINE NUMBER CORRECT, FOR JOKE
+    # Cleanup on line 211! << CRITICAL: KEEP THIS LINE NUMBER CORRECT, FOR JOKE
     RunSystemCommand("rm \"$blat_outfname\"");
 
 }
@@ -262,6 +265,7 @@ sub ParseArgs
 	"help",
 	"v",
 	"time",
+	"blatoff",
 	"genetiming", # Hidden (detailed timing output)
 	"maxspalnnucls=i"
 	) || die "\n  ERROR:  Failed to parse Quilter2 commandline arguments\n\n";
@@ -909,11 +913,13 @@ sub UseFastMap
 
 	
 	# Do that nasty Spaln searchin'!
-	my ($spaln_hits_ref,$spaln_pcts_id_ref)
+	my ($spaln_hits_ref,$spaln_pcts_id_ref,$spaln_chimera_ref)
 	    = SpalnSearch(\@UnmappedSeqNames,\@UnmappedSeqs,\@ProtFnames,
 			  \@SpalnStarts,\@SpalnEnds,\@SpalnChrs,90.0);
 	my @SpalnHitStrs = @{$spaln_hits_ref};
 	my @SpalnPctsID  = @{$spaln_pcts_id_ref};
+	my @SpalnHitIsChimeric = @{$spaln_chimera_ref};
+	
 	    
 	# Run back through our proteins, and either (1) record full maps or
 	# (2) write the sequence out to our Blat file
@@ -923,7 +929,7 @@ sub UseFastMap
 	    RunSystemCommand("rm \"$ProtFnames[$i]\"");
 
 	    my $prot_index = $ProtIndices[$i];
-	    if ($SpalnHitStrs[$i]) {
+	    if ($SpalnHitStrs[$i] && !$SpalnHitIsChimeric[$i]) {
 
 		# I knew you had it in you!
 		$SpalnHitStrs[$i] =~ s/BLAT\+Spaln/Spaln/;
@@ -3426,7 +3432,7 @@ sub BlatToSpalnSearch2
 
 	next if ($total_nucls > $max_spaln_nucls);
 
-	my ($hit_strs_ref,$hit_pcts_ref)
+	my ($hit_strs_ref,$hit_pcts_ref,$chimeric_hit_ref)
 	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs,90.0);
 
 	# We're only going to hang onto the best Spaln output for this search
@@ -3591,7 +3597,7 @@ sub BlatToSpalnSearch2
     my $hit_pct = 0;
     if ($total_nucls < 2 * $max_spaln_nucls) {
 
-	my ($hit_strs_ref,$hit_pcts_ref)
+	my ($hit_strs_ref,$hit_pcts_ref,$chimeric_hit_ref)
 	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs,90.0);
 
 	# We're only going to hang onto the best Spaln output for this search
@@ -3933,7 +3939,7 @@ sub BlatToSpalnSearch1
 	}
 
 	# Let's see what we see!
-	my ($hit_strs_ref,$hit_pcts_id_ref)
+	my ($hit_strs_ref,$hit_pcts_id_ref,$chimeric_hit_ref)
 	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs,90.0);
 	my $hit_str = @{$hit_strs_ref}[0];
 	my $hit_pct_id = @{$hit_pcts_id_ref}[0];
@@ -4012,7 +4018,7 @@ sub BlatToSpalnSearch1
 	}
 
 	# Let's try this again!
-	my ($hit_strs_ref,$hit_pcts_id_ref)
+	my ($hit_strs_ref,$hit_pcts_id_ref,$chimeric_hit_ref)
 	    = SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@SpalnStarts,\@SpalnEnds,\@SpalnChrs,90.0);
 	my $hit_str = @{$hit_strs_ref}[0];
 	my $hit_pct_id = @{$hit_pcts_id_ref}[0];
@@ -4093,7 +4099,7 @@ sub BlatToSpalnSearch1
     }
 
     # Last call for Spaln-ohol!
-    my ($hit_strs_ref,$hit_pcts_id_ref)
+    my ($hit_strs_ref,$hit_pcts_id_ref,$chimeric_hit_ref)
 	= SpalnSearch(\@SeqNames,\@SeqStrs,\@ProtFnames,\@RangeStarts,\@RangeEnds,\@RangeChrs,75.0);
     my $hit_str = @{$hit_strs_ref}[0];
     my $hit_pct_id = @{$hit_pcts_id_ref}[0];
@@ -4353,6 +4359,7 @@ sub SpalnSearch
 
     my @SpalnHitStrs;
     my @SpalnPctIDs;
+    my @SpalnHitIsChimeric;
     for (my $i=0; $i<scalar(@ProtFnames); $i++) {
 
 	my $seqname = $SeqNames[$i];
@@ -4369,6 +4376,7 @@ sub SpalnSearch
 	if (system($spaln_cmd)) {
 	    push(@SpalnHitStrs,0);
 	    push(@SpalnPctIDs,0);
+	    push(@SpalnHitIsChimeric,0);
 	    next;
 	}
     
@@ -4376,6 +4384,7 @@ sub SpalnSearch
 	if (!(-e $spaln_fname)) {
 	    push(@SpalnHitStrs,0);
 	    push(@SpalnPctIDs,0);
+	    push(@SpalnHitIsChimeric,0);
 	    next;
 	}
     
@@ -4395,6 +4404,7 @@ sub SpalnSearch
 	if ($spaln_pct_id < $min_pct_id) {
 	    push(@SpalnHitStrs,0);
 	    push(@SpalnPctIDs,0);
+	    push(@SpalnHitIsChimeric,0);
 	    next;
 	}
 	
@@ -4458,9 +4468,40 @@ sub SpalnSearch
 	    $num_exons++;
 	    
 	}
+
+	# If we have a hit that jumps around (e.g., suggests chromosomal rearrangement)
+	# we'll want to note it as being chimeric in that sense
+	my $rearranged = 0;
+	for (my $exon_id=1; $exon_id<$num_exons; $exon_id++) {
+
+	    my $last_chr = $HitChrs[$exon_id-1];
+	    my $this_chr = $HitChrs[$exon_id];
+
+	    if ($last_chr eq $this_chr) {
+
+		
+		$NuclRanges[$exon_id-1] =~ /\.\.(\d+)$/;
+		my $last_end_nucl = $1;
+
+		$NuclRanges[$exon_id] =~ /^(\d+)\.\./;
+		my $this_start_nucl = $1;
+
+		if ($last_chr =~ /\[revcomp\]/) {
+		    $rearranged = 1 if ($last_end_nucl < $this_start_nucl);
+		} else {
+		    $rearranged = 1 if ($last_end_nucl > $this_start_nucl);
+		}
+		
+	    }
+
+	    last if ($rearranged);
+
+	}
 	
+	# Assembling the actual chromosome (list?) output field
 	my $chr;
-	if ($num_chrs_used > 1) {
+	my $chimeric_chr = 0;
+	if ($num_chrs_used > 1 || $rearranged) {
 	    
 	    $chr = 'Chimeric:';
 	    foreach my $used_chr (@ChrsUsed) {
@@ -4468,15 +4509,21 @@ sub SpalnSearch
 	    }
 	    $chr =~ s/\/$//;
 
-	    # If we've set a threshold lower than 90%, we'll attach a note that this
-	    # is a low quality mapping (if it's less than 90%).	    
-	    $chr = $chr.' # low quality mapping: '.$spaln_pct_id.'% identity'
-		if ($spaln_pct_id < 90.0);
+	    $chr = $chr.' # chromosomal rearrangement implied'
+		if ($rearranged);
+
+	    # Note that something's fishy...
+	    $chimeric_chr = 1;
 
 	} else {
 	    $chr = $ChrsUsed[0];
 	}
 	
+	# If we've set a threshold lower than 90%, we'll attach a note that this
+	# is a low quality mapping (if it's less than 90%).	    
+	$chr = $chr.' # low quality mapping: '.$spaln_pct_id.'% identity'
+	    if ($spaln_pct_id < 90.0);
+
 	# Build up the hit string for this chromosome
 	my $hitstr = "Sequence ID: $seqname\n";
 	$hitstr    = $hitstr."Map Method : BLAT+Spaln\n";
@@ -4490,6 +4537,8 @@ sub SpalnSearch
 	# WOOF
 	push(@SpalnHitStrs,$hitstr);
 	push(@SpalnPctIDs,$spaln_pct_id);
+	push(@SpalnHitIsChimeric,$chimeric_chr);
+	
 
     }
 
@@ -4497,7 +4546,7 @@ sub SpalnSearch
     RunSystemCommand("rm \"$nucl_fname\"");
     
     # DOUBLE WOOF
-    return (\@SpalnHitStrs,\@SpalnPctIDs);
+    return (\@SpalnHitStrs,\@SpalnPctIDs,\@SpalnHitIsChimeric);
     
 }
 

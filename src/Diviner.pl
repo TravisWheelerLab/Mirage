@@ -7,8 +7,8 @@ use Getopt::Long;
 use Time::HiRes;
 
 # I AM UNAVOIDABLE
-sub GetThisDir { my $lib = $0; $lib =~ s/\/Diviner.pl$//; return $lib; }
-use lib GetThisDir();
+sub GetScriptDir { return '.' if ($0 !~ /\//); $0 =~ /^(.+)\/[^\/]+$/; return $1; }
+use lib GetScriptDir();
 use BureaucracyMirage;
 use DisplayProgress;
 
