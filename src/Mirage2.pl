@@ -101,8 +101,8 @@ my $ResultsDir      = $Options{outdirname};
 my $verbose         = $Options{verbose};
 my $num_cpus        = $Options{cpus};
 my $timing          = $Options{time};
-my $only_map        = $Options{onlymap};
-my $blat_off        = $Options{blatoff};
+my $only_map        = $Options{only_map};
+my $blat_off        = $Options{blat_off};
 my $stack_arfs      = $Options{stackarfs};     # Hidden
 my $forcecompile    = $Options{forcecompile};  # Hidden
 my $cleanMSA        = $Options{cleanmsa};      # Hidden
@@ -470,22 +470,28 @@ print "\n  Mirage complete; results in $ResultsDir\n\n";
 sub PrintUsage
 {
     print "\n\n";
-    print " Mirage2: Multiple-sequence Isoform Alignment Tool Guided by Exon Boundaries ($mirage_version)\n\n";
-    print " USAGE  : mirage [OPT.s] <Isoform DB>  <Species Guide>                                  \n\n";
+    print " Mirage2: Multiple-sequence Isoform Alignment Tool Guided by Exon Boundaries ($mirage_version)\n";
+    print "\n";
+    print " USAGE  : mirage [OPT.s] <Isoform DB>  <Species Guide>                                  \n";
+    print "\n";
     print " ARG.s  : <IsoformDB>     : A FASTA-formatted protein database, with the following      \n";
-    print "                            naming convention:                                          \n\n";
-    print "                            >gene_name|protein_name|species|seqID|groupID               \n\n";
+    print "                            naming convention:                                          \n";
+    print "\n";
+    print "                            >gene_name|protein_name|species|seqID|groupID               \n";
+    print "\n";
     print "          <Species Guide> : A file indicating, for each species being searched on,      \n";
     print "                            the location of a FASTA-formatted genome for that species   \n";
     print "                            and a .gtf index file corresponding to that species and     \n";
     print "                            genome.  These fields should be whitespace-separated and    \n";
     print "                            ordered as follows:  species, genome, .gtf index            \n";
     print "                            It is recommended that similar species are grouped together \n";
-    print "                            and positioned near the top of the list.                    \n\n";
+    print "                            and positioned near the top of the list.                    \n";
+    print "\n";
     print " OPT.s  : --help      : More detailed help.                                             \n";
     print "          --verbose   : Verbose output.                                                 \n";
     print "          --time      : Print timing data to stdout at end of program                   \n";
-    print "          --onlymap   : Stop after producing protein-to-genome mappings                 \n";
+    print "          --only_map  : Stop after producing protein-to-genome mappings                 \n";
+    print "          --blat_off  : Prevents BLAT search (faster, may miss some mappings)           \n";
     print "          -outdirname : Specify output directory name.                                  \n";
     print "          -cpus       : Specify number of CPU cores (default: 2)                        \n";
     die "\n\n";
@@ -544,7 +550,8 @@ sub DetailedUsage
     print "                                                                                   \n";
     print "    OPT.s :  --verbose            : Verbose output                                 \n";
     print "             --time               : Print timing data to stdout at end of program  \n";
-    print "             --onlymap            : Stop after producing protein-to-genome mappings\n";
+    print "             --only_map           : Stop after producing protein-to-genome mappings\n";
+    print "             --blat_off           : Prevents BLAT search (faster, may miss some mappings)\n";
     print "             -outdirname <string> : Specify ouptut directory name                  \n";
     print "             -cpus <int>          : Specify number of CPU cores (default: 2)       \n";
     die "\n\n\n";
@@ -592,8 +599,8 @@ sub ParseArgs
 	"verbose",
 	"cpus=i",
 	"time",
-	"onlymap",
-	"blatoff",
+	"only_map",
+	"blat_off",
 	"stackarfs",       # Hidden
 	"forcecompile",    # Hidden
 	"cleanmsa=i",      # Hidden
