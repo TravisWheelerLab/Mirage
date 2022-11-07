@@ -280,7 +280,7 @@ sub GetElapsedTime
     if ($time_in_seconds =~ /^(\d+\.\d\d)/) {
 	return $1;
     }
-    return $time_in_seconds;
+    return int(100.0 * $time_in_seconds)/100.0;
 }
 
 
@@ -295,18 +295,18 @@ sub SecondsToSMHD
     my $seconds = $total_seconds;
 
     my $minutes = int($seconds / 60);
-    return (1,$seconds,0,0,0) if (!$minutes);
+    return (1,int($seconds),0,0,0) if (!$minutes);
     $seconds -= $minutes * 60;
 
     my $hours = int($minutes / 60);
-    return (2,$seconds,$minutes,0,0) if (!$hours);
+    return (2,int($seconds),int($minutes),0,0) if (!$hours);
     $minutes -= $hours * 60;
 
     my $days = int($hours / 24);
-    return (3,$seconds,$minutes,$hours,0) if (!$days);
-    $hours -= $days * 24;
+    return (3,int($seconds),int($minutes),int($hours),0) if (!$days);
+    $hours -= int($days * 24);
 
-    return (4,$seconds,$minutes,$hours,$days);
+    return (4,int($seconds),int($minutes),int($hours),int($days));
     
 }
 
