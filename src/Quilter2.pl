@@ -4412,11 +4412,37 @@ sub SpalnSearch
 	my @UnadjNuclRanges = @{$nucl_ranges_ref};
 	my @UnadjCenters = @{$centers_ref};
 
+	my @AminoRanges = @{$amino_ranges_ref};
+
+	# Because of cases like what we see in rat's 'pou2f3' Spaln
+	# mapping, we need to check to make sure the reported nucl.
+	# ranges aren't wildly far off in terms of being able to encode
+	# their associated amino sequences.
+	my $busted_nucl_range = 0;
+	for (my $exon_id = 0; $exon_id < scalar(@UnadjNuclRanges); $exon_id++) {
+
+	    $UnadjNuclRanges[$exon_id] =~ /^(\d+)\.\.(\d+)$/;
+	    my $nucl_range_length = abs($2-$1);
+	    $AminoRanges[$exon_id] =~ /^(\d+)\.\.(\d+)$/;
+	    my $amino_range_length = $2-$1;
+
+	    if ($amino_range_length * 9 < $nucl_range_length) {
+		$busted_nucl_range = 1;
+		last;
+	    }
+	    
+	}
+	if ($busted_nucl_range) {
+	    push(@SpalnHitStrs,0);
+	    push(@SpalnPctIDs,0);
+	    push(@SpalnHitIsChimeric,0);
+	    next;
+	}
+
 	my @HitChrs;
 	my @ChrsUsed;
 	my $num_chrs_used = 0;
 	my @NuclRanges;
-	my @AminoRanges = @{$amino_ranges_ref};
 	my @CodonCenters;
 	my $num_exons = 0;
 	while ($num_exons < scalar(@UnadjNuclRanges)) {
