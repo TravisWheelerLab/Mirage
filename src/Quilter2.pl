@@ -4412,11 +4412,12 @@ sub SpalnSearch
 	my @UnadjNuclRanges = @{$nucl_ranges_ref};
 	my @UnadjCenters = @{$centers_ref};
 
+	my @AminoRanges = @{$amino_ranges_ref};
+
 	my @HitChrs;
 	my @ChrsUsed;
 	my $num_chrs_used = 0;
 	my @NuclRanges;
-	my @AminoRanges = @{$amino_ranges_ref};
 	my @CodonCenters;
 	my $num_exons = 0;
 	while ($num_exons < scalar(@UnadjNuclRanges)) {
@@ -4469,6 +4470,38 @@ sub SpalnSearch
 	    
 	}
 
+	# For the final checks of the Spaln output, we'll keep an eye on
+	# whether or not the proposed mapping is chimeric
+	my $chimeric_chr = 0;
+
+	# Because of cases like what we see in rat's 'pou2f3' Spaln
+	# mapping, we need to check to make sure the reported nucl.
+	# ranges aren't wildly far off in terms of being able to encode
+	# their associated amino sequences (this would suggest that we
+	# mapped to the sequence that crosses over an exon gap)
+	my $spans_exon_break = 0;
+	for (my $exon_id = 0; $exon_id < $num_exons; $exon_id++) {
+
+	    $NuclRanges[$exon_id] =~ /^(\d+)\.\.(\d+)$/;
+	    my $nucl_range_length = abs($2-$1);
+
+	    $AminoRanges[$exon_id] =~ /^(\d+)\.\.(\d+)$/;
+	    my $amino_range_length = $2-$1;
+
+	    # 21 is always a good cutoff, am I right M.A.D.D.?!
+	    if ($amino_range_length * 12 < $nucl_range_length) {
+		$spans_exon_break = 1;
+		last;
+	    }
+	    
+	}
+	if ($spans_exon_break) {
+	    push(@SpalnHitStrs,0);
+	    push(@SpalnPctIDs,0);
+	    push(@SpalnHitIsChimeric,0);
+	    next;
+	}
+
 	# If we have a hit that jumps around (e.g., suggests chromosomal rearrangement)
 	# we'll want to note it as being chimeric in that sense
 	my $rearranged = 0;
@@ -4500,7 +4533,6 @@ sub SpalnSearch
 	
 	# Assembling the actual chromosome (list?) output field
 	my $chr;
-	my $chimeric_chr = 0;
 	if ($num_chrs_used > 1 || $rearranged) {
 	    
 	    $chr = 'Chimeric:';
