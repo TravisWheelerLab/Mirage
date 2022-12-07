@@ -122,7 +122,6 @@ while (my $line = <$inf>) {
 		    $attempt_num++;
 		    $adj_id = $id.'.'.$attempt_num;
 		}
-		$NameUniquenessCheck{$species.'|'.$genes.'|'.$adj_id} = 1;
 	    } else {
 		$adj_id = 1;
 		while ($NameUniquenessCheck{$species.'|'.$genes.'|'.$adj_id}) {
@@ -131,6 +130,7 @@ while (my $line = <$inf>) {
 	    }
 	    
 	    my $new_name = $species.'|'.$genes.'|'.$adj_id;
+	    $NameUniquenessCheck{$new_name} = 1;
 
 	    print $namechangef "$orig_name ===[changed-to]==> $new_name\n";
 	    print $outf "\>$new_name";
@@ -165,10 +165,11 @@ while (my $line = <$inf>) {
 		$attempt_num++;
 		$adj_id = $id.'.'.$attempt_num;
 	    }
-	    $NameUniquenessCheck{$species.'|'.$genes.'|'.$adj_id} = 1;
 
 	    # If we changed the name, report it -- otherwise, cruise on along!
 	    my $new_name = $species.'|'.$genes.'|'.$adj_id;
+	    $NameUniquenessCheck{$new_name} = 1;
+
 	    if ($new_name ne $orig_name) {
 		$num_changes++;
 		print $namechangef "$orig_name ===[changed-to]==> $new_name\n";
