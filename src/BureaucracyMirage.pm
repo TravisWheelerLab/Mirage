@@ -242,10 +242,8 @@ sub CreateDirectory
 {
     my $dirname = shift;
 
+    $dirname =~ s/\/$//;
     my $dirbase = $dirname;
-    if ($dirbase =~ /\/$/) {
-	$dirbase =~ s/\/$//;
-    }
 
     my $dircount = 1;
     while (-d $dirname) {
