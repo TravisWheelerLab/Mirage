@@ -7,7 +7,7 @@ use POSIX;
 # We'll need bureaucratic powers
 sub GetScriptDir { return '.' if ($0 !~ /\//); $0 =~ /^(.+)\/[^\/]+$/; return $1; }
 use lib GetScriptDir();
-use BureaucracyMirage;
+use Bureaucracy;
 
 
 # Additional subroutines

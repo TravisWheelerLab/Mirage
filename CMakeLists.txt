@@ -57,15 +57,6 @@ add_custom_target(
  	COMMAND ln
  		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/mirage2
  		   ${CMAKE_SOURCE_DIR}/mirage2
-	COMMAND cp
-		${CMAKE_SOURCE_DIR}/src/run_diviner.sh
-		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/diviner
- 	COMMAND ln
- 		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/diviner
- 		   ${CMAKE_SOURCE_DIR}/diviner
-	COMMAND cp
-		${CMAKE_SOURCE_DIR}/src/run_bazaar.sh
-		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/bazaar
 )
 
 add_custom_target(

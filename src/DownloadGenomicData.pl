@@ -18,7 +18,7 @@ sub GetStaticCommonTree;
 #  BEUREAUCRATIC SUBROUTINES
 #
 #  NOTE: Because I think this will be useful outside of Mirage, I'm not going to
-#        link it to the src/BureaucracyMirage.pm file, even though that essentially
+#        link it to the src/Bureaucracy.pm file, even though that essentially
 #        has all of the same functions.
 #
 sub MIN;
