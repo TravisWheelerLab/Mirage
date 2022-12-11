@@ -11,7 +11,7 @@ use Cwd;
 # YUCKITY YUCK YUCK
 sub GetScriptDir { return '.' if ($0 !~ /\//); $0 =~ /^(.+)\/[^\/]+$/; return $1; }
 use lib GetScriptDir();
-use BureaucracyMirage;
+use Bureaucracy;
 use DisplayProgress;
 
 sub PrintUsage;

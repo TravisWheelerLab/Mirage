@@ -4,7 +4,7 @@
 set -e
 
 
-TOTAL_NUM_TESTS=30
+TOTAL_NUM_TESTS=27
 GLOBAL_TEST_NUM=1
 LOCAL_TEST_NUM=1
 
@@ -123,24 +123,6 @@ check_spaln()
 }
 
 
-check_tblastn()
-{
-    DNA_NAME=$1
-    AMINO_NAME=$2
-    OUT_FILE_NAME=$3
-
-    DNA_INPUT=$INPUTS_DIR/$DNA_NAME
-    AMINO_INPUT=$INPUTS_DIR/$AMINO_NAME
-    OBSERVED_FILE=$OBS_OUTPUTS_DIR/$OUT_FILE_NAME
-    EXPECTED_FILE=$EXP_OUTPUTS_DIR/$OUT_FILE_NAME
-
-    report_test_start tblastn
-    $TBLASTN -outfmt 6 -subject $DNA_INPUT -query $AMINO_INPUT -out $OBSERVED_FILE 1>/dev/null
-    confirm_identical_files $OBSERVED_FILE $EXPECTED_FILE tblastn
-    echo ' passed'
-}
-
-
 check_blat()
 {
     DNA_NAME=$1
@@ -161,7 +143,6 @@ check_blat()
 HSI_BASE=hsi
 BLAT_BASE=blat
 SPALN_BASE=spaln
-TBLASTN_BASE=tblastn
 
 DEPS_DIR=dependencies
 
@@ -169,19 +150,16 @@ TEST_DIR=$DEPS_DIR/install-test
 HSI_DIR=$DEPS_DIR/$HSI_BASE-1.0.0
 BLAT_DIR=$DEPS_DIR/$BLAT_BASE
 SPALN_DIR=$DEPS_DIR/${SPALN_BASE}2.3.3
-TBLASTN_DIR=$DEPS_DIR/$TBLASTN_BASE
 
 TEST_TAR=$TEST_DIR.tgz
 HSI_TAR=$HSI_DIR.tgz
 BLAT_TAR=${BLAT_DIR}Src36.tgz
 SPALN_TAR=$SPALN_DIR.tgz
-TBLASTN_TAR=$TBLASTN_DIR.tgz
 
 confirm_file_exists $TEST_TAR
 confirm_file_exists $HSI_TAR
 confirm_file_exists $BLAT_TAR
 confirm_file_exists $SPALN_TAR
-confirm_file_exists $TBLASTN_TAR
 
 BUILD_DIR=build
 
@@ -191,7 +169,6 @@ rm -rf $TEST_DIR
 rm -rf $HSI_DIR
 rm -rf $BLAT_DIR
 rm -rf $SPALN_DIR
-rm -rf $TBLASTN_DIR
 
 # Test input and output files
 tar -xf $TEST_TAR -C $DEPS_DIR
@@ -296,23 +273,6 @@ else
     check_spaln $AA3_NAME $SP3_GENE23_DNA_NAME sp3.g23.spaln.out  # test 24
     
     mv -f $SPALN_DIR $BUILD_DIR/$SPALN_BASE
-fi
-
-
-# TBLASTN
-if [[ -d $BUILD_DIR/$TBLASTN_BASE ]]
-then
-    echo " Tblastn already built (remove $BUILD_DIR/$TBLASTN to remake)"
-else
-    tar -xf $TBLASTN_TAR -C $DEPS_DIR
-    TBLASTN=$TBLASTN_DIR/tblastn.linux.x86_64
-    
-    LOCAL_TEST_NUM=1
-    check_tblastn $DNA1_NAME $AA1_NAME sp1.tblastn.out  # test 28
-    check_tblastn $DNA2_NAME $AA2_NAME sp2.tblastn.out  # test 29
-    check_tblastn $DNA3_NAME $AA3_NAME sp3.tblastn.out  # test 30
-
-    mv -f $TBLASTN_DIR $BUILD_DIR/$TBLASTN_BASE
 fi
 
 
