@@ -9,10 +9,11 @@ use POSIX;
 sub ParseSpeciesTreeFile;
 sub RecursiveTreeCheck;
 sub RecursiveTreeReduce;
-sub GetLatinToCommon;
-sub GetStaticLatinToCommon;
+sub GenNameSwapHashes;
+sub GetSpeciesNamePairs;
+sub GetStaticLatinToEnglish;
 sub GetStaticLatinTree;
-sub GetStaticCommonTree;
+sub GetStaticEnglishTree;
 
 
 #  BEUREAUCRATIC SUBROUTINES
@@ -60,26 +61,42 @@ if (scalar(@ARGV) < 1){
     print "\n";
     print "    -outdirname [string] : Name the output directory (default:Genomic-Data)\n";
     print "    --parse-species-tree : Instead of downloading genomic data, parse phylip tree from NCBI (see README)\n";
+    print "\n";
+    print "  Help :\n";
+    print "    --list-known-species : List species that this script has existing knowledge of\n";
     die   "\n";
 }
 
 
 # See if the user wants to try their hand at providing some commandline
 # arguments.
+my $species_list_fname = 0;
 my $outdirname = 'Genomic-Data';
 my $relative_outdir = 1;
-for (my $opt_num = 0; $opt_num < scalar(@ARGV)-1; $opt_num++) {
+for (my $opt_num = 0; $opt_num < scalar(@ARGV); $opt_num++) {
+
     if (lc($ARGV[$opt_num]) =~ /\-outdirname/) {
+
 	$outdirname = $ARGV[++$opt_num];
 	if ($outdirname =~ /^\// || $outdirname =~ /^\~/) {
 	    $relative_outdir = 0;
 	}
+
+    } elsif ($opt_num == scalar(@ARGV)-1) {
+
+	if (-e $ARGV[$opt_num]) {
+	    $species_list_fname = $ARGV[$opt_num];
+	} elsif (lc($ARGV[$opt_num]) !~ /\-full$/) {
+	    die "\n  ERROR:  Either a species list file or '--full' must be provided as the final argument\n\n";
+	}
+	
     } elsif (lc($ARGV[$opt_num]) =~ /\-parse\-species\-tree/) {
 
 	if (@ARGV < 3) {
-	    die "\n  USAGE:  ./DownloadGenomicData.pl --parse-species-tree [tree.phy] [scientific-to-common-names.txt OR -]\n\n";
+	    die "\n  USAGE:  ./DownloadGenomicData.pl --parse-species-tree [tree.phy] [scientific-to-English-names.txt OR -]\n\n";
 	}
-	my ($latin_tree_str,$common_tree_str)
+	
+	my ($latin_tree_str,$english_tree_str)
 	    = ParseSpeciesTreeFile($ARGV[scalar(@ARGV)-2],$ARGV[scalar(@ARGV)-1]);
 	
 	print "\n\n";
@@ -87,27 +104,68 @@ for (my $opt_num = 0; $opt_num < scalar(@ARGV)-1; $opt_num++) {
 	print "------------------\n";
 	print "$latin_tree_str\n";
 	print "\n\n";
-	print "Common Species Tree (if known)\n";
+	print "English Species Tree (if known)\n";
 	print "-------------------\n";
-	print "$common_tree_str\n";
+	print "$english_tree_str\n";
 	print "\n\n";
     
+	exit(0);
+
+    } elsif (lc($ARGV[$opt_num]) =~ /\-list\-known\-species/) {
+
+	my @EnglishNames;
+	my @LatinNames;
+	my $longest_english_name_len = 0;
+	foreach my $species_name_pair (@{GetSpeciesNamePairs()}) {
+
+	    $species_name_pair =~ s/\_/ /g;
+	    $species_name_pair =~ /^([^\|]+)\|([^\|]+)$/;
+	    my $latin_name = $1;
+	    my $english_name = $2;
+	    
+	    push(@LatinNames,$latin_name);
+	    push(@EnglishNames,$english_name);
+
+	    if (length($english_name) > $longest_english_name_len) {
+		$longest_english_name_len = length($english_name);
+	    }
+
+	}
+
+	print "\n";
+	for (my $i=0; $i<scalar(@EnglishNames); $i++) {
+	    my $english_name = $EnglishNames[$i];
+	    while (length($english_name) < $longest_english_name_len) {
+		$english_name = $english_name.' ';
+	    }
+	    my $latin_name = $LatinNames[$i];
+	    print "  $english_name ($latin_name)\n";
+	}
+	print "\n";
+	print "  NOTE:  When making a list of species to download, include either\n";
+	print "         the Latin OR the English name (not both).\n";
+	print "\n";
+
 	exit(0);
 
     } else {
 	print "  Unrecognized option '$ARGV[$opt_num]' ignored\n";
     }
+    
 }
+
+
+# We'll want to have these on-hand ASAP!
+my ($latin_to_english_ref,$english_to_latin_ref) = GenNameSwapHashes('-');
+my %LatinToEnglish = %{$latin_to_english_ref};
+my %EnglishToLatin = %{$english_to_latin_ref};
 
 
 # See if there's a file to parse
 my %SpeciesToDownload;
-my $download_all = 1;
-if (lc($ARGV[scalar(@ARGV)-1]) !~ /\-full/) {
+if ($species_list_fname) {
 
-    $download_all = 0;
-    
-    my $inf = OpenInputFile($ARGV[scalar(@ARGV)-1]);
+    my $inf = OpenInputFile($species_list_fname);
     while (my $line = <$inf>) {
 
 	# Eliminate any leading or trailing whitespace
@@ -118,9 +176,21 @@ if (lc($ARGV[scalar(@ARGV)-1]) !~ /\-full/) {
 	# Convert any spaces to underscores
 	$line =~ s/\s/\_/g;
 
-	$SpeciesToDownload{lc($line)} = 1;
+	my $species_name = lc($line);
+	if ($EnglishToLatin{$species_name}) {
+	    $species_name = $EnglishToLatin{$species_name};
+	}
+	
+	$SpeciesToDownload{$species_name} = 1;
 
     }
+    
+} else {
+
+    foreach my $species_name (keys %LatinToEnglish) {
+	$SpeciesToDownload{$species_name} = 1;
+    }
+
 }
 
 
@@ -130,7 +200,8 @@ $outdirname = CreateDirectory($outdirname);
 
 # Now it's time to do the terrible work of downloading some GD html
 my $ucsc_dir_fname = $outdirname.'ucsc-dir.html';
-RunSystemCommand("wget --quiet -O $ucsc_dir_fname https://hgdownload.soe.ucsc.edu/downloads.html");
+my $genome_index_url = "https://hgdownload.soe.ucsc.edu/goldenPath/currentGenomes/";
+RunSystemCommand("wget --quiet -O $ucsc_dir_fname $genome_index_url");
 
 # We'll use a standard filename for temporary html downloads
 my $temp_html_fname = $outdirname.'temp.html';
@@ -139,134 +210,56 @@ my $temp_html_fname = $outdirname.'temp.html';
 # subdirectories containing species data we're interested in
 my $UCSCf = OpenInputFile($ucsc_dir_fname);
 my %SpeciesToGenomes;
-my %SpeciesToSciNames;
 my %SpeciesToGTFs;
 my %TroubleSpecies;
-
-my $ucscf_line = <$UCSCf>; # prime our reader
 
 # Let the user know what we're doing, since there'll be a bit of time
 # spent performing quiet downloads
 print "\n  Scanning UCSC Genome Browser for available genomes...\n";
 
-while (!eof($UCSCf)) {
+# Get to the list of current genomes
+while (my $line = <$UCSCf>) {
+    last if ($line =~ /\<pre\>/);
+}
 
-    # Look for the next section break (these had BETTER stay consistent!)
-    $ucscf_line =~ s/\n|\r//g;
-    if ($ucscf_line !~ /\<\!\-\- (.+) Download/) {
-	$ucscf_line = <$UCSCf>;
-	next;
-    }
+if (eof($UCSCf)) {
+    die "\n  ERROR: Failed to make sense of the HTML index file '$ucsc_dir_fname'\n\n";
+}
 
-    # What would a human being call this species?
-    my $plain_species_name = lc($1);
-    $plain_species_name =~ s/\s/\_/g;
+while (my $line = <$UCSCf>) {
 
-    # What's your shorthand name?
-    while ($ucscf_line = <$UCSCf>) {
-	if ($ucscf_line =~ /\<\/h3\>/ || $ucscf_line =~ /\<\!\-\- .+ Download/) {
-	    last;
-	}
-    }
-    last if (eof($UCSCf));
-
-    # There are some utility sections that use the same general formatting,
-    # so we need to make sure that if we aren't looking at a genome then
-    # we can jump ship at an appropriate time.
-    my $shorthand_species_name;
-    if ($ucscf_line =~ /\>([^\<]+)\<\/a\>\)\<\/h3\>/) {
-	$shorthand_species_name = $1;
-    } else {
-	# NOTE: We don't pull in a new line in case we 'last'-ed to a '<!--'
-	next;
-    }
-
-    # We'll want to grab the species' scientific name, for smartness
-    my $desc_fname = 'https://hgdownload.soe.ucsc.edu/gbdb/'.$shorthand_species_name.'/html/description.html';
-    my $scientific_name = $shorthand_species_name; # Placeholder
-    if (!system("wget --quiet -O $temp_html_fname $desc_fname")) {
-
-	# We'll look for the scientific name in either the genome ID (preferred)
-	# or under the photo description.
-	my $descf = OpenInputFile($temp_html_fname);
-	my $photo_name = 0;
-	my $gen_id_name = 0;
-	while (my $desc_line = <$descf>) {
-	    if (lc($desc_line) =~ /\<font size\=\-1\>\s*\<em\>([^\<]+)\<\/em\>\s*\<br\>/) {
-		$photo_name = $1;
-		$photo_name =~ s/^\s+//g;
-		$photo_name =~ s/\s+$//g;
-		$photo_name =~ s/\s/\_/g;
-	    } elsif ($desc_line =~ /NCBI Genome ID\:/) {
-		while (!eof($descf) && lc($desc_line) !~ /\<\/a\>\s*\(/) {
-		    $desc_line = <$descf>;
-		}
-		last if (eof($descf));
-		if (lc($desc_line) =~ /\<\/a\>\s*\(([^\)|\(]+)/) {
-		    $gen_id_name = $1;
-		    $gen_id_name =~ s/^\s+//;
-		    $gen_id_name =~ s/\s+$//;
-		    $gen_id_name =~ s/\s/\_/g;
-		}
-	    }
-	}
-	close($descf);
-
-	# In case there are both gen_id and scientific names, we'll want
-	# to make sure that we grab whichever one looks the most Latin
-	# (i.e., has spaces).
-	# NOTE that even though there seems to be some redundancies in how
-	# this is coded it's reflecting a series of preferences, so we need
-	# all this conditioning.
-	if ($gen_id_name && $photo_name) {
-	    if ($gen_id_name =~ /\_/) {
-		$scientific_name = $gen_id_name;
-	    } elsif ($photo_name =~ /\_/) {
-		$scientific_name = $photo_name;
-	    } else {
-		$scientific_name = $gen_id_name;
-	    }
-	} elsif ($gen_id_name) {
-	    $scientific_name = $gen_id_name;
-	} elsif ($photo_name) {
-	    $scientific_name = $photo_name;
-	}
-	
-    }
-
-    $SpeciesToSciNames{$plain_species_name} = $scientific_name;
-
-    # If we have a list of species to look for, see if this dude's made the cut
-    unless ($download_all || $SpeciesToDownload{$plain_species_name} || $SpeciesToDownload{$scientific_name}) {
-	$ucscf_line = <$UCSCf>;
-	next;
-    }
-
-    # Assuming everything holds, we don't really need to parse anything else,
-    # since there's a standard convention for the URLs containing genome data
-    my $genome_dir_fname = 'https://hgdownload.soe.ucsc.edu/goldenPath/'.$shorthand_species_name.'/bigZips/';
-
-
-    # TIME FOR THE MONEY MOVES!
+    $line =~ s/\n|\r//g;
+    last if ($line =~ /\<\/pre\>/);
     
+    next if ($line !~ /\<a href\=\"([^\"]+)\"\>([^\/|\<]+)\/?\</);
+    my $species_dir_url = $1;
+    my $latin_species_name = lc($2);
+
+    next if (!$SpeciesToDownload{$latin_species_name});
     
+    # What would an English-speaking person normally call this species?
+    my $english_species_name = $LatinToEnglish{$latin_species_name};
+
+
     # 1. Identify the genome download link
+    
+    my $genome_dir_fname = $genome_index_url.$species_dir_url.'bigZips/';
 
     # Download the directory
     if (system("wget --quiet -O $temp_html_fname $genome_dir_fname")) {
-	my $trouble_key = $plain_species_name.' ('.$shorthand_species_name.')';
-	$TroubleSpecies{$trouble_key} = 1;
-	$ucscf_line = <$UCSCf>;
+	$TroubleSpecies{$latin_species_name} = 1;
 	next;
     }
 
-    # Luckily, this is (mostly) plain-text rather than html, so we should have an
-    # easy time parsing it.
+    # We're going to be a little funny -- look for 'xyz.2bit' and then swap
+    # the '.2bit' with '.fa.gz'
     my $BigZips = OpenInputFile($temp_html_fname);
     my $genome_fname = 0;
+    my $reduced_name = 0;
     while (my $bz_line = <$BigZips>) {
-	if ($bz_line =~ /^\s*(\S+) \- \"Soft-masked\" assembly sequence in one file/) {
-	    $genome_fname = $genome_dir_fname.$1;
+	if ($bz_line =~ /(\S+)\.2bit/) {
+	    $reduced_name = $1;
+	    $genome_fname = $genome_dir_fname.$reduced_name.'.fa.gz';
 	    last;
 	}
     }
@@ -275,14 +268,13 @@ while (!eof($UCSCf)) {
     # If we hit the end of the file and didn't find a genome download link,
     # note this as a "trouble species" and move on
     if (!$genome_fname) {
-	my $trouble_key = $plain_species_name.' ('.$shorthand_species_name.')';
-	$TroubleSpecies{$trouble_key} = 1;
-	$ucscf_line = <$UCSCf>;
+	$TroubleSpecies{$latin_species_name} = 1;
 	next;
     }
 
+    
     # GENOME AHOY!
-    $SpeciesToGenomes{$plain_species_name} = $genome_fname;
+    $SpeciesToGenomes{$latin_species_name} = $genome_fname;
 
     
     # 2. Pull in any gtfs that might be floating around
@@ -304,19 +296,11 @@ while (!eof($UCSCf)) {
     }
     close($Genesf);
 
-    # If there weren't any gtf files in our 'genes' dir, then I have two thoughts:
-    # (1.) weird...?, and (2.) whatever
-    if (!$gtf_list_str) {
-	$ucscf_line = <$UCSCf>;
-	next;
+    # GTFs ahoy?
+    if ($gtf_list_str) {
+	# GTFs AHOY!
+	$SpeciesToGTFs{$latin_species_name} = $gtf_list_str;
     }
-
-    # GTFs AHOY!
-    $SpeciesToGTFs{$plain_species_name} = $gtf_list_str;
-
-    
-    # Moving right along
-    $ucscf_line = <$UCSCf>;
 
 }
 close($UCSCf);
@@ -355,32 +339,36 @@ $pwd = $pwd.'/' if ($pwd !~ /\/$/);
 
 # We'll want to position ourselves to really easily build a species guide out of
 # what we download, so let's just frickin' do it!
-my %SpeciesToSuperNames; # english name + scientific name + shorthand
-my $longest_name_len = 0;
-my $longest_sci_name_len = 0;
-my $longest_genome_len = 0;
+my %LatinToSuper; # "English name (Latin name/shorthand)"
+my $longest_english_name_len = 0;
+my $longest_latin_name_len = 0;
 my $longest_supername_len = 0;
+my $longest_genome_fname_len = 0;
 
-foreach my $species (sort keys %SpeciesToGenomes) {
+foreach my $latin_species_name (sort keys %SpeciesToGenomes) {
 
-    $longest_name_len = length($species) if (length($species) > $longest_name_len);
+    if (length($latin_species_name) > $longest_latin_name_len) {
+	$longest_latin_name_len = length($latin_species_name);
+    }
 
-    my $genome_link = $SpeciesToGenomes{$species};
+    my $genome_link = $SpeciesToGenomes{$latin_species_name};
 
     # Just in case some are '.fasta.gz'
     $genome_link =~ /\/([^\/]+)(\.[^\.]+)\.gz$/;
     my $species_shorthand = $1;
-    my $genome_extension  = $2;
+    my $genome_extension = $2;
 
-    my $scientific_name = $SpeciesToSciNames{$species};
-    $longest_sci_name_len = length($scientific_name)
-	if (length($scientific_name) > $longest_sci_name_len);
+    my $english_species_name = $LatinToEnglish{$latin_species_name};
+    if (length($english_species_name) > $longest_english_name_len) {
+	$longest_english_name_len = length($english_species_name);
+    }
 
     # What's your "supername"?
-    my $supername = $species.' ('.$scientific_name.'/'.$species_shorthand.')';
-    $longest_supername_len = length($supername)
-	if (length($supername) > $longest_supername_len);
-    $SpeciesToSuperNames{$species} = $supername;
+    my $supername = $english_species_name.' ('.$latin_species_name.'/'.$species_shorthand.')';
+    if (length($supername) > $longest_supername_len) {
+	$longest_supername_len = length($supername)
+    }
+    $LatinToSuper{$latin_species_name} = $supername;
 
     my $dl_genome_fname = $dl_genome_dirname.$species_shorthand.$genome_extension.'.gz';
 
@@ -394,15 +382,16 @@ foreach my $species (sort keys %SpeciesToGenomes) {
     # Record the full path to the file
     $dl_genome_fname =~ s/\.gz$//g;
     $dl_genome_fname = $pwd.$dl_genome_fname if ($relative_outdir);
-    $SpeciesToGenomes{$species} = $dl_genome_fname;
+    $SpeciesToGenomes{$latin_species_name} = $dl_genome_fname;
 
-    $longest_genome_len = length($dl_genome_fname)
-	if (length($dl_genome_fname) > $longest_genome_len);
+    if (length($dl_genome_fname) > $longest_genome_fname_len) {
+	$longest_genome_fname_len = length($dl_genome_fname);
+    }
 
     # If there isn't at least one gtf for this species, then we're moving on!
-    next if (!$SpeciesToGTFs{$species});
+    next if (!$SpeciesToGTFs{$latin_species_name});
 
-    my @GTFList = split(/\|/,$SpeciesToGTFs{$species});
+    my @GTFList = split(/\|/,$SpeciesToGTFs{$latin_species_name});
     for (my $i=0; $i<scalar(@GTFList); $i++) {
 
 	my $gtf_link = $GTFList[$i];
@@ -430,9 +419,11 @@ foreach my $species (sort keys %SpeciesToGenomes) {
 
     # Record the loooooooong name
     if ($relative_outdir) {
-	$SpeciesToGTFs{$species} = $pwd.$dl_gtf_dirname.$species_shorthand.'.gtf';
+	$SpeciesToGTFs{$latin_species_name} =
+	    $pwd.$dl_gtf_dirname.$species_shorthand.'.gtf';
     } else {
-	$SpeciesToGTFs{$species} = $dl_gtf_dirname.$species_shorthand.'.gtf';
+	$SpeciesToGTFs{$latin_species_name} =
+	    $dl_gtf_dirname.$species_shorthand.'.gtf';
     }
     
     # We got our big honkin' nasty boi, so let's clean up our lil' beepin' chill gals!
@@ -450,78 +441,52 @@ foreach my $species (sort keys %SpeciesToGenomes) {
 
 # ... But first, how about we decide what our species trees should look like?
 #
-my %ReducedSpeciesToSciNames;
-foreach my $species (keys %SpeciesToGenomes) {
-    $ReducedSpeciesToSciNames{$species} = $SpeciesToSciNames{$species};
+my ($english_tree,$latin_tree)
+    = RecursiveTreeReduce(GetStaticLatinTree());
+
+# Species guides comin' atchya!
+my $LatinGuide = OpenOutputFile($outdirname.'Latin-Species-Guide');
+my $EnglishGuide = OpenOutputFile($outdirname.'English-Species-Guide');
+
+if (scalar(split(/\,/,$latin_tree)) > 2) {
+    print $LatinGuide "$latin_tree\n";
+    print $EnglishGuide "$english_tree\n";
 }
-my ($common_tree,$latin_tree)
-    = RecursiveTreeReduce(GetStaticCommonTree(),\%ReducedSpeciesToSciNames);
 
-# We'll count the number of species in our trees -- if there are less than
-# three, then there really isn't any point in having a species tree
-my $num_species_in_tree = scalar(split(/\,/,$common_tree));
+foreach my $latin_species_name (sort keys %SpeciesToGenomes) {
 
-
-# 1. Common name species guide
-my $SpeciesGuide = OpenOutputFile($outdirname.'Common-Species-Guide');
-
-print $SpeciesGuide "$common_tree\n" if ($num_species_in_tree > 2);
-foreach my $species (sort keys %SpeciesToGenomes) {
-
-    my $genome = $SpeciesToGenomes{$species};
+    my $genome = $SpeciesToGenomes{$latin_species_name};
 
     my $gtf = '-';
-    if ($SpeciesToGTFs{$species}) {
-	$gtf = $SpeciesToGTFs{$species};
+    if ($SpeciesToGTFs{$latin_species_name}) {
+	$gtf = $SpeciesToGTFs{$latin_species_name};
     }
 
-    while (length($species) < $longest_name_len) {
-	$species = $species.' ';
+    my $english_species_name = $LatinToEnglish{$latin_species_name};
+    while (length($english_species_name) < $longest_english_name_len) {
+	$english_species_name = $english_species_name.' ';
     }
 
-    while (length($genome) < $longest_genome_len) {
+    while (length($latin_species_name) < $longest_latin_name_len) {
+	$latin_species_name = $latin_species_name.' ';
+    }
+
+    while (length($genome) < $longest_genome_fname_len) {
 	$genome = $genome.' ';
     }
 
-    print $SpeciesGuide "$species $genome $gtf\n";
+    print $LatinGuide "$latin_species_name $genome $gtf\n";
+    print $EnglishGuide "$english_species_name $genome $gtf\n";
 
 }
-close($SpeciesGuide);
+close($LatinGuide);
+close($EnglishGuide);
 
-# 2. Scientific name species guide
-$SpeciesGuide = OpenOutputFile($outdirname.'Latin-Species-Guide');
-
-print $SpeciesGuide "$latin_tree\n" if ($num_species_in_tree > 2);
-my %AllSciSpeciesNames;
-foreach my $species (sort keys %SpeciesToGenomes) {
-
-    my $scientific_name = $SpeciesToSciNames{$species};
-    $AllSciSpeciesNames{$scientific_name} = 1;
-    
-    my $genome = $SpeciesToGenomes{$species};
-
-    my $gtf = '-';
-    if ($SpeciesToGTFs{$species}) {
-	$gtf = $SpeciesToGTFs{$species};
-    }
-
-    while (length($scientific_name) < $longest_sci_name_len) {
-	$scientific_name = $scientific_name.' ';
-    }
-
-    while (length($genome) < $longest_genome_len) {
-	$genome = $genome.' ';
-    }
-
-    print $SpeciesGuide "$scientific_name $genome $gtf\n";
-
-}
-close($SpeciesGuide);
 
 # If any of the requested species weren't in UCSC, we'll want to be sure to
 # add them to the 'TroubleSpecies' hash
 foreach my $species (keys %SpeciesToDownload) {
-    if (!$SpeciesToGenomes{$species} && !$AllSciSpeciesNames{$species}) {
+    if (!$SpeciesToGenomes{$species}) {
 	$TroubleSpecies{$species} = 1;
     }
 }
@@ -532,7 +497,7 @@ foreach my $species (keys %TroubleSpecies  ) { $AllSpecies{$species} = 1; }
 
 # Oh, let's give even the "trouble species" supernames -- it's a fundamental right!
 foreach my $species (keys %TroubleSpecies) {
-    $SpeciesToSuperNames{$species} = $species;
+    $LatinToSuper{$species} = $species;
     $longest_supername_len = length($species)
 	if (length($species) > $longest_supername_len);
 }
@@ -561,7 +526,7 @@ foreach my $species (sort keys %AllSpecies) {
 	$gtf    = 'No     ';
     }
 
-    my $supername = $SpeciesToSuperNames{$species};
+    my $supername = $LatinToSuper{$species};
 
     # Let's get pretty with it!
     $supername =~ s/\_/ /g;
@@ -617,11 +582,9 @@ print "\n";
 #
 sub ParseSpeciesTreeFile
 {
+    
     my $treefname = shift;
     my $mapfname  = shift;
-
-    my $latin_to_common_ref = GetLatinToCommon($mapfname);
-    my %LatinToCommon = %{$latin_to_common_ref};
 
     my $treef = OpenInputFile($treefname);
     my $giant_str = '';
@@ -643,7 +606,7 @@ sub ParseSpeciesTreeFile
     close($treef);
 
     $giant_str =~ s/\,$//;
-    return RecursiveTreeCheck(lc($giant_str),\%LatinToCommon);
+    return RecursiveTreeCheck(lc($giant_str));
 
 }
 
@@ -660,9 +623,6 @@ sub RecursiveTreeCheck
 {
     my $in_tree_str = shift;
     my @TreeChars = split(//,$in_tree_str);
-
-    my $latin_to_common_ref = shift;
-    my %LatinToCommon = %{$latin_to_common_ref};
 
     # What we'll do here is sort all characters into either being
     # at this sub-tree's node, or belonging to a subtree of their own
@@ -694,49 +654,44 @@ sub RecursiveTreeCheck
     }
 
     my $latin_out_tree_str = '';
-    my $common_out_tree_str = '';
-    foreach my $species (split(/\,/,$node_str)) {
+    my $english_out_tree_str = '';
+    foreach my $latin_species (split(/\,/,$node_str)) {
 
-	my $common_species;
-	if ($LatinToCommon{$species}) {
-	    $common_species = $LatinToCommon{$species};
-	} else {
-	    $common_species = $species;
-	}
+	my $english_species = $LatinToEnglish{$latin_species};
 	
 	if ($latin_out_tree_str) {
-	    $latin_out_tree_str = '('.$latin_out_tree_str.','.$species.')';
-	    $common_out_tree_str = '('.$common_out_tree_str.','.$common_species.')';
+	    $latin_out_tree_str = '('.$latin_out_tree_str.','.$latin_species.')';
+	    $english_out_tree_str = '('.$english_out_tree_str.','.$english_species.')';
 	} else {
-	    $latin_out_tree_str = $species;
-	    $common_out_tree_str = $common_species;
+	    $latin_out_tree_str = $latin_species;
+	    $english_out_tree_str = $english_species;
 	}
 
     }
 
     my $latin_out_subtree_str = '';
-    my $common_out_subtree_str = '';
+    my $english_out_subtree_str = '';
     for (my $i=0; $i<scalar(@SubTreeStrs); $i++) {
 
-	my ($latin_subtree_str,$common_subtree_str)
-	    = RecursiveTreeCheck($SubTreeStrs[$i],\%LatinToCommon);
+	my ($latin_subtree_str,$english_subtree_str)
+	    = RecursiveTreeCheck($SubTreeStrs[$i]);
 
 	if ($latin_out_subtree_str) {
 	    $latin_out_subtree_str = '('.$latin_out_subtree_str.','.$latin_subtree_str.')';
-	    $common_out_subtree_str = '('.$common_out_subtree_str.','.$common_subtree_str.')';
+	    $english_out_subtree_str = '('.$english_out_subtree_str.','.$english_subtree_str.')';
 	} else {
 	    $latin_out_subtree_str = $latin_subtree_str;
-	    $common_out_subtree_str = $common_subtree_str;
+	    $english_out_subtree_str = $english_subtree_str;
 	}
 
     }
 
     if ($latin_out_subtree_str) {
 	$latin_out_tree_str = '('.$latin_out_tree_str.','.$latin_out_subtree_str.')';
-	$common_out_tree_str = '('.$common_out_tree_str.','.$common_out_subtree_str.')';
+	$english_out_tree_str = '('.$english_out_tree_str.','.$english_out_subtree_str.')';
     }
 
-    return ($latin_out_tree_str,$common_out_tree_str);
+    return ($latin_out_tree_str,$english_out_tree_str);
     
 }
 
@@ -753,9 +708,6 @@ sub RecursiveTreeReduce
     my $in_tree_str = shift;
     my @TreeChars = split(//,$in_tree_str);
     
-    my $common_to_latin_ref = shift;
-    my %CommonToLatin = %{$common_to_latin_ref};
-
     # Sadly, I'm essentially repeating what's in 'RecursiveTreeCheck' but with
     # the additional bit of computation involved in reacting to absent species
     my $tree_depth = 0;
@@ -783,53 +735,59 @@ sub RecursiveTreeReduce
 
     # Because we're going off our pre-formatted string, we have a guarantee that
     # no node will have more than two species
-    my $common_node_str = '';
+    my $english_node_str = '';
     my $latin_node_str = '';
-    foreach my $species (split(/\,/,$node_str)) {
-	if ($CommonToLatin{$species}) {
-	    if ($common_node_str) {
-		$common_node_str = '('.$common_node_str.','.$species.')';
-		$latin_node_str = '('.$latin_node_str.','.$CommonToLatin{$species}.')';
-	    } else {
-		$common_node_str = $species;
-		$latin_node_str = $CommonToLatin{$species};
-	    }
+    foreach my $latin_species (split(/\,/,$node_str)) {
+
+	next if (!$SpeciesToGenomes{$latin_species});
+	
+	my $english_species = $LatinToEnglish{$latin_species};
+	if ($latin_node_str) {
+	    $latin_node_str = '('.$latin_node_str.','.$latin_species.')';
+	    $english_node_str = '('.$english_node_str.','.$english_species.')';
+	} else {
+	    $latin_node_str = $latin_species;
+	    $english_node_str = $english_species;
 	}
+	
     }
 
     # Get the subtree string(s) (if there are any)
-    my $common_subtree_str = '';
+    my $english_subtree_str = '';
     my $latin_subtree_str = '';
     foreach $subtree_str (@SubTreeStrs) {
-	my ($common_sub_str,$latin_sub_str)
-	    = RecursiveTreeReduce($subtree_str,\%CommonToLatin);
-	next if (!$common_sub_str);
-	if ($common_subtree_str) {
-	    $common_subtree_str = '('.$common_subtree_str.','.$common_sub_str.')';
+
+	my ($english_sub_str,$latin_sub_str)
+	    = RecursiveTreeReduce($subtree_str);
+	next if (!$english_sub_str);
+	
+	if ($english_subtree_str) {
+	    $english_subtree_str = '('.$english_subtree_str.','.$english_sub_str.')';
 	    $latin_subtree_str = '('.$latin_subtree_str.','.$latin_sub_str.')';
 	} else {
-	    $common_subtree_str = $common_sub_str;
+	    $english_subtree_str = $english_sub_str;
 	    $latin_subtree_str = $latin_sub_str;
 	}
+	
     }
 
     # Put it all together!
-    my $common_out_str = '';
+    my $english_out_str = '';
     my $latin_out_str = '';
-    if ($common_node_str) {
-	if ($common_subtree_str) {
-	    $common_out_str = '('.$common_node_str.','.$common_subtree_str.')';
+    if ($english_node_str) {
+	if ($english_subtree_str) {
+	    $english_out_str = '('.$english_node_str.','.$english_subtree_str.')';
 	    $latin_out_str = '('.$latin_node_str.','.$latin_subtree_str.')';
 	} else {
-	    $common_out_str = $common_node_str;
+	    $english_out_str = $english_node_str;
 	    $latin_out_str = $latin_node_str;
 	}
-    } elsif ($common_subtree_str) {
-	$common_out_str = $common_subtree_str;
+    } elsif ($english_subtree_str) {
+	$english_out_str = $english_subtree_str;
 	$latin_out_str = $latin_subtree_str;
     }
 
-    return ($common_out_str,$latin_out_str);
+    return ($english_out_str,$latin_out_str);
 
 }
 
@@ -840,40 +798,56 @@ sub RecursiveTreeReduce
 
 #################################################################
 #
-#  FUNCTION:  GetLatinToCommon
+#  FUNCTION:  GenNameSwapHashes
 #
-sub GetLatinToCommon
+sub GenNameSwapHashes
 {
     my $fname = shift;
-    return GetStaticLatinToCommon() if ($fname eq '-');
 
-    my $mapf = OpenInputFile($fname);
-    my %LatinToCommon;
-    while (my $line = <$mapf>) {
+    my %LatinToEnglish;
+    my %EnglishToLatin;
+    if ($fname eq '-') {
+    
+	my $species_name_pairs_ref = GetSpeciesNamePairs();
+	foreach my $species_name_pair (@{$species_name_pairs_ref}) {
+	    
+	    $species_name_pair =~ /^([^\|]+)\|([^\|]+)$/;
+	    my $latin_name = $1;
+	    my $english_name = $2;
 
-	if ($line =~ /^([^\=]+)\=([^\=]+)$/) {
-
-	    my $latin_name  = lc($1);
-	    my $common_name = lc($2);
-
-	    $latin_name =~ s/^\s+//;
-	    $latin_name =~ s/\s+$//;
-	    $latin_name =~ s/\s/\_/g;
-
-	    $common_name =~ s/^\s+//;
-	    $common_name =~ s/\s+$//;
-	    $common_name =~ s/\s/\_/g;
-
-	    $LatinToCommon{$latin_name} = $common_name;
-
+	    $LatinToEnglish{$latin_name} = $english_name;
+	    $EnglishToLatin{$english_name} = $latin_name;
+	
 	}
 
+    } else {
+
+	my $mapf = OpenInputFile($fname);
+	my %LatinToEnglish;
+	while (my $line = <$mapf>) {
+	    
+	    if ($line =~ /^\s*([^\=]+)\s*\=\s*([^\=]+)\s*$/) {
+		
+		my $latin_name   = lc($1);
+		my $english_name = lc($2);
+		
+		$latin_name =~ s/\s/\_/g;
+		$english_name =~ s/\s/\_/g;
+		
+		$LatinToEnglish{$latin_name} = $english_name;
+		$EnglishToLatin{$english_name} = $latin_name;
+		
+	    }
+	    
+	}
+	close($mapf);
+
     }
-    close($mapf);
 
-    return \%LatinToCommon;
-    
+    return(\%LatinToEnglish,\%EnglishToLatin);
+
 }
+
 
 
 
@@ -882,97 +856,96 @@ sub GetLatinToCommon
 
 #################################################################
 #
-#  FUNCTION:  GetStaticLatinToCommon
+#  FUNCTION:  GetSpeciesNamePairs
 #
-sub GetStaticLatinToCommon
+sub GetSpeciesNamePairs
 {
-    my %LatinToCommon;
-
-    $LatinToCommon{'anopheles_gambiae'} = 'a._gambiae';
-    $LatinToCommon{'vicugna_pacos'} = 'alpaca';
-    $LatinToCommon{'alligator_mississippiensis'} = 'american_alligator';
-    $LatinToCommon{'dasypus_novemcinctus'} = 'armadillo';
-    $LatinToCommon{'gadus_morhua'} = 'atlantic_cod';
-    $LatinToCommon{'papio_anubis'} = 'baboon';
-    $LatinToCommon{'bison_bison_bison'} = 'bison';
-    $LatinToCommon{'pan_paniscus'} = 'bonobo';
-    $LatinToCommon{'apteryx_australis'} = 'brown_kiwi';
-    $LatinToCommon{'melopsittacus_undulatus'} = 'budgerigar';
-    $LatinToCommon{'otolemur_garnettii'} = 'bushbaby';
-    $LatinToCommon{'felis_catus'} = 'cat';
-    $LatinToCommon{'gallus_gallus'} = 'chicken';
-    $LatinToCommon{'pan_troglodytes'} = 'chimp';
-    $LatinToCommon{'cricetulus_griseus'} = 'chinese_hamster';
-    $LatinToCommon{'manis_pentadactyla'} = 'chinese_pangolin';
-    $LatinToCommon{'ciona_intestinalis'} = 'ciona';
-    $LatinToCommon{'latimeria_chalumnae'} = 'coelacanth';
-    $LatinToCommon{'bos_taurus'} = 'cow';
-    $LatinToCommon{'macaca_fascicularis'} = 'crab-eating_macaque';
-    $LatinToCommon{'drosophila_melanogaster'} = 'd._melanogaster';
-    $LatinToCommon{'canis_lupus_familiaris'} = 'dog';
-    $LatinToCommon{'tursiops_truncatus'} = 'dolphin';
-    $LatinToCommon{'loxodonta_africana'} = 'elephant';
-    $LatinToCommon{'callorhinchus_milii'} = 'elephant_shark';
-    $LatinToCommon{'mustela_putorius_furo'} = 'ferret';
-    $LatinToCommon{'takifugu_rubripes'} = 'fugu';
-    $LatinToCommon{'thamnophis_sirtalis'} = 'garter_snake';
-    $LatinToCommon{'nomascus_leucogenys'} = 'gibbon';
-    $LatinToCommon{'aquila_chrysaetos_canadensis'} = 'golden_eagle';
-    $LatinToCommon{'rhinopithecus_roxellana'} = 'golden_snub-nosed_monkey';
-    $LatinToCommon{'gorilla_gorilla_gorilla'} = 'gorilla';
-    $LatinToCommon{'chlorocebus_sabaeus'} = 'green_monkey';
-    $LatinToCommon{'cavia_porcellus'} = 'guinea_pig';
-    $LatinToCommon{'neomonachus_schauinslandi'} = 'hawaiian_monk_seal';
-    $LatinToCommon{'erinaceus_europaeus'} = 'hedgehog';
-    $LatinToCommon{'equus_caballus'} = 'horse';
-    $LatinToCommon{'homo_sapiens'} = 'human';
-    $LatinToCommon{'dipodomys_ordii'} = 'kangaroo_rat';
-    $LatinToCommon{'petromyzon_marinus'} = 'lamprey';
-    $LatinToCommon{'anolis_carolinensis'} = 'lizard';
-    $LatinToCommon{'galeopterus_variegatus'} = 'malayan_flying_lemur';
-    $LatinToCommon{'trichechus_manatus_latirostris'} = 'manatee';
-    $LatinToCommon{'callithrix_jacchus'} = 'marmoset';
-    $LatinToCommon{'oryzias_latipes'} = 'medaka';
-    $LatinToCommon{'geospiza_fortis'} = 'medium_ground_finch';
-    $LatinToCommon{'pteropus_vampyrus'} = 'megabat';
-    $LatinToCommon{'myotis_lucifugus'} = 'microbat';
-    $LatinToCommon{'balaenoptera_acutorostrata_scammoni'} = 'minke_whale';
-    $LatinToCommon{'mus_musculus'} = 'mouse';
-    $LatinToCommon{'microcebus_murinus'} = 'mouse_lemur';
-    $LatinToCommon{'heterocephalus_glaber'} = 'naked_mole-rat';
-    $LatinToCommon{'oreochromis_niloticus'} = 'nile_tilapia';
-    $LatinToCommon{'pongo_pygmaeus_abelii'} = 'orangutan';
-    $LatinToCommon{'chrysemys_picta_bellii'} = 'painted_turtle';
-    $LatinToCommon{'ailuropoda_melanoleuca'} = 'panda';
-    $LatinToCommon{'sus_scrofa'} = 'pig';
-    $LatinToCommon{'ochotona_princeps'} = 'pika';
-    $LatinToCommon{'ornithorhynchus_anatinus'} = 'platypus';
-    $LatinToCommon{'nasalis_larvatus'} = 'proboscis_monkey';
-    $LatinToCommon{'oryctolagus_cuniculus'} = 'rabbit';
-    $LatinToCommon{'rattus_norvegicus'} = 'rat';
-    $LatinToCommon{'macaca_mulatta'} = 'rhesus';
-    $LatinToCommon{'procavia_capensis'} = 'rock_hyrax';
-    $LatinToCommon{'aplysia_californica'} = 'sea_hare';
-    $LatinToCommon{'ovis_aries'} = 'sheep';
-    $LatinToCommon{'sorex_araneus'} = 'shrew';
-    $LatinToCommon{'choloepus_hoffmanni'} = 'sloth';
-    $LatinToCommon{'enhydra_lutris_nereis'} = 'southern_sea_otter';
-    $LatinToCommon{'spermophilus_tridecemlineatus'} = 'squirrel';
-    $LatinToCommon{'saimiri_boliviensis'} = 'squirrel_monkey';
-    $LatinToCommon{'tarsius_syrichta'} = 'tarsier';
-    $LatinToCommon{'sarcophilus_harrisii'} = 'tasmanian_devil';
-    $LatinToCommon{'echinops_telfairi'} = 'tenrec';
-    $LatinToCommon{'nanorana_parkeri'} = 'tibetan_frog';
-    $LatinToCommon{'tupaia_belangeri'} = 'tree_shrew';
-    $LatinToCommon{'meleagris_gallopavo'} = 'turkey';
-    $LatinToCommon{'strongylocentrotus_purpuratus'} = 'urchin';
-    $LatinToCommon{'notamacropus_eugenii'} = 'wallaby';
-    $LatinToCommon{'ceratotherium_simum'} = 'white_rhinoceros';
-    $LatinToCommon{'xenopus_tropicalis'} = 'x._tropicalis';
-    $LatinToCommon{'taeniopygia_guttata'} = 'zebra_finch';
-    $LatinToCommon{'danio_rerio'} = 'zebrafish';
+    my @SpeciesNamePairs;
+    push(@SpeciesNamePairs,'anopheles_gambiae|a._gambiae');
+    push(@SpeciesNamePairs,'vicugna_pacos|alpaca');
+    push(@SpeciesNamePairs,'alligator_mississippiensis|american_alligator');
+    push(@SpeciesNamePairs,'dasypus_novemcinctus|armadillo');
+    push(@SpeciesNamePairs,'gadus_morhua|atlantic_cod');
+    push(@SpeciesNamePairs,'papio_anubis|baboon');
+    push(@SpeciesNamePairs,'bison_bison_bison|bison');
+    push(@SpeciesNamePairs,'pan_paniscus|bonobo');
+    push(@SpeciesNamePairs,'apteryx_australis|brown_kiwi');
+    push(@SpeciesNamePairs,'melopsittacus_undulatus|budgerigar');
+    push(@SpeciesNamePairs,'otolemur_garnettii|bushbaby');
+    push(@SpeciesNamePairs,'felis_catus|cat');
+    push(@SpeciesNamePairs,'gallus_gallus|chicken');
+    push(@SpeciesNamePairs,'pan_troglodytes|chimp');
+    push(@SpeciesNamePairs,'cricetulus_griseus|chinese_hamster');
+    push(@SpeciesNamePairs,'manis_pentadactyla|chinese_pangolin');
+    push(@SpeciesNamePairs,'ciona_intestinalis|ciona');
+    push(@SpeciesNamePairs,'latimeria_chalumnae|coelacanth');
+    push(@SpeciesNamePairs,'bos_taurus|cow');
+    push(@SpeciesNamePairs,'macaca_fascicularis|crab-eating_macaque');
+    push(@SpeciesNamePairs,'drosophila_melanogaster|d._melanogaster');
+    push(@SpeciesNamePairs,'canis_lupus_familiaris|dog');
+    push(@SpeciesNamePairs,'tursiops_truncatus|dolphin');
+    push(@SpeciesNamePairs,'loxodonta_africana|elephant');
+    push(@SpeciesNamePairs,'callorhinchus_milii|elephant_shark');
+    push(@SpeciesNamePairs,'mustela_putorius_furo|ferret');
+    push(@SpeciesNamePairs,'takifugu_rubripes|fugu');
+    push(@SpeciesNamePairs,'thamnophis_sirtalis|garter_snake');
+    push(@SpeciesNamePairs,'nomascus_leucogenys|gibbon');
+    push(@SpeciesNamePairs,'aquila_chrysaetos_canadensis|golden_eagle');
+    push(@SpeciesNamePairs,'rhinopithecus_roxellana|golden_snub-nosed_monkey');
+    push(@SpeciesNamePairs,'gorilla_gorilla_gorilla|gorilla');
+    push(@SpeciesNamePairs,'chlorocebus_sabaeus|green_monkey');
+    push(@SpeciesNamePairs,'cavia_porcellus|guinea_pig');
+    push(@SpeciesNamePairs,'neomonachus_schauinslandi|hawaiian_monk_seal');
+    push(@SpeciesNamePairs,'erinaceus_europaeus|hedgehog');
+    push(@SpeciesNamePairs,'equus_caballus|horse');
+    push(@SpeciesNamePairs,'homo_sapiens|human');
+    push(@SpeciesNamePairs,'dipodomys_ordii|kangaroo_rat');
+    push(@SpeciesNamePairs,'petromyzon_marinus|lamprey');
+    push(@SpeciesNamePairs,'anolis_carolinensis|lizard');
+    push(@SpeciesNamePairs,'galeopterus_variegatus|malayan_flying_lemur');
+    push(@SpeciesNamePairs,'trichechus_manatus_latirostris|manatee');
+    push(@SpeciesNamePairs,'callithrix_jacchus|marmoset');
+    push(@SpeciesNamePairs,'oryzias_latipes|medaka');
+    push(@SpeciesNamePairs,'geospiza_fortis|medium_ground_finch');
+    push(@SpeciesNamePairs,'pteropus_vampyrus|megabat');
+    push(@SpeciesNamePairs,'myotis_lucifugus|microbat');
+    push(@SpeciesNamePairs,'balaenoptera_acutorostrata_scammoni|minke_whale');
+    push(@SpeciesNamePairs,'mus_musculus|mouse');
+    push(@SpeciesNamePairs,'microcebus_murinus|mouse_lemur');
+    push(@SpeciesNamePairs,'heterocephalus_glaber|naked_mole-rat');
+    push(@SpeciesNamePairs,'oreochromis_niloticus|nile_tilapia');
+    push(@SpeciesNamePairs,'pongo_pygmaeus_abelii|orangutan');
+    push(@SpeciesNamePairs,'chrysemys_picta_bellii|painted_turtle');
+    push(@SpeciesNamePairs,'ailuropoda_melanoleuca|panda');
+    push(@SpeciesNamePairs,'sus_scrofa|pig');
+    push(@SpeciesNamePairs,'ochotona_princeps|pika');
+    push(@SpeciesNamePairs,'ornithorhynchus_anatinus|platypus');
+    push(@SpeciesNamePairs,'nasalis_larvatus|proboscis_monkey');
+    push(@SpeciesNamePairs,'oryctolagus_cuniculus|rabbit');
+    push(@SpeciesNamePairs,'rattus_norvegicus|rat');
+    push(@SpeciesNamePairs,'macaca_mulatta|rhesus');
+    push(@SpeciesNamePairs,'procavia_capensis|rock_hyrax');
+    push(@SpeciesNamePairs,'aplysia_californica|sea_hare');
+    push(@SpeciesNamePairs,'ovis_aries|sheep');
+    push(@SpeciesNamePairs,'sorex_araneus|shrew');
+    push(@SpeciesNamePairs,'choloepus_hoffmanni|sloth');
+    push(@SpeciesNamePairs,'enhydra_lutris_nereis|southern_sea_otter');
+    push(@SpeciesNamePairs,'spermophilus_tridecemlineatus|squirrel');
+    push(@SpeciesNamePairs,'saimiri_boliviensis|squirrel_monkey');
+    push(@SpeciesNamePairs,'tarsius_syrichta|tarsier');
+    push(@SpeciesNamePairs,'sarcophilus_harrisii|tasmanian_devil');
+    push(@SpeciesNamePairs,'echinops_telfairi|tenrec');
+    push(@SpeciesNamePairs,'nanorana_parkeri|tibetan_frog');
+    push(@SpeciesNamePairs,'tupaia_belangeri|tree_shrew');
+    push(@SpeciesNamePairs,'meleagris_gallopavo|turkey');
+    push(@SpeciesNamePairs,'strongylocentrotus_purpuratus|urchin');
+    push(@SpeciesNamePairs,'notamacropus_eugenii|wallaby');
+    push(@SpeciesNamePairs,'ceratotherium_simum|white_rhinoceros');
+    push(@SpeciesNamePairs,'xenopus_tropicalis|x._tropicalis');
+    push(@SpeciesNamePairs,'taeniopygia_guttata|zebra_finch');
+    push(@SpeciesNamePairs,'danio_rerio|zebrafish');
     
-    return \%LatinToCommon;
+    return \@SpeciesNamePairs;
 
 }
 
@@ -984,13 +957,13 @@ sub GetStaticLatinToCommon
 
 #################################################################
 #
-#  FUNCTION:  GetStaticLatinTree / GetStaticCommonTree
+#  FUNCTION:  GetStaticLatinTree / GetStaticEnglishTree
 #
 sub GetStaticLatinTree
 {
     return '((strongylocentrotus_purpuratus,aplysia_californica),(((((((alligator_mississippiensis,chrysemys_picta_bellii),latimeria_chalumnae),callorhinchus_milii),petromyzon_marinus),ciona_intestinalis),(((((thamnophis_sirtalis,anolis_carolinensis),((((((((((((galeopterus_variegatus,manis_pentadactyla),trichechus_manatus_latirostris),tupaia_belangeri),procavia_capensis),loxodonta_africana),echinops_telfairi),dasypus_novemcinctus),choloepus_hoffmanni),notamacropus_eugenii),sarcophilus_harrisii),ornithorhynchus_anatinus),((((((((pteropus_vampyrus,myotis_lucifugus),(((((ictidomys_tridecemlineatus,heterocephalus_glaber),cavia_porcellus),cricetulus_griseus),dipodomys_ordii),(rattus_norvegicus,mus_musculus))),(oryctolagus_cuniculus,ochotona_princeps)),(ceratotherium_simum,equus_caballus)),((((balaenoptera_acutorostrata_scammoni,vicugna_pacos),sus_scrofa),tursiops_truncatus),((bison_bison_bison,ovis_aries),bos_taurus))),((((neomonachus_schauinslandi,felis_catus),ailuropoda_melanoleuca),canis_lupus_familiaris),(enhydra_lutris_nereis,mustela_putorius_furo))),((((carlito_syrichta,nomascus_leucogenys),otolemur_garnettii),microcebus_murinus),(((((homo_sapiens,pongo_abelii),gorilla_gorilla_gorilla),(pan_troglodytes,pan_paniscus)),((((rhinopithecus_roxellana,chlorocebus_sabaeus),nasalis_larvatus),papio_anubis),(macaca_mulatta,macaca_fascicularis))),(saimiri_boliviensis,callithrix_jacchus)))),(sorex_araneus,erinaceus_europaeus)))),(((aquila_chrysaetos_canadensis,melopsittacus_undulatus),apteryx_australis),((taeniopygia_guttata,geospiza_fortis),(meleagris_gallopavo,gallus_gallus)))),(nanorana_parkeri,xenopus_tropicalis)),((((takifugu_rubripes,oreochromis_niloticus),oryzias_latipes),gadus_morhua),danio_rerio))),(drosophila_melanogaster,anopheles_gambiae)))';
 }
-sub GetStaticCommonTree
+sub GetStaticEnglishTree
 {
     return '((urchin,sea_hare),(((((((american_alligator,painted_turtle),coelacanth),elephant_shark),lamprey),ciona),(((((garter_snake,lizard),((((((((((((malayan_flying_lemur,chinese_pangolin),manatee),tree_shrew),rock_hyrax),elephant),tenrec),armadillo),sloth),wallaby),tasmanian_devil),platypus),((((((((megabat,microbat),(((((ictidomys_tridecemlineatus,naked_mole-rat),guinea_pig),chinese_hamster),kangaroo_rat),(rat,mouse))),(rabbit,pika)),(white_rhinoceros,horse)),((((minke_whale,alpaca),pig),dolphin),((bison,sheep),cow))),((((hawaiian_monk_seal,cat),panda),dog),(southern_sea_otter,ferret))),((((carlito_syrichta,gibbon),bushbaby),mouse_lemur),(((((human,pongo_abelii),gorilla),(chimp,bonobo)),((((golden_snub-nosed_monkey,green_monkey),proboscis_monkey),baboon),(rhesus,crab-eating_macaque))),(squirrel_monkey,marmoset)))),(shrew,hedgehog)))),(((golden_eagle,budgerigar),brown_kiwi),((zebra_finch,medium_ground_finch),(turkey,chicken)))),(tibetan_frog,x._tropicalis)),((((fugu,nile_tilapia),medaka),atlantic_cod),zebrafish))),(d._melanogaster,a._gambiae)))';
 }
