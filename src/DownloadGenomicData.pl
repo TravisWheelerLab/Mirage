@@ -254,15 +254,28 @@ while (my $line = <$UCSCf>) {
     # We're going to be a little funny -- look for 'xyz.2bit' and then swap
     # the '.2bit' with '.fa.gz'
     my $BigZips = OpenInputFile($temp_html_fname);
-    my $genome_fname = 0;
     my $reduced_name = 0;
     while (my $bz_line = <$BigZips>) {
 	if ($bz_line =~ /(\S+)\.2bit/) {
 	    $reduced_name = $1;
-	    $genome_fname = $genome_dir_fname.$reduced_name.'.fa.gz';
+	    last;
+	}
+    }    
+
+    if (!$reduced_name) {
+	close($BigZips);
+	$TroubleSpecies{$latin_species_name} = 1;
+	next;
+    }
+
+    my $genome_fname = 0;
+    while (my $bz_line = <$BigZips>) {
+	if ($bz_line =~ /href=\"($reduced_name\.fa[sta]?\.gz)\"/) {
+	    $genome_fname = $genome_dir_fname.$1;
 	    last;
 	}
     }
+    
     close($BigZips);
 
     # If we hit the end of the file and didn't find a genome download link,
