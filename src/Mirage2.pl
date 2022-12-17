@@ -2,15 +2,13 @@
 #
 # MIRAGE.pl - Multiple-sequence Isoform Alignment Tool Guided by Exon Boundaries
 #           - Alex Nord
-#           - 2016
-#
-# >>> M2 (2020) : Look forward to seeing big changes 'round here!
+#           - 2022
 #
 # ABOUT: This is a top-level script used to perform isoform alignment across
 #        species.  It requires a fasta-formatted database of proteins and a
 #        file containing information about where genomes and .gtf indices for each
 #        species that is being considered can be found.  The program outputs
-#        gene-wise MSAs to a directory (by default: MirageResults/FinalMSAs).
+#        gene-wise MSAs to a directory (by default: MirageResults/Final-MSAs).
 #
 #
 use warnings;
@@ -52,7 +50,7 @@ sub FormatTimeString;
 
 
 # VERSION INFO
-my $mirage_version = 'Version 2.0.0a';
+my $version = '2.0.0';
 
 
 
@@ -75,6 +73,12 @@ if (@ARGV == 0) { PrintUsage(); }
 my $location = $0;
 $location =~ s/Mirage2\.pl$//;
 
+
+# Read in user arguments
+my $optsRef = ParseArgs();
+my %Options = %{$optsRef};
+
+
 # Where are all our dependencies?
 my $dependencies_ref = FindDependencies();
 my %Dependencies = %{$dependencies_ref};
@@ -87,11 +91,6 @@ my $quilter      = $Dependencies{'quilter2'};
 my $maps_to_msas = $Dependencies{'mapstomsas'};
 my $multi_seq_nw = $Dependencies{'multiseqnw'};
 my $final_msa    = $Dependencies{'finalmsa'};
-
-
-# Read in user arguments
-my $optsRef = ParseArgs();
-my %Options = %{$optsRef};
 
 
 # Change options to more intelligible variables
@@ -469,31 +468,27 @@ print "\n  Mirage complete; results in $ResultsDir\n\n";
 #
 sub PrintUsage
 {
-    print "\n\n";
-    print " Mirage2: Multiple-sequence Isoform Alignment Tool Guided by Exon Boundaries ($mirage_version)\n";
     print "\n";
-    print " USAGE  : mirage [OPT.s] <Isoform DB>  <Species Guide>                                  \n";
+    print "  Mirage$version\n";
     print "\n";
-    print " ARG.s  : <IsoformDB>     : A FASTA-formatted protein database, with the following      \n";
-    print "                            naming convention:                                          \n";
-    print "\n";
-    print "                            >gene_name|protein_name|species|seqID|groupID               \n";
-    print "\n";
-    print "          <Species Guide> : A file indicating, for each species being searched on,      \n";
-    print "                            the location of a FASTA-formatted genome for that species   \n";
-    print "                            and a .gtf index file corresponding to that species and     \n";
-    print "                            genome.  These fields should be whitespace-separated and    \n";
-    print "                            ordered as follows:  species, genome, .gtf index            \n";
-    print "                            It is recommended that similar species are grouped together \n";
-    print "                            and positioned near the top of the list.                    \n";
-    print "\n";
-    print " OPT.s  : --help      : More detailed help.                                             \n";
-    print "          --verbose   : Verbose output.                                                 \n";
-    print "          --time      : Print timing data to stdout at end of program                   \n";
-    print "          --only_map  : Stop after producing protein-to-genome mappings                 \n";
-    print "          --blat_off  : Prevents BLAT search (faster, may miss some mappings)           \n";
-    print "          -outdirname : Specify output directory name.                                  \n";
-    print "          -cpus       : Specify number of CPU cores (default: 2)                        \n";
+    print "  Usage : ./mirage2 {OPT.s} [IsoformDB.fa] [Species Guide]                          \n";
+    print "                                                                                    \n";
+    print "  Arg.s : [IsoformDB.fa]  :  A FASTA-formatted protein database, formatted          \n";
+    print "                             using either UniProt naming conventions or the         \n";
+    print "                             following simplified naming scheme:                    \n";
+    print "                                                                                    \n";
+    print "                                    >species|gene_name|sequence_id                  \n";
+    print "                                                                                    \n";
+    print "          [Species Guide] :  A simple text file linking each species to the         \n";
+    print "                             file location of its FASTA-formatted genome and        \n";
+    print "                             a GTF-formatted index file.                            \n";
+    print "                                                                                    \n";
+    print "  Opt.s  : --help            : Print (slightly) more detailed help                  \n";
+    print "           --time            : Print timing data to stdout at end of program        \n";
+    print "           --only_map        : Stop after producing protein-to-genome mappings      \n";
+    print "           --blat_off        : Prevents BLAT search (faster, may miss some mappings)\n";
+    print "           -outdirname [str] : Specify output directory name                        \n";
+    print "           -cpus [int]       : Specify number of CPU cores (default: 2)             \n";
     die "\n\n";
 }
 
@@ -511,49 +506,47 @@ sub PrintUsage
 sub DetailedUsage
 {
     print "\n\n";
-    print " .-=======-+--=-----------------=----=--=--------------=---------=-------------------.  \n";
-    print " | Mirage2 :  Multiple-sequence Isoform Alignment Tool Guided by Exon Boundaries (2) |  \n";
-    print " '-=======-+--=-----------------=----=--=--------------=---------=-------------------'  \n";
-    print "  $mirage_version\n";
-    print "                                                                                   \n";
-    print "    USAGE :  mirage  [OPT.s]  <Isoform DB>  <Species Guide>                        \n";
-    print "                                                                                   \n";
-    print "                                                                                   \n";
-    print "    ARG.s :  Isoform DB    : A FASTA-formatted protein database using the          \n";
-    print "                             following sequence naming convention:                 \n";
-    print "                                                                                   \n";
-    print "                             >gene_name|protein_name|species|seqID|groupID         \n";
-    print "                                                                                   \n";
-    print "             Species Guide : A simple file indicating, for each species being      \n";
-    print "                             searched on, the location of a FASTA-formatted        \n";
-    print "                             genome for that species and a .gtf index file         \n";
-    print "                             corresponding to that species and genome.             \n";
-    print "                                                                                   \n";
-    print "                             The filenames should be paths to the files from       \n";
-    print "                             the directory containing MIRAGE.pl and must be        \n";
-    print "                             separated by whitespace.                              \n";
-    print "                                                                                   \n";
-    print "                             Required order:   species, genome, index file         \n";
-    print "                                                                                   \n";
-    print "                               EXAMPLE:                                            \n";
-    print "                             .------------------------------------------------.    \n";
-    print "                             | human  ~/data/HumanGenome.fa  ~/data/human.gtf |    \n";
-    print "                             | mouse  ~/data/MouseGenome.fa  ~/data/mouse.gtf |    \n";
-    print "                             | ...                                            |    \n";
-    print "                             '------------------------------------------------'    \n";
-    print "                                                                                   \n";
-    print "                             Species are introduced into the final genewise MSAs   \n";
-    print "                             in the order that they are listed in the species      \n";
-    print "                             guide.  It is recommended that similar species are    \n";
-    print "                             grouped together for optimal alignments.              \n";
-    print "                                                                                   \n";
-    print "                                                                                   \n";
-    print "    OPT.s :  --verbose            : Verbose output                                 \n";
-    print "             --time               : Print timing data to stdout at end of program  \n";
-    print "             --only_map           : Stop after producing protein-to-genome mappings\n";
-    print "             --blat_off           : Prevents BLAT search (faster, may miss some mappings)\n";
-    print "             -outdirname <string> : Specify ouptut directory name                  \n";
-    print "             -cpus <int>          : Specify number of CPU cores (default: 2)       \n";
+    print " .-=======-+--=-----------------=----=--=--------------=---------=-------------------.\n";
+    print " | Mirage2 :  Multiple-sequence Isoform Alignment Tool Guided by Exon Boundaries (2) |\n";
+    print " '-=======-+--=-----------------=----=--=--------------=---------=-------------------'\n";
+    #print "   (2.0.0)                                                                            \n";
+    print "  (v.$version)                                                                           \n";
+    print "                                                                                      \n";
+    print "    Usage : ./mirage2 {OPT.s} [IsoformDB.fa] [Species Guide]                          \n";
+    print "                                                                                      \n";
+    print "                                                                                      \n";
+    print "    Arg.s : [IsoformDB.fa]  : A FASTA-formatted protein database, formatted           \n";
+    print "                              using either UniProt naming conventions or the          \n";
+    print "                              following simplified naming scheme:                     \n";
+    print "                                                                                      \n";
+    print "                                     >species|gene_name|sequence_id                   \n";
+    print "                                                                                      \n";
+    print "            [Species Guide] : A simple text file linking each species to the          \n";
+    print "                              file location of its FASTA-formatted genome and         \n";
+    print "                              a GTF-formatted index file.  Each of these fields       \n";
+    print "                              should be whitespace-separated, and a '-' should        \n";
+    print "                              be used to indicate the absence of a GTF index.         \n";
+    print "                                                                                      \n";
+    print "                              Additionally, a Newick-formatted species tree can       \n";
+    print "                              be provided to specify the merge order of intra-        \n";
+    print "                              species MSAs during inter-species alignment.            \n";
+    print "                                                                                      \n";
+    print "                                Example:                                              \n";
+    print "                                .--------------------------------------------.        \n";
+    print "                                | (((mouse,rat),human),dog)                  |        \n";
+    print "                                | human   ~/genomes/Hs.fa   ~/gtfs/human.gtf |        \n";
+    print "                                | mouse   ~/genomes/Mm.fa   ~/gtfs/mouse.gtf |        \n";
+    print "                                | rat     ~/genomes/Rn.fa   ~/gtfs/rat.gtf   |        \n";
+    print "                                | dog     ~/genomes/Cf.fa   -                |        \n";
+    print "                                |                                            |        \n";
+    print "                                '--------------------------------------------'        \n";
+    print "                                                                                      \n";
+    print "                                                                                      \n";
+    print "    Opt.s :  --time            : Print timing data to stdout at end of program        \n";
+    print "             --only_map        : Stop after producing protein-to-genome mappings      \n";
+    print "             --blat_off        : Prevents BLAT search (faster, may miss some mappings)\n";
+    print "             -outdirname [str] : Specify ouptut directory name                        \n";
+    print "             -cpus [int]       : Specify number of CPU cores (default: 2)             \n";
     die "\n\n\n";
 }
 
@@ -567,7 +560,7 @@ sub DetailedUsage
 #
 # About:  Print out the version of Mirage being used
 #
-sub PrintVersion { die "\n  Mirage $mirage_version\n\n"; }
+sub PrintVersion { die "\n  Mirage version $version\n\n"; }
 
 
 
