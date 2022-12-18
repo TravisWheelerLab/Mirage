@@ -29,6 +29,7 @@ sub DetailedUsage;
 sub PrintVersion;
 sub CheckSourceFiles;
 sub ParseArgs;
+sub VerifyInputFiles;
 sub VerifiedClean;
 sub ParseSpeciesGuide;
 sub SetMergeOrder;
@@ -83,6 +84,7 @@ my %Options = %{$optsRef};
 my $dependencies_ref = FindDependencies();
 my %Dependencies = %{$dependencies_ref};
 
+
 # We're going to need these friends
 my $sindex       = $Dependencies{'sindex'};
 my $sfetch       = $Dependencies{'sfetch'};
@@ -91,6 +93,11 @@ my $quilter      = $Dependencies{'quilter2'};
 my $maps_to_msas = $Dependencies{'mapstomsas'};
 my $multi_seq_nw = $Dependencies{'multiseqnw'};
 my $final_msa    = $Dependencies{'finalmsa'};
+
+
+# This essentially does the work of the upcoming 'ConfirmFile'
+# calls, but with a bit more detailed user output.
+VerifyInputFiles();
 
 
 # Change options to more intelligible variables
@@ -610,22 +617,38 @@ sub ParseArgs
     if ($Options{check})   { die "\n  Looking good!\n\n"; } # FindDependencies already passed
     if ($Options{version}) { PrintVersion();              }
 
+    return \%Options;
+
+}
+
+
+
+
+########################################################################
+#
+# Function Name: VerifyInputFiles
+#
+# About: 
+#
+sub VerifyInputFiles
+{
+    
     # If we don't have the required files, give usage
     my $proteindb = $ARGV[0];
-    my $reference = $ARGV[1];
+    my $species_guide = $ARGV[1];
     if (!$proteindb) {
-	if (!$reference) {
-	    print "\n  ERROR : Protein database and reference file not provided\n";
-	    print "  --------------------------------------------------------";
+	if (!$species_guide) {
+	    print "\n  ERROR : Protein database and species guide file not provided\n";
+	    print "  ------------------------------------------------------------";
 	    PrintUsage();
 	} 
 	print "\n  ERROR : Protein database not provided\n";
 	print "  -------------------------------------";
 	PrintUsage();
     }
-    if (!$reference) {
-	print "\n  ERROR : Reference file not provided\n";
-	print "  -----------------------------------";
+    if (!$species_guide) {
+	print "\n  ERROR : Species guide file not provided\n";
+	print "  ---------------------------------------";
 	PrintUsage();
     }
 
@@ -635,7 +658,6 @@ sub ParseArgs
     #         is a good index, so just run that
     RunSystemCommand($sindex." \"$proteindb\"");
 
-    return \%Options;
 }
 
 
