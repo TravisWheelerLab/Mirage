@@ -967,7 +967,7 @@ sub WriteMSAToFile
 	    print $outf "\n" if (($j+1) % 60 == 0);
 	}
 	print $outf "\n" if ($msa_len % 60);
-	print $outf "\n";
+	#print $outf "\n";
     }
     close($outf);
 
