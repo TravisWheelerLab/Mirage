@@ -119,7 +119,8 @@ check_spaln()
     EXPECTED_FILE=$EXP_OUTPUTS_DIR/$OUT_FILE_NAME
 
     report_test_start spaln
-    $SPALN -Q3 -O1 -S1 -ya3 -yz4 -yy4 $DNA_INPUT $AMINO_INPUT 1>$OBSERVED_FILE 2>/dev/null
+    $($SPALN -Q3 -O1 -S1 -ya3 -yz4 -yy4 $DNA_INPUT $AMINO_INPUT 1>$OBSERVED_FILE 2>/dev/null)
+    SPALN_EXIT_CODE=$?
     
     # confirm_identical_files $OBSERVED_FILE $EXPECTED_FILE spaln
 
@@ -127,7 +128,6 @@ check_spaln()
     # *that* spaln ran, rather than comparing outputs.
     # OBVIOUSLY this isn't ideal, but until we come up with our own
     # replacement tool, life will *probably* go on...
-    SPALN_EXIT_CODE=$?
     if [ SPALN_EXIT_CODE -ne 0 ];
     then
 	echo "\n    ERROR (spaln): Execution failed unexpectedly"
