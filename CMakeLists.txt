@@ -55,8 +55,8 @@ add_custom_target(
 		${CMAKE_SOURCE_DIR}/src/run_mirage2.sh
 		${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/mirage2
  	COMMAND ln
- 		-s ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/mirage2
- 		   ${CMAKE_SOURCE_DIR}/mirage2
+ 		-sf ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/mirage2
+ 		    ${CMAKE_SOURCE_DIR}/mirage2
 )
 
 add_custom_target(
