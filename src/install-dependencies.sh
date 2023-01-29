@@ -120,8 +120,8 @@ check_spaln()
 
     report_test_start spaln
     $SPALN -Q3 -O1 -S1 -ya3 -yz4 -yy4 $DNA_INPUT $AMINO_INPUT 1>$OBSERVED_FILE 2>/dev/null
-
-    #confirm_identical_files $OBSERVED_FILE $EXPECTED_FILE spaln
+    
+    # confirm_identical_files $OBSERVED_FILE $EXPECTED_FILE spaln
 
     # Use the Spaln output comparison script
     SPALN_COMP_RESULTS=$(perl $SPALN_COMP_SCRIPT $EXPECTED_FILE $OBSERVED_FILE)
