@@ -119,18 +119,14 @@ check_spaln()
     EXPECTED_FILE=$EXP_OUTPUTS_DIR/$OUT_FILE_NAME
 
     report_test_start spaln
-    $($SPALN -Q3 -O1 -S1 -ya3 -yz4 -yy4 $DNA_INPUT $AMINO_INPUT 1>$OBSERVED_FILE 2>/dev/null)
-    SPALN_EXIT_CODE=$?
-    
-    # confirm_identical_files $OBSERVED_FILE $EXPECTED_FILE spaln
+    $SPALN -Q3 -O1 -S1 -ya3 -yz4 -yy4 $DNA_INPUT $AMINO_INPUT 1>$OBSERVED_FILE 2>/dev/null
 
-    # Because of funniness in Spaln2.2.2, we're just going to check
-    # *that* spaln ran, rather than comparing outputs.
-    # OBVIOUSLY this isn't ideal, but until we come up with our own
-    # replacement tool, life will *probably* go on...
-    if [ SPALN_EXIT_CODE -ne 0 ];
+    COMP_OUTPUT=$($SPALN_COMP_SCRIPT $EXPECTED_FILE $OBSERVED_FILE)
+    COMP_EXIT_CODE=$?
+
+    if [ $COMP_EXIT_CODE -ne 0 ];
     then
-	echo "\n    ERROR (spaln): Execution failed unexpectedly"
+	echo "\n    ERROR (spaln): Observed hits (in '$OBSERVED_FILE') do not match expected hits (in '$EXPECTED_FILE')";
 	exit 1
     fi
 
@@ -164,7 +160,7 @@ DEPS_DIR=dependencies
 TEST_DIR=$DEPS_DIR/install-test
 HSI_DIR=$DEPS_DIR/$HSI_BASE-1.0.0
 BLAT_DIR=$DEPS_DIR/$BLAT_BASE
-SPALN_DIR=$DEPS_DIR/${SPALN_BASE}2.4.13f
+SPALN_DIR=$DEPS_DIR/${SPALN_BASE}2.2.2
 
 TEST_TAR=$TEST_DIR.tgz
 HSI_TAR=$HSI_DIR.tgz
