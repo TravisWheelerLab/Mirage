@@ -111,14 +111,25 @@ check_spaln()
     DNA_NAME=$2
     OUT_FILE_NAME=$3
 
+    SPALN_COMP_SCRIPT=$4
+
     AMINO_INPUT=$INPUTS_DIR/$AMINO_NAME
     DNA_INPUT=$EXP_OUTPUTS_DIR/$DNA_NAME
     OBSERVED_FILE=$OBS_OUTPUTS_DIR/$OUT_FILE_NAME
     EXPECTED_FILE=$EXP_OUTPUTS_DIR/$OUT_FILE_NAME
 
     report_test_start spaln
-    $SPALN -Q3 -O1 -S1 -ya3 -yz4 -yy4 $DNA_INPUT $AMINO_INPUT 1>$OBSERVED_FILE
-    confirm_identical_files $OBSERVED_FILE $EXPECTED_FILE spaln
+    $SPALN -Q3 -O1 -S1 -ya3 -yz4 -yy4 $DNA_INPUT $AMINO_INPUT 1>$OBSERVED_FILE 2>/dev/null
+
+    COMP_OUTPUT=$($SPALN_COMP_SCRIPT $EXPECTED_FILE $OBSERVED_FILE)
+    COMP_EXIT_CODE=$?
+
+    if [ $COMP_EXIT_CODE -ne 0 ];
+    then
+	echo "\n    ERROR (spaln): Observed hits (in '$OBSERVED_FILE') do not match expected hits (in '$EXPECTED_FILE')";
+	exit 1
+    fi
+
     echo ' passed'
 }
 
@@ -149,7 +160,7 @@ DEPS_DIR=dependencies
 TEST_DIR=$DEPS_DIR/install-test
 HSI_DIR=$DEPS_DIR/$HSI_BASE-1.0.0
 BLAT_DIR=$DEPS_DIR/$BLAT_BASE
-SPALN_DIR=$DEPS_DIR/${SPALN_BASE}2.3.3
+SPALN_DIR=$DEPS_DIR/${SPALN_BASE}2.2.2
 
 TEST_TAR=$TEST_DIR.tgz
 HSI_TAR=$HSI_DIR.tgz
@@ -264,13 +275,17 @@ else
     cd $SPALN_DIR/src && ./configure && make && cd -
     SPALN=$SPALN_DIR/src/spaln
 
+    # For Spaln2.2.2 we need an comparison script that allows for
+    # results to be produced in different orders.
+    COMP_SCRIPT=$TEST_DIR/Compare-Spaln-Outputs.pl
+
     LOCAL_TEST_NUM=1
     echo '* The following 5 Spaln tests may take a minute...'
-    check_spaln $AA1_NAME $SP1_GENE2_DNA_NAME sp1.g2.spaln.out    # test 20
-    check_spaln $AA1_NAME $SP1_GENE3_DNA_NAME sp1.g3.spaln.out    # test 21
-    check_spaln $AA2_NAME $SP2_GENE2_DNA_NAME sp2.g2.spaln.out    # test 22
-    check_spaln $AA2_NAME $SP2_GENE3_DNA_NAME sp2.g3.spaln.out    # test 23
-    check_spaln $AA3_NAME $SP3_GENE23_DNA_NAME sp3.g23.spaln.out  # test 24
+    check_spaln $AA1_NAME $SP1_GENE2_DNA_NAME sp1.g2.spaln.out   $COMP_SCRIPT # test 20
+    check_spaln $AA1_NAME $SP1_GENE3_DNA_NAME sp1.g3.spaln.out   $COMP_SCRIPT # test 21
+    check_spaln $AA2_NAME $SP2_GENE2_DNA_NAME sp2.g2.spaln.out   $COMP_SCRIPT # test 22
+    check_spaln $AA2_NAME $SP2_GENE3_DNA_NAME sp2.g3.spaln.out   $COMP_SCRIPT # test 23
+    check_spaln $AA3_NAME $SP3_GENE23_DNA_NAME sp3.g23.spaln.out $COMP_SCRIPT # test 24
     
     mv -f $SPALN_DIR $BUILD_DIR/$SPALN_BASE
 fi
