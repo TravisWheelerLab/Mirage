@@ -2,6 +2,12 @@
 
 Multiple-sequence IsofoRm Alignment tool Guided by Exon boundaries.
 
+## Citation
+
+[*Mirage2*’s high-quality spliced protein-to-genome mappings produce accurate multiple-sequence alignments of isoforms](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0285225).
+Nord et al., 2023.
+
+
 ## About
 
 Mirage produces multiple sequence alignments of proteoforms by mapping sequences
