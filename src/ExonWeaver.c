@@ -607,6 +607,11 @@ void AttemptConnection
   int top_right_break = 1;
   float top_score = sum_score + LeftFPSS[0] + RightTPSS[1] + UnravelCost[0];
 
+  // NORD 2025 - Adjustment Zone 0
+  float good_splice =  1.0;
+  float bad_splice  = -5.0;
+  float splice_score;
+
   // i tracks the position that will be the first drawing from
   //   the left node's nucleotide sequence,
   // j tracks the position in TransSeq that we write to
@@ -631,6 +636,20 @@ void AttemptConnection
       k=0;
     }
 
+    
+    /* NORD 2025 - Adjustment Zone 1 - Start */
+    if (LeftNucls[i+1] == 'G' && LeftNucls[i+2] == 'T')
+      splice_score = good_splice;
+    else
+      splice_score = bad_splice;
+
+    if (RightNucls[i-2] == 'A' && RightNucls[i-1] == 'G')
+      splice_score += good_splice;
+    else
+      splice_score += bad_splice;
+    /* NORD 2025 - Adjustment Zone 1 - End   */
+
+    
     // Well, that wasn't toooooo nasty!  Let's run the translation and
     // compare scores.
     //
@@ -643,7 +662,7 @@ void AttemptConnection
 
     // If we've beaten out the previous champion, then we'll seize the throne!
     if (num_stop_codons == 0) {
-      float score_check = sum_score + LeftFPSS[i] + RightTPSS[i+1] + UnravelCost[j];
+      float score_check = sum_score + LeftFPSS[i] + RightTPSS[i+1] + UnravelCost[j] + splice_score;
       if (score_check > top_score) {
 	top_left_break  = i;
 	top_right_break = i+1;
